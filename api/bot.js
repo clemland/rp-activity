@@ -3,13 +3,18 @@
  *  - channels                                   : salons où la navigation est active
  *  - message { channelId, userId, name }        : un message RP en navigation
  *  - choose  { channelId, userId, entryId, choice } : un choix sur un événement
+ *  - open { userId, target, name, targetName }  : /edit profil, l'app s'ouvrira sur la fiche de « target »
+ *  - player.get { userId, name }                : fiche d'un joueur (le bot vérifie lui-même que c'est le staff)
+ *  - player.act { userId, action, by }          : modification par le staff (/edit profil)
  * Toute la logique de jeu reste ici : le bot ne fait qu'afficher.
  */
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
 import { write, retry, activeNavChannels } from './_lib/db.js';
 import { loadPlayer, loadNav } from './_lib/context.js';
-import { navMessage, navChoose, eventView, fullName } from '../shared/game.js';
+import { navMessage, navChoose, eventView, fullName, staffAction, XP_NEED } from '../shared/game.js';
+import { publicPlayer } from './_lib/context.js';
+import { resolveStaffAction, choiceLists } from './_lib/resolve.js';
 
 export default handler(['POST'], async (req, body) => {
   need(env.botSecret && req.headers['x-bot-secret'] === env.botSecret, 401, 'Secret du bot invalide.');
@@ -44,6 +49,35 @@ export default handler(['POST'], async (req, body) => {
         await write('navs', body.channelId, r.nav, navV, { active: !!r.nav.active });
         await write('players', body.userId, r.player, version);
         return { ups: r.ups, level: r.player.level, name: fullName(r.player), event: eventView(r.entry, r.player) };
+      });
+    }
+
+    case 'open': {
+      need(body.userId && body.target, 400, 'Demande incomplète.');
+      await loadPlayer(body.target, body.targetName); // crée la fiche du joueur si besoin
+      return retry(async () => {
+        const { player, version } = await loadPlayer(body.userId, body.name);
+        player.pendingOpen = { target: body.target, at: Date.now() };
+        await write('players', body.userId, player, version);
+        return { ok: true };
+      });
+    }
+
+    case 'player.get': {
+      need(body.userId, 400, 'Joueur manquant.');
+      const { player } = await loadPlayer(body.userId, body.name);
+      return { player: publicPlayer(player), xpNeed: XP_NEED(player.level), lists: choiceLists() };
+    }
+
+    case 'player.act': {
+      need(body.userId && body.action, 400, 'Action incomplète.');
+      const { action, ignored } = resolveStaffAction(body.action);
+      return retry(async () => {
+        const { player, version } = await loadPlayer(body.userId, body.name);
+        const out = staffAction(player, action);
+        await write('players', body.userId, out.player, version);
+        if (body.by) console.log(`[staff] ${body.by} a modifié ${body.userId} : ${action.type}`);
+        return { ...out, player: publicPlayer(out.player), xpNeed: XP_NEED(out.player.level), ignored };
       });
     }
 

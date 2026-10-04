@@ -2,6 +2,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/media/:path*", "destination": "https://gliopbmvujzfvjumjaam.supabase.co/storage/v1/object/public/media/:path*" }
+    { "source": "/media/:path*", "destination": "https://TON-PROJET.supabase.co/storage/v1/object/public/media/:path*" }
   ]
 }

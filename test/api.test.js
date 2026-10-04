@@ -161,3 +161,38 @@ test('écriture concurrente : la version empêche d’écraser', async () => {
   await write('players', 'u1', row.data, row.version);
   await assert.rejects(write('players', 'u1', row.data, row.version), Conflict);
 });
+
+test('bot : lire et modifier une fiche, avec des valeurs tapées à la main', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  let r = await call('bot', { body: { op: 'player.get', userId: 'u9', name: 'Nami' }, headers: H });
+  assert.equal(r.status, 200);
+  assert.equal(r.out.player.id.first, 'Nami');
+  assert.ok(r.out.lists.jobs.some((j) => j.key === 'forgeron'));
+  r = await call('bot', {
+    body: { op: 'player.act', userId: 'u9', by: 'u2', action: { type: 'edit', patch: { id: { race: 'homme poisson', classe: 'Sorcier' }, job: 'forgeron' } } },
+    headers: H,
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.player.id.race, 'Homme-poisson');
+  assert.equal(r.out.player.job.id, 'forgeron');
+  assert.deepEqual(r.out.ignored, ['classe « Sorcier »']);
+  r = await call('bot', { body: { op: 'player.act', userId: 'u9', action: { type: 'give', key: 'gigot de mer', qty: 2 } }, headers: H });
+  assert.equal(r.out.player.inv.find(Boolean)[0], 'gigot');
+  r = await call('bot', { body: { op: 'player.act', userId: 'u9', action: { type: 'give', key: 'licorne', qty: 1 } }, headers: H });
+  assert.equal(r.status, 400);
+});
+
+test('/edit profil : le bot prépare l’ouverture, l’app s’ouvre une fois sur la fiche', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  let r = await call('bot', { body: { op: 'open', userId: 'u2', target: 'u1', name: 'mj' }, headers: H });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
+  assert.equal(r.out.open, 'u1');
+  assert.equal(r.out.player.pendingOpen, undefined);
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
+  assert.equal(r.out.open, null, 'une seule fois');
+  // Un joueur non staff ne peut pas s'en servir
+  await call('bot', { body: { op: 'open', userId: 'u1', target: 'u2' }, headers: H });
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: J });
+  assert.equal(r.out.open, null);
+});

@@ -31,6 +31,6 @@ export async function channelInfo(channelId) {
 
 /** Ce que voit le site : on ne renvoie pas les champs internes. */
 export const publicPlayer = (p) => {
-  const { navCd, ...rest } = p;
+  const { navCd, pendingOpen, ...rest } = p;
   return rest;
 };

@@ -1319,6 +1319,67 @@ $('edit-form').addEventListener('submit', async (e) => {
   }
 });
 
+/* ═══ Onglet Édition MJ (staff) ═══════════════════════════════════════════ */
+function renderMjTab() {
+  const tab = $('t-mj');
+  tab.hidden = !ME?.staff;
+  if (!ME?.staff) return;
+  const wait = S.techniques.filter((t) => !t.ok);
+  const job = JOBS[S.job.id];
+  $('v-mj').innerHTML = `
+    <div class="sec-head">
+      <div><h2>Édition MJ</h2><p class="lede" style="margin:0">Fiche de <b>${esc(fullName())}</b>. Les modifications s’appliquent tout de suite.</p></div>
+      <button class="btn" id="mj-edit-open">Modifier la fiche</button>
+    </div>
+    <div class="mj-summary">
+      <span><small>Niveau</small><b>${S.level}</b></span>
+      <span><small>Berrys</small><b>${berry(S.berry)}</b></span>
+      <span><small>Points à répartir</small><b>${S.statPts}</b></span>
+      <span><small>Métier</small><b>${esc(job.name)} · ${JOB_LEVELS[S.job.lvl - 1]}</b></span>
+      <span><small>Volonté</small>${stars(S.volonte)}</span>
+    </div>
+
+    <h3 class="ed-h">Techniques à valider ${wait.length ? `<span class="pill">${wait.length}</span>` : ''}</h3>
+    ${wait.length ? `<div class="val-list">${wait.map((t) => `
+      <article class="val-card">
+        ${t.media ? `<div class="val-media"><img src="${esc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.remove()"></div>` : ''}
+        <div class="val-body">
+          <h3>${esc(t.name)} <span class="tag ${SRC_CLS[t.src]}">${G.TECH_SOURCES[t.src]}</span></h3>
+          <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
+          <div class="val-acts"><button class="btn sm" data-ok-tech="${t.id}">✓ Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">✗ Refuser</button></div>
+        </div>
+      </article>`).join('')}</div>` : '<p class="note">Aucune technique en attente.</p>'}
+
+    <h3 class="ed-h">Objets et expérience</h3>
+    <div class="mj-tools">
+      <div class="mj-row">
+        <select id="mjt-item" aria-label="Objet">${Object.entries(ITEMS).map(([k, it]) => `<option value="${k}">${esc(it.name)}</option>`).join('')}</select>
+        <input id="mjt-qty" type="number" min="1" value="1" style="width:76px" aria-label="Quantité">
+        <button class="btn sm" data-mjt-give="give">Donner</button><button class="btn sm ghost" data-mjt-give="take">Retirer</button>
+      </div>
+      <div class="mj-row">
+        <span class="note">Expérience :</span>
+        <button class="btn sm" data-mjt-xp="50">+50 XP</button><button class="btn sm" data-mjt-xp="250">+250 XP</button><button class="btn sm" data-mjt-xp="1000">+1000 XP</button>
+      </div>
+    </div>
+    <p class="note" style="margin-top:14px">Pour ouvrir la fiche d’un autre joueur : <button class="linklike" id="mj-pick">choisir un joueur</button>, ou <code>/edit profil</code> sur Discord.</p>`;
+}
+$('v-mj').addEventListener('click', async (e) => {
+  if (e.target.closest('#mj-edit-open')) return openEdit();
+  if (e.target.closest('#mj-pick')) {
+    openDialog('d-mj');
+    return renderMJ();
+  }
+  const ok = e.target.closest('[data-ok-tech]')?.dataset.okTech;
+  if (ok) return void staffAct({ type: 'tech.validate', id: Number(ok), ok: true });
+  const no = e.target.closest('[data-no-tech]')?.dataset.noTech;
+  if (no) return void staffAct({ type: 'tech.validate', id: Number(no), ok: false });
+  const give = e.target.closest('[data-mjt-give]')?.dataset.mjtGive;
+  if (give) return void staffAct({ type: give, key: $('mjt-item').value, qty: +$('mjt-qty').value || 1 });
+  const xp = e.target.closest('[data-mjt-xp]')?.dataset.mjtXp;
+  if (xp) return void staffAct({ type: 'xp', amount: +xp });
+});
+
 /* ═══ Mode MJ : ouvrir la fiche d'un joueur ══════════════════════════════ */
 let players = [];
 async function renderMJ() {
@@ -1369,7 +1430,7 @@ $('open-mj').addEventListener('click', () => {
   renderMJ();
 });
 
-async function openPlayer(uid) {
+async function openPlayer(uid, { tab = null } = {}) {
   setBusy(1);
   try {
     const st = await API.state(uid === ME.uid ? undefined : uid);
@@ -1384,6 +1445,7 @@ async function openPlayer(uid) {
     document.querySelectorAll('.scr[data-screen="shop"], .scr[data-screen="nav"]').forEach((b) => (b.hidden = !!VIEW));
     if (VIEW) showScreen('fiche');
     renderAll();
+    if (tab) selectTab($(tab));
   } catch (err) {
     toast(esc(err.message));
   } finally {
@@ -1393,7 +1455,7 @@ async function openPlayer(uid) {
 $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && openPlayer(ME.uid));
 
 /* ═══ Onglets, écrans, rendu ═════════════════════════════════════════════ */
-const RENDER = [renderPerso, renderTech, renderInv, renderJob, renderNav, renderShop];
+const RENDER = [renderPerso, renderTech, renderInv, renderJob, renderMjTab, renderNav, renderShop];
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(tab) {
   tabs.forEach((t) => {
@@ -1465,8 +1527,9 @@ async function refresh() {
 /* ═══ Démarrage ══════════════════════════════════════════════════════════ */
 (async () => {
   paintStatic();
+  let st;
   try {
-    const st = await API.boot();
+    st = await API.boot();
     ME = st.me;
     S = st.player;
     SHOP = st.shop;
@@ -1486,6 +1549,8 @@ async function refresh() {
   showScreen('fiche');
   fillGauges(document.querySelector('.hero'));
   $('boot').hidden = true;
+  // Ouverte avec /edit profil : directement sur la fiche du joueur, onglet Édition MJ
+  if (st.open && ME.staff) await openPlayer(st.open, { tab: 't-mj' });
   setInterval(() => screen !== 'fiche' && refresh(), 10_000);
   document.addEventListener('visibilitychange', () => !document.hidden && refresh());
 })();

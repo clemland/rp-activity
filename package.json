@@ -1,0 +1,24 @@
+{
+  "name": "rp-activity",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/game.test.js && node --test --experimental-test-module-mocks test/api.test.js"
+  },
+  "dependencies": {
+    "@discord/embedded-app-sdk": "^2.4.0",
+    "@fontsource/alegreya": "^5.2.5",
+    "@fontsource/ultra": "^5.2.5",
+    "@supabase/supabase-js": "^2.49.4"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

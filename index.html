@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fiche RP</title>
+</head>
+<body>
+<div class="boot" id="boot"><img src="/assets/banner-small.webp" alt=""><p id="boot-msg">Chargement de ta fiche…</p></div>
+
+<div class="backdrop" aria-hidden="true"></div>
+
+<header class="crest"><img src="/assets/banner-big.webp" alt="" width="1400" height="132"></header>
+<nav class="bar topnav" aria-label="Navigation principale">
+  <div class="screens" role="tablist" aria-label="Écrans">
+    <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
+    <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
+    <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
+  </div>
+  <div class="wallet-chips">
+    <span class="chip purse" title="Ta bourse"><span class="ico" data-i="261"></span><span class="money" id="purse"></span></span>
+  </div>
+</nav>
+
+<main class="screen" id="s-fiche" role="tabpanel">
+  <div class="mj-banner" id="mj-banner" hidden></div>
+  <section class="hero" aria-label="Identité">
+    <div class="portrait" id="portrait" role="button" tabindex="0" aria-label="Changer la photo du personnage"></div>
+    <div class="who">
+      <div class="stamp-row" id="h-faction"></div>
+      <h1 class="h-name" id="h-name"></h1>
+      <div class="h-epithet" id="h-epithet"></div>
+      <div class="h-will" id="h-will" role="img"></div>
+      <p class="h-aff" id="h-aff"></p>
+      <ul class="traits" id="h-traits"></ul>
+      <div class="level">
+        <div class="lv"><small>Niv.</small><span id="id-lv"></span></div>
+        <div class="grow">
+          <div class="gauge" id="xp-gauge" role="progressbar" aria-label="Expérience"><i></i></div>
+          <div class="gauge-cap"><span>Expérience</span><span id="xp-cap"></span></div>
+        </div>
+        <span class="hero-acts"><button class="btn ghost sm" id="open-photo">📷 Photo</button><button class="btn ghost sm" id="open-edit" hidden>Modifier</button></span>
+      </div>
+    </div>
+    <div class="badge-slot" id="badge-slot"></div>
+  </section>
+
+  <section class="log" aria-label="Carnet du personnage">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="t-perso" aria-controls="v-perso"><span class="ico" data-i="96"></span>Stats & compétences</button>
+      <button class="tab" role="tab" id="t-tech" aria-controls="v-tech"><span class="ico" data-i="131"></span>Techniques</button>
+      <button class="tab" role="tab" id="t-inv" aria-controls="v-inv"><span class="ico" data-i="270"></span>Inventaire</button>
+      <button class="tab" role="tab" id="t-job" aria-controls="v-job"><span class="ico" data-i="279"></span>Métier</button>
+    </div>
+    <div class="sheet">
+      <div role="tabpanel" id="v-perso" aria-labelledby="t-perso"></div>
+      <div role="tabpanel" id="v-tech" aria-labelledby="t-tech" hidden></div>
+      <div role="tabpanel" id="v-inv" aria-labelledby="t-inv" hidden></div>
+      <div role="tabpanel" id="v-job" aria-labelledby="t-job" hidden></div>
+    </div>
+  </section>
+</main>
+
+<main class="screen" id="s-shop" role="tabpanel" hidden>
+  <section class="stall">
+    <div class="awning" aria-hidden="true"></div>
+    <div class="stall-body" id="v-shop"></div>
+  </section>
+</main>
+
+<main class="screen" id="s-nav" role="tabpanel" hidden>
+  <section class="voyage" id="v-nav"></section>
+</main>
+
+<footer>
+  <span id="foot-note"></span>
+  <span class="links"><button id="open-mj" hidden>Mode MJ</button><button id="reset" hidden>Remettre la démo à zéro</button></span>
+</footer>
+
+<dialog id="d-edit" aria-labelledby="edit-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="edit-title">Modifier la fiche</h2><p>Identité, compétences et progression.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <form class="panel-body" id="edit-form" novalidate>
+      <div class="form" id="edit-fields"></div>
+      <div id="edit-extra"></div>
+      <p class="err" id="edit-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="submit" class="btn">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="d-photo" aria-labelledby="photo-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="photo-title">Photo du personnage</h2><p>Choisis une image ou colle un lien, puis fais-la glisser et zoome pour la cadrer.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div class="ph-wrap">
+        <div class="ph-stage" id="ph-stage" aria-label="Zone de cadrage">
+          <img id="ph-img" alt="" hidden draggable="false">
+          <div class="ph-empty" id="ph-empty">Clique ou dépose une image ici</div>
+        </div>
+        <div class="ph-side">
+          <button type="button" class="btn" id="ph-pick">Choisir une image</button>
+          <input type="file" id="ph-file" accept="image/*" hidden>
+          <label for="ph-url" class="ph-label">Ou depuis un lien</label>
+          <div class="ph-url-row"><input type="url" id="ph-url" placeholder="https://…/image.png" inputmode="url" autocomplete="off"><button type="button" class="btn sm" id="ph-url-go">Charger</button></div>
+          <label for="ph-zoom" class="ph-label">Zoom</label>
+          <input type="range" id="ph-zoom" min="1" max="4" step="0.01" value="1" disabled>
+          <p class="note">Tu peux aussi coller une image ou un lien avec Ctrl+V. La molette zoome.</p>
+          <button type="button" class="btn sm ghost" id="ph-remove" hidden>Revenir au portrait par défaut</button>
+        </div>
+      </div>
+      <p class="err" id="ph-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="ph-save" disabled>Enregistrer la photo</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-shopedit" aria-labelledby="se-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="se-title">Éditer la boutique</h2><p>Salon, vendeur et objets en vente.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="se-body"></div>
+      <p class="err" id="se-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="se-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-tech" aria-labelledby="tech-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="tech-title">Nouvelle technique</h2><p>Elle sera utilisable une fois validée par un MJ.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <form class="panel-body" id="tech-form" novalidate>
+      <div class="form">
+        <div class="wide"><label for="tf-name">Nom de la technique</label><input id="tf-name" name="name" maxlength="40" required></div>
+        <div class="wide"><label for="tf-src">Type</label><select id="tf-src" name="src"></select></div>
+        <div class="wide">
+          <label>Image ou GIF</label>
+          <div class="tf-media">
+            <div class="tf-preview" id="tf-preview"></div>
+            <div class="tf-ctl">
+              <div class="se-row"><button type="button" class="btn sm" id="tf-pick">Choisir un fichier</button><button type="button" class="btn sm ghost" id="tf-media-del" hidden>Retirer</button></div>
+              <input type="file" id="tf-file" accept="image/*" hidden>
+              <div class="ph-url-row"><input type="url" id="tf-url" placeholder="ou colle un lien https://…gif" autocomplete="off"><button type="button" class="btn sm" id="tf-url-go">Charger</button></div>
+              <p class="note" style="margin:0">PNG, JPG ou GIF animé, 2 Mo maximum. Ctrl+V marche aussi.</p>
+            </div>
+          </div>
+        </div>
+        <div class="wide"><label for="tf-desc">Description</label><textarea id="tf-desc" name="desc" maxlength="300" rows="4" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px"></textarea></div>
+      </div>
+      <p class="err" id="tech-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="submit" class="btn" id="tech-submit">Proposer la technique</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="d-mj" aria-labelledby="mj-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="mj-title">Mode MJ</h2><p>Ouvre la fiche d’un joueur pour la modifier.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body" id="mj-body"></div>
+  </div>
+</dialog>
+
+<dialog class="levelup" id="levelup" aria-labelledby="lu-title">
+  <div class="card">
+    <img src="/assets/banner-small.webp" alt="">
+    <div class="big" id="lu-title"></div>
+    <p id="lu-text"></p>
+    <p class="note">Touche pour continuer</p>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

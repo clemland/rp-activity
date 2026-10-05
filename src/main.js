@@ -778,7 +778,7 @@ function renderJob() {
       <div class="badge">${job ? pic(job.pic) : ico(121)}</div>
       <div>
         <h2>${job ? esc(job.name) : 'Aucun métier'} ${job ? `<span class="pips" aria-label="Niveau ${S.job.lvl} sur 3">${[1, 2, 3].map((i) => `<i class="${i <= S.job.lvl ? 'on' : ''}"></i>`).join('')}</span>` : ''}</h2>
-        <p class="lede" style="margin:0">${job ? `${JOB_LEVELS[S.job.lvl - 1]}. Ta maîtrise débloque de nouvelles recettes.` : 'Tu peux réaliser les recettes ouvertes à tous.'}</p>
+        ${job ? `<p class="lede" style="margin:0">${JOB_LEVELS[S.job.lvl - 1]}</p>` : ''}
       </div>
     </div>
 
@@ -899,14 +899,37 @@ function putOnCounter(k) {
   const r = $('drop-counter').getBoundingClientRect();
   if (r.top < 0 || r.bottom > innerHeight) $('drop-counter').scrollIntoView({ block: 'center', behavior: calm.matches ? 'auto' : 'smooth' });
 }
+/* Panneau admin : toutes les boutiques, consultables et modifiables depuis n'importe quel salon */
+let adminShops = null; // { channelId: shop }
+let adminShopCh = null; // boutique affichée
+async function loadAdminShops() {
+  try {
+    adminShops = (await API.staff('shops')).shops;
+  } catch (err) {
+    adminShops = {};
+    toast(esc(err.message));
+  }
+  if (!adminShopCh || !(adminShopCh in adminShops)) adminShopCh = API.channelId in adminShops ? API.channelId : Object.keys(adminShops)[0] ?? null;
+  renderShop();
+}
 function renderShopAdmin() {
   const el = $('v-shop');
-  if (!SHOP) {
-    el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Pas de boutique ici</h2><p class="note">Aucun marchand ne tient boutique dans ce salon${CHNAME ? ` (#${esc(CHNAME)})` : ''}.</p>
-      <button class="btn" id="shop-create">Ouvrir une boutique dans ce salon</button></div>`;
+  if (!adminShops) {
+    el.innerHTML = '<p class="note">Chargement des boutiques…</p>';
     return;
   }
-  const rows = SHOP.items.map(([k, price, left]) => {
+  const list = Object.entries(adminShops).sort((a, b) => a[1].channel.localeCompare(b[1].channel));
+  const shop = adminShopCh ? adminShops[adminShopCh] : null;
+  const picker = `
+    <div class="shop-bar adm-shopbar">
+      <label class="flt"><span>Boutique</span><select id="adm-shop">${list.map(([id, sh]) => `<option value="${esc(id)}" ${id === adminShopCh ? 'selected' : ''}>${esc(sh.channel)} · ${esc(sh.name)}</option>`).join('') || '<option value="">Aucune boutique</option>'}</select></label>
+      <button class="btn" id="shop-create">+ Nouvelle boutique</button>
+    </div>`;
+  if (!shop) {
+    el.innerHTML = `${picker}<div class="no-shop">${ico(265)}<h2>Aucune boutique</h2><p class="note">Crée la première avec « + Nouvelle boutique » : il suffira de coller l’ID du salon.</p></div>`;
+    return;
+  }
+  const rows = shop.items.map(([k, price, left]) => {
     const it = itemOf(k);
     return `<div class="ware">
       <div class="slot-ico">${itemIco(k)}</div>
@@ -914,13 +937,13 @@ function renderShopAdmin() {
       <div class="buy"><span class="price">${berry(price)}</span></div>
     </div>`;
   }).join('');
-  el.innerHTML = `
+  el.innerHTML = `${picker}
     <div class="counter">
-      <div class="face" id="seller-face">${SHOP.img ? `<img src="${esc(SHOP.img)}" alt="${esc(SHOP.seller)}">` : `<span aria-hidden="true">${esc(SHOP.face || '🙂')}</span>`}</div>
-      <div><h2>${esc(SHOP.name)}</h2><p>${esc(SHOP.seller)} · rachat à ${Math.round(SHOP.buyRate * 100)} %</p></div>
+      <div class="face" id="seller-face">${shop.img ? `<img src="${esc(shop.img)}" alt="${esc(shop.seller)}">` : `<span aria-hidden="true">${esc(shop.face || '🙂')}</span>`}</div>
+      <div><h2>${esc(shop.name)}</h2><p>${esc(shop.seller)} · rachat à ${Math.round(shop.buyRate * 100)} %</p></div>
       <button class="btn" id="shop-edit">Modifier la boutique</button>
     </div>
-    <div class="shop-bar"><span class="chan-tag">${esc(SHOP.channel)}</span><span class="note">Vue admin : ce que vend la boutique de ce salon.</span></div>
+    <div class="shop-bar"><span class="chan-tag">${esc(shop.channel)}</span><span class="note">ID du salon : ${esc(adminShopCh)}</span></div>
     <div class="wares">${rows || '<p class="note">Aucun objet en vente.</p>'}</div>`;
 }
 function renderShop() {
@@ -991,8 +1014,8 @@ $('v-shop').addEventListener('input', (e) => {
 });
 $('v-shop').addEventListener('click', async (e) => {
   if (sJust) return;
-  if (e.target.closest('#shop-create')) return openShopEdit(G.newShop(CHNAME));
-  if (e.target.closest('#shop-edit')) return openShopEdit();
+  if (e.target.closest('#shop-create')) return openShopEdit(G.newShop(), null);
+  if (e.target.closest('#shop-edit')) return openShopEdit(adminShops[adminShopCh], adminShopCh);
   const sc = e.target.closest('.scell');
   if (sc && !VIEW) return putOnCounter(S.inv[+sc.dataset.sslot][0]);
   if (e.target.closest('[data-unsell]')) {
@@ -1038,9 +1061,13 @@ $('v-shop').addEventListener('click', async (e) => {
 
 /* Éditeur de boutique : staff seulement (double-clic ou appui long sur le vendeur) */
 let shopDraft = null;
-function openShopEdit(base = SHOP) {
+let shopEditCh = null, shopDraftCh = '';
+function openShopEdit(base, channelId = null) {
   if (!tools() || !base) return;
   shopDraft = structuredClone(base);
+  shopEditCh = channelId; // salon d'origine (null = nouvelle boutique)
+  // Nouvelle boutique : on propose le salon où le panneau est ouvert, s'il n'a pas déjà de boutique.
+  shopDraftCh = channelId ?? (API.channelId && !adminShops?.[API.channelId] ? API.channelId : '');
   renderShopEdit();
   $('se-err').textContent = '';
   openDialog('d-shopedit');
@@ -1050,7 +1077,8 @@ function renderShopEdit() {
   const opts = (s) => Object.entries(G.ITEMS).map(([k, it]) => `<option value="${k}" ${k === s ? 'selected' : ''}>${esc(it.name)}</option>`).join('');
   $('se-body').innerHTML = `
     <div class="form">
-      <div><label for="se-chan">Salon</label><input id="se-chan" value="${esc(d.channel)}" maxlength="40"></div>
+      <div class="wide"><label for="se-chan">ID du salon</label><input id="se-chan" value="${esc(shopDraftCh)}" inputmode="numeric" placeholder="ex. 1234567890123456789" maxlength="22">
+        <small class="note">Dans Discord : clic droit sur le salon > Copier l’identifiant (mode développeur activé). Le nom du salon est retrouvé tout seul.</small></div>
       <div><label for="se-name">Nom de la boutique</label><input id="se-name" value="${esc(d.name)}" maxlength="40"></div>
       <div><label for="se-seller">Vendeur</label><input id="se-seller" value="${esc(d.seller)}" maxlength="30"></div>
       <div><label for="se-rate">Rachat (% de la valeur)</label><input id="se-rate" type="number" min="5" max="100" value="${Math.round(d.buyRate * 100)}"></div>
@@ -1078,11 +1106,12 @@ function renderShopEdit() {
         </div>`).join('')}
     </div>
     <div class="se-row"><button type="button" class="btn sm ghost" id="se-add">+ Ajouter un objet</button>
-      ${SHOP ? '<button type="button" class="btn sm ghost" id="se-close-shop">Fermer la boutique</button>' : ''}</div>`;
+      ${shopEditCh ? '<button type="button" class="btn sm ghost" id="se-close-shop">Fermer la boutique</button>' : ''}</div>`;
 }
 function readShopEdit() {
   const d = shopDraft;
-  d.channel = $('se-chan').value.trim() || d.channel;
+  const raw = $('se-chan').value.trim();
+  shopDraftCh = API.mode === 'demo' ? raw : raw.replace(/\D/g, '');
   d.name = $('se-name').value.trim() || d.name;
   d.seller = $('se-seller').value.trim() || d.seller;
   d.buyRate = Math.min(100, Math.max(5, +$('se-rate').value || 40)) / 100;
@@ -1115,12 +1144,14 @@ $('d-shopedit').addEventListener('click', async (e) => {
     shopDraft.img = null;
     renderShopEdit();
   }
-  if (e.target.id === 'se-close-shop' && confirm('Fermer la boutique de ce salon ? Ses objets en vente seront supprimés.')) {
-    const out = await API.staff('shop.delete').catch((err) => toast(esc(err.message)));
+  if (e.target.id === 'se-close-shop' && confirm(`Fermer la boutique ${shopDraft.channel} ? Ses objets en vente seront supprimés.`)) {
+    const out = await API.staff('shop.delete', { channelId: shopEditCh }).catch((err) => toast(esc(err.message)));
     if (out) {
-      SHOP = null;
+      if (shopEditCh === API.channelId) SHOP = null;
+      delete adminShops?.[shopEditCh];
+      adminShopCh = null;
       closeDialog($('d-shopedit'));
-      renderShop();
+      loadAdminShops();
       toast(out.toast);
     }
   }
@@ -1156,12 +1187,15 @@ $('se-save').addEventListener('click', async () => {
   readShopEdit();
   const keys = shopDraft.items.map((x) => x[0]);
   if (new Set(keys).size !== keys.length) return void ($('se-err').textContent = 'Un même objet apparaît deux fois.');
+  if (API.mode === 'demo' ? !shopDraftCh : !/^\d{15,22}$/.test(shopDraftCh)) return void ($('se-err').textContent = 'Colle l’ID du salon (une suite de chiffres).');
   $('se-save').disabled = true;
   try {
-    const out = await API.staff('shop.save', { shop: shopDraft });
-    SHOP = out.shop;
+    const out = await API.staff('shop.save', { channelId: shopDraftCh, from: shopEditCh, shop: shopDraft });
+    if (out.channelId === API.channelId) SHOP = out.shop;
+    else if (shopEditCh === API.channelId) SHOP = null;
+    adminShopCh = out.channelId;
     closeDialog($('d-shopedit'));
-    renderShop();
+    await loadAdminShops();
     toast(esc(out.toast));
   } catch (err) {
     $('se-err').textContent = err.message;
@@ -1170,10 +1204,16 @@ $('se-save').addEventListener('click', async () => {
   }
 });
 let faceTimer = null;
-$('v-shop').addEventListener('dblclick', (e) => e.target.closest('#seller-face') && openShopEdit());
+const editShown = () => ADMIN && adminShops?.[adminShopCh] && openShopEdit(adminShops[adminShopCh], adminShopCh);
+$('v-shop').addEventListener('dblclick', (e) => e.target.closest('#seller-face') && editShown());
 $('v-shop').addEventListener('pointerdown', (e) => {
   if (!e.target.closest('#seller-face') || e.pointerType === 'mouse') return;
-  faceTimer = setTimeout(() => openShopEdit(), 650);
+  faceTimer = setTimeout(editShown, 650);
+});
+$('v-shop').addEventListener('change', (e) => {
+  if (e.target.id !== 'adm-shop') return;
+  adminShopCh = e.target.value || null;
+  renderShop();
 });
 ['pointerup', 'pointerleave', 'pointercancel'].forEach((t) => $('v-shop').addEventListener(t, () => clearTimeout(faceTimer)));
 
@@ -1623,6 +1663,7 @@ async function enterAdmin({ target = null } = {}) {
   renderAll();
   renderAdminHome();
   loadPlayers();
+  loadAdminShops();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 
@@ -1902,7 +1943,11 @@ function showScreen(name) {
       fillGauges(el);
     }
   });
-  if (name === 'shop') drawAwning();
+  if (name === 'shop') {
+    renderShop();
+    paintStatic();
+    drawAwning();
+  }
   if (name === 'nav') {
     const log = $('sea-log');
     if (log) log.scrollTop = log.scrollHeight;

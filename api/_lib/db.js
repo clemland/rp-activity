@@ -75,7 +75,7 @@ export async function listPlayers() {
   return data.map((r) => ({ uid: r.id, ident: r.ident || {}, level: r.level, photo: r.photo, job: r.job?.id ?? null }));
 }
 
-/** Toute une table sous forme { id: data } (objets, recettes). */
+/** Toute une table sous forme { id: data } (objets, recettes, boutiques). */
 export async function readAll(table) {
   const key = TABLES[table];
   const { data, error } = await db().from(table).select(`${key}, data`).limit(5000);

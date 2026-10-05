@@ -1062,3 +1062,5 @@ body:not(.admin) #t-mj{display:none!important}
 .mj-player input[type=checkbox],.pick-all input{width:18px;height:18px;accent-color:var(--gold-deep)}
 @media (max-width:620px){.prog-row{grid-template-columns:1fr 1fr}.prog-row > label:first-child{grid-column:1/-1}.flt-q input{min-width:0;width:100%}.flt-q{flex:1 1 100%}}
 .prog-row .btn{justify-self:start}
+.adm-shopbar{align-items:end}
+.adm-shopbar select{min-width:260px}

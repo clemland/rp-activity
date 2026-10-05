@@ -3,13 +3,16 @@
  *  - players                              : liste des fiches
  *  - act { target, action }                : modifier la fiche d'un joueur
  *  - bulk { targets, action }              : la même action sur plusieurs joueurs (XP, niveaux, berrys, objets)
- *  - shop.save { channelId, shop } / shop.delete { channelId }
+ *  - shops                                    : toutes les boutiques
+ *  - shop.save { channelId, from?, shop }      : enregistre la boutique du salon channelId (déplacée depuis « from » si l'ID a changé)
+ *  - shop.delete { channelId }
  *  - item.save { id?, item } / item.delete { id }        : base d'objets
  *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
  */
 import { handler, need } from './_lib/http.js';
-import { userFromRequest, isStaff, channelName } from './_lib/discord.js';
-import { read, write, remove, retry, listPlayers } from './_lib/db.js';
+import { userFromRequest, isStaff, channelById } from './_lib/discord.js';
+import { env } from './_lib/env.js';
+import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog } from './_lib/context.js';
 import { normalize, normalizeShop, normalizeItem, normalizeRecipe, staffAction, slug, ITEMS } from '../shared/game.js';
@@ -66,20 +69,31 @@ export default handler(['POST'], async (req, body) => {
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
 
+    case 'shops':
+      return { shops: await readAll('shops') };
+
     case 'shop.save': {
       need(body.channelId && body.shop, 400, 'Boutique manquante.');
+      const channelId = String(body.channelId).trim();
+      // On retrouve le vrai salon à partir de son ID : pas besoin de taper son nom.
+      const ch = await channelById(channelId);
+      need(ch, 400, 'Salon introuvable : vérifie l’ID (clic droit sur le salon > Copier l’identifiant) et que le bot voit ce salon.');
+      need(!env.guildId || !ch.guildId || ch.guildId === env.guildId, 400, 'Ce salon n’est pas sur le serveur principal.');
       const shop = normalizeShop({ ...body.shop });
       shop.items = shop.items.filter(([k]) => ITEMS[k]);
       need(new Set(shop.items.map((x) => x[0])).size === shop.items.length, 400, 'Un même objet apparaît deux fois.');
       shop.name = String(shop.name || 'Comptoir').slice(0, 60);
       shop.seller = String(shop.seller || 'Le marchand').slice(0, 40);
       shop.face = String(shop.face || '').slice(0, 8);
-      shop.channel = String(shop.channel || `#${await channelName(body.channelId)}`).slice(0, 60);
-      shop.img = shop.img ? await ingest(shop.img, 'vendeurs', body.channelId) : null;
+      shop.channel = `#${ch.name}`;
+      shop.img = shop.img ? await ingest(shop.img, 'vendeurs', channelId) : null;
+      const from = body.from && body.from !== channelId ? String(body.from) : null;
+      if (from) need(!(await read('shops', channelId)), 409, `Il y a déjà une boutique dans #${ch.name}.`);
       return retry(async () => {
-        const row = await read('shops', body.channelId);
-        await write('shops', body.channelId, shop, row?.version ?? null);
-        return { shop, toast: 'Boutique mise à jour' };
+        const row = await read('shops', channelId);
+        await write('shops', channelId, shop, row?.version ?? null);
+        if (from) await remove('shops', from);
+        return { channelId, shop, toast: from ? `Boutique déplacée vers #${ch.name}` : `Boutique de #${ch.name} enregistrée` };
       });
     }
 

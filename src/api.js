@@ -29,8 +29,10 @@ function loadStore() {
   } catch {}
   if (!store?.player) {
     G.setCatalog(G.demoCatalog());
-    store = { player: G.demoPlayer(), shop: G.demoShop(), catalog: G.demoCatalog() };
+    store = { player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog() };
   }
+  if (!store.shops) store.shops = { demo: store.shop ?? null };
+  delete store.shop;
   G.setCatalog(store.catalog);
   G.normalize(store.player);
 }
@@ -45,7 +47,7 @@ export function resetDemo() {
 }
 const demoState = () => ({
   me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
-  player: structuredClone(store.player), shop: structuredClone(store.shop), catalog: structuredClone(store.catalog),
+  player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
   channelId: 'demo', channelName: 'port-brisant',
 });
 
@@ -75,9 +77,9 @@ export async function state(playerId) {
 export async function act(action) {
   if (mode === 'demo') {
     G.setCatalog(store.catalog);
-    const out = G.playerAction(store.player, action, { shop: store.shop, channelId: 'demo' });
+    const out = G.playerAction(store.player, action, { shop: store.shops.demo, channelId: 'demo' });
     store.player = out.player;
-    if (out.shop) store.shop = out.shop;
+    if (out.shop) store.shops.demo = out.shop;
     saveStore();
     return structuredClone(out);
   }
@@ -109,38 +111,23 @@ export async function staff(op, payload = {}) {
       saveStore();
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}` };
     }
+    if (op === 'shops') return { shops: structuredClone(Object.fromEntries(Object.entries(store.shops).filter(([, v]) => v))) };
     if (op === 'shop.save') {
-      store.shop = G.normalizeShop(structuredClone(payload.shop));
+      const id = String(payload.channelId);
+      if (payload.from && payload.from !== id && store.shops[id]) throw new Error('Il y a déjà une boutique dans ce salon.');
+      const shop = G.normalizeShop(structuredClone(payload.shop));
+      shop.channel = id === 'demo' ? '#port-brisant' : `#salon-${id.slice(-4)}`;
+      store.shops[id] = shop;
+      if (payload.from && payload.from !== id) delete store.shops[payload.from];
       saveStore();
-      return { shop: structuredClone(store.shop), toast: 'Boutique mise à jour' };
-    }
-    if (op === 'item.save' || op === 'recipe.save') {
-      const items = op === 'item.save', table = items ? store.catalog.items : store.catalog.recipes;
-      G.setCatalog(store.catalog);
-      const data = items ? G.normalizeItem(payload.item) : G.normalizeRecipe(payload.recipe);
-      let id = payload.id && table[payload.id] ? payload.id : G.slug(data.name);
-      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(data.name)}-${n}`;
-      const isNew = !table[id];
-      table[id] = data;
-      saveStore();
-      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${data.name}` };
-    }
-    if (op === 'item.delete' || op === 'recipe.delete') {
-      const items = op === 'item.delete';
-      if (items) {
-        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map((r) => r.name);
-        if (used.length) throw new Error(`Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
-      }
-      delete (items ? store.catalog.items : store.catalog.recipes)[payload.id];
-      saveStore();
-      return { catalog: structuredClone(store.catalog), toast: items ? 'Objet supprimé' : 'Recette supprimée' };
+      return { channelId: id, shop: structuredClone(shop), toast: 'Boutique enregistrée' };
     }
     if (op === 'shop.delete') {
-      store.shop = null;
+      delete store.shops[payload.channelId];
       saveStore();
       return { shop: null, toast: 'Boutique fermée' };
     }
   }
-  return call('POST', '/api/staff', { op, ...payload, channelId });
+  return call('POST', '/api/staff', { op, channelId, ...payload });
 }
 

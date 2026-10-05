@@ -55,6 +55,15 @@ export async function isStaff(uid) {
   });
 }
 
+/** Salon Discord par son ID : { name, guildId } ou null s'il n'existe pas / n'est pas visible par le bot. */
+export async function channelById(channelId) {
+  if (!/^\d{15,22}$/.test(String(channelId || '')) || !env.botToken) return null;
+  return cached(`chi:${channelId}`, 10 * 60_000, async () => {
+    const c = await bot(`/channels/${channelId}`);
+    return c?.id ? { name: c.name || '', guildId: c.guild_id || null } : null;
+  });
+}
+
 export async function channelName(channelId) {
   if (!channelId || !env.botToken) return '';
   return cached(`ch:${channelId}`, 30 * 60_000, async () => (await bot(`/channels/${channelId}`))?.name || '');

@@ -64,7 +64,10 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes('/guilds/g1/members/')) return json({ roles: [] });
   if (u.endsWith('/guilds/g1')) return json({ owner_id: 'owner' });
   if (u.endsWith('/guilds/g1/roles')) return json([]);
-  if (u.includes('/channels/')) return json({ name: 'port-brisant' });
+  if (u.includes('/channels/111111111111111111')) return json({ id: '111111111111111111', name: 'port-brisant', guild_id: 'g1' });
+  if (u.includes('/channels/222222222222222222')) return json({ id: '222222222222222222', name: 'île-aux-forges', guild_id: 'g1' });
+  if (u.includes('/channels/333333333333333333')) return json({ id: '333333333333333333', name: 'autre-serveur', guild_id: 'autre' });
+  if (u.includes('/channels/')) return json({}, 404);
   return json({}, 404);
 };
 
@@ -138,11 +141,13 @@ test('fabrication : lancée, pas encore prête, puis terminée par le staff et r
 });
 
 test('boutique avec les objets du staff', async () => {
-  let r = await call('staff', { body: { op: 'shop.save', channelId: 'c1', shop: { name: 'Comptoir', seller: 'Rosa', items: [['coffre', 100, 2], ['inexistant', 5, 1]], buyRate: 0.4 } }, headers: MJ });
+  const C1 = '111111111111111111';
+  let r = await call('staff', { body: { op: 'shop.save', channelId: C1, shop: { name: 'Comptoir', seller: 'Rosa', items: [['coffre', 100, 2], ['inexistant', 5, 1]], buyRate: 0.4 } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.deepEqual(r.out.shop.items, [['coffre', 100, 2]], 'objets inconnus retirés');
+  assert.equal(r.out.shop.channel, '#port-brisant', 'nom retrouvé à partir de l’ID');
   await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'edit', patch: { berry: 1000 } } }, headers: MJ });
-  r = await call('action', { body: { channelId: 'c1', action: { type: 'shop.buy', key: 'coffre' } }, headers: J });
+  r = await call('action', { body: { channelId: C1, action: { type: 'shop.buy', key: 'coffre' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(r.out.player.berry, 900);
 });
@@ -214,4 +219,22 @@ test('actions en groupe : XP à plusieurs joueurs, échecs signalés sans bloque
   assert.equal(r.status, 400, 'pas d’édition libre en groupe');
   r = await call('staff', { body: { op: 'bulk', targets: ['u1'], action: { type: 'xp', amount: 5 } }, headers: J });
   assert.equal(r.status, 403);
+});
+
+test('boutiques par ID de salon : ID inconnu, autre serveur, déplacement, liste', async () => {
+  const shop = { name: 'Forge', seller: 'Brann', items: [], buyRate: 0.5 };
+  let r = await call('staff', { body: { op: 'shop.save', channelId: '999999999999999999', shop }, headers: MJ });
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /introuvable/);
+  r = await call('staff', { body: { op: 'shop.save', channelId: 'pas-un-id', shop }, headers: MJ });
+  assert.equal(r.status, 400);
+  r = await call('staff', { body: { op: 'shop.save', channelId: '333333333333333333', shop }, headers: MJ });
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /serveur principal/);
+  r = await call('staff', { body: { op: 'shop.save', channelId: '111111111111111111', from: 'ancien', shop }, headers: MJ });
+  assert.equal(r.status, 409, 'déjà une boutique dans ce salon');
+  await call('staff', { body: { op: 'shop.save', channelId: '222222222222222222', shop }, headers: MJ });
+  r = await call('staff', { body: { op: 'shops' }, headers: MJ });
+  assert.deepEqual(Object.keys(r.out.shops).sort(), ['111111111111111111', '222222222222222222']);
+  assert.equal(r.out.shops['222222222222222222'].channel, '#île-aux-forges');
 });

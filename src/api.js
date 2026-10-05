@@ -44,7 +44,7 @@ export function resetDemo() {
   loadStore();
 }
 const demoState = () => ({
-  me: { uid: 'demo', name: 'Démo', staff: true },
+  me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
   player: structuredClone(store.player), shop: structuredClone(store.shop), catalog: structuredClone(store.catalog),
   channelId: 'demo', channelName: 'port-brisant',
 });

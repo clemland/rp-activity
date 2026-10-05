@@ -13,6 +13,7 @@
 <header class="crest"><img src="/assets/banner-big.webp" alt="" width="1400" height="132"></header>
 <nav class="bar topnav" aria-label="Navigation principale">
   <div class="screens" role="tablist" aria-label="Écrans">
+    <button class="scr" role="tab" data-screen="admin" aria-controls="s-admin" id="scr-admin" hidden><span class="ico" data-i="125"></span><span>Joueurs</span></button>
     <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
     <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
     <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
@@ -76,13 +77,17 @@
   <section class="voyage" id="v-nav"></section>
 </main>
 
+<main class="screen" id="s-admin" role="tabpanel" hidden>
+  <section class="sheet" id="v-admin"></section>
+</main>
+
 <main class="screen" id="s-gest" role="tabpanel" hidden>
   <section class="sheet" id="v-gest"></section>
 </main>
 
 <footer>
   <span id="foot-note"></span>
-  <span class="links"><button id="open-mj" hidden>Mode MJ</button><button id="reset" hidden>Remettre la démo à zéro</button></span>
+  <span class="links"><button id="open-mj" hidden>Panneau admin (démo)</button><button id="reset" hidden>Remettre la démo à zéro</button></span>
 </footer>
 
 <dialog id="d-edit" aria-labelledby="edit-title">

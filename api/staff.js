@@ -31,6 +31,8 @@ export default handler(['POST'], async (req, body) => {
 
     case 'act': {
       need(typeof body.target === 'string', 400, 'Joueur manquant.');
+      // Anti-triche : personne ne modifie sa propre fiche, même le staff.
+      need(body.target !== me.uid, 403, 'Tu ne peux pas modifier ta propre fiche : demande à un autre membre du staff.');
       return retry(async () => {
         const row = await read('players', body.target);
         need(row, 404, 'Ce joueur n’a pas de fiche.');

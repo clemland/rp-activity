@@ -33,6 +33,8 @@ let ME = null; // { uid, name, staff }
 let S = null; // fiche affichée
 let SHOP = null; // boutique du salon (ou null)
 let CHNAME = ''; // nom du salon
+let ADMIN = false; // panneau admin (/panel admin, /edit profil) ; /profil = vue joueur pure, même pour le staff
+const tools = () => ADMIN && !!ME?.staff;
 let VIEW = null; // uid d'un autre joueur ouvert par le staff (lecture seule pour lui)
 const shown = {};
 const fullName = () => G.fullName(S);
@@ -227,7 +229,7 @@ function renderHero() {
   shown.berryOf = S.uid;
   document.title = `Fiche de ${fullName()}`;
   $('open-photo').hidden = !!VIEW;
-  $('open-edit').hidden = !ME.staff;
+  $('open-edit').hidden = !(tools() && VIEW && VIEW !== ME.uid);
 }
 $('portrait').addEventListener('click', () => !VIEW && openPhoto());
 $('open-photo').addEventListener('click', () => openPhoto());
@@ -517,7 +519,7 @@ function renderTech() {
         <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
         <div class="t-actions">
           <button class="btn sm ghost" data-edit-tech="${t.id}">Modifier</button><button class="btn sm ghost" data-del-tech="${t.id}">Supprimer</button>
-          ${ME.staff && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>` : ''}
+          ${tools() && VIEW && VIEW !== ME.uid && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>` : ''}
         </div>
       </details>`).join('') || '<p class="note">Aucune technique pour l’instant.</p>'}`;
 }
@@ -800,7 +802,7 @@ function renderJob() {
       </div>
       <div class="craft-acts">
         ${ready ? '<button class="btn" id="craft-collect">Récupérer</button>' : '<button class="btn sm ghost" id="craft-cancel">Annuler</button>'}
-        ${ME.staff && !ready ? '<button class="btn sm ghost" id="craft-finish" title="Outil MJ">Terminer (MJ)</button>' : ''}
+        ${tools() && VIEW && VIEW !== ME.uid && !ready ? '<button class="btn sm ghost" id="craft-finish" title="Outil MJ">Terminer (MJ)</button>' : ''}
       </div>
     </div>` : ''}
 
@@ -908,11 +910,37 @@ function putOnCounter(k) {
   const r = $('drop-counter').getBoundingClientRect();
   if (r.top < 0 || r.bottom > innerHeight) $('drop-counter').scrollIntoView({ block: 'center', behavior: calm.matches ? 'auto' : 'smooth' });
 }
-function renderShop() {
+function renderShopAdmin() {
   const el = $('v-shop');
   if (!SHOP) {
     el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Pas de boutique ici</h2><p class="note">Aucun marchand ne tient boutique dans ce salon${CHNAME ? ` (#${esc(CHNAME)})` : ''}.</p>
-      ${ME.staff && !VIEW ? '<button class="btn" id="shop-create">Ouvrir une boutique dans ce salon</button>' : ''}</div>`;
+      <button class="btn" id="shop-create">Ouvrir une boutique dans ce salon</button></div>`;
+    return;
+  }
+  const rows = SHOP.items.map(([k, price, left]) => {
+    const it = itemOf(k);
+    return `<div class="ware">
+      <div class="slot-ico">${itemIco(k)}</div>
+      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><div class="stock">${left < 0 ? 'Stock illimité' : left === 0 ? 'Épuisé' : `${left} en stock`}</div></div>
+      <div class="buy"><span class="price">${berry(price)}</span></div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="counter">
+      <div class="face" id="seller-face">${SHOP.img ? `<img src="${esc(SHOP.img)}" alt="${esc(SHOP.seller)}">` : `<span aria-hidden="true">${esc(SHOP.face || '🙂')}</span>`}</div>
+      <div><h2>${esc(SHOP.name)}</h2><p>${esc(SHOP.seller)} · rachat à ${Math.round(SHOP.buyRate * 100)} %</p></div>
+      <button class="btn" id="shop-edit">Modifier la boutique</button>
+    </div>
+    <div class="shop-bar"><span class="chan-tag">${esc(SHOP.channel)}</span><span class="note">Vue admin : ce que vend la boutique de ce salon.</span></div>
+    <div class="wares">${rows || '<p class="note">Aucun objet en vente.</p>'}</div>`;
+}
+function renderShop() {
+  if (ADMIN) return renderShopAdmin();
+  if (!S) return;
+  const el = $('v-shop');
+  if (!SHOP) {
+    el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Pas de boutique ici</h2><p class="note">Aucun marchand ne tient boutique dans ce salon${CHNAME ? ` (#${esc(CHNAME)})` : ''}.</p>
+      ${tools() ? '<button class="btn" id="shop-create">Ouvrir une boutique dans ce salon</button>' : ''}</div>`;
     return;
   }
   const rows = shopMode === 'buy'
@@ -975,6 +1003,7 @@ $('v-shop').addEventListener('input', (e) => {
 $('v-shop').addEventListener('click', async (e) => {
   if (sJust) return;
   if (e.target.closest('#shop-create')) return openShopEdit(G.newShop(CHNAME));
+  if (e.target.closest('#shop-edit')) return openShopEdit();
   const sc = e.target.closest('.scell');
   if (sc && !VIEW) return putOnCounter(S.inv[+sc.dataset.sslot][0]);
   if (e.target.closest('[data-unsell]')) {
@@ -1021,7 +1050,7 @@ $('v-shop').addEventListener('click', async (e) => {
 /* Éditeur de boutique : staff seulement (double-clic ou appui long sur le vendeur) */
 let shopDraft = null;
 function openShopEdit(base = SHOP) {
-  if (!ME.staff || VIEW || !base) return;
+  if (!tools() || !base) return;
   shopDraft = structuredClone(base);
   renderShopEdit();
   $('se-err').textContent = '';
@@ -1278,8 +1307,12 @@ $('edit-form').addEventListener('submit', async (e) => {
 /* ═══ Onglet Édition MJ (staff) ═══════════════════════════════════════════ */
 function renderMjTab() {
   const tab = $('t-mj');
-  tab.hidden = !ME?.staff;
-  if (!ME?.staff) return;
+  const show = tools() && VIEW && VIEW !== ME.uid;
+  tab.hidden = !show;
+  if (!show) {
+    if (tab.getAttribute('aria-selected') === 'true') selectTab(tabs[0]);
+    return;
+  }
   const wait = S.techniques.filter((t) => !t.ok);
   const job = S.job.id ? JOBS[S.job.id] : null;
   $('v-mj').innerHTML = `
@@ -1318,14 +1351,11 @@ function renderMjTab() {
         <button class="btn sm" data-mjt-xp="50">+50 XP</button><button class="btn sm" data-mjt-xp="250">+250 XP</button><button class="btn sm" data-mjt-xp="1000">+1000 XP</button>
       </div>
     </div>
-    <p class="note" style="margin-top:14px">Pour ouvrir la fiche d’un autre joueur : <button class="linklike" id="mj-pick">choisir un joueur</button>, ou <code>/edit profil</code> sur Discord.</p>`;
+    <p class="note" style="margin-top:14px"><button class="linklike" id="mj-pick">← Liste des joueurs</button></p>`;
 }
 $('v-mj').addEventListener('click', async (e) => {
   if (e.target.closest('#mj-edit-open')) return openEdit();
-  if (e.target.closest('#mj-pick')) {
-    openDialog('d-mj');
-    return renderMJ();
-  }
+  if (e.target.closest('#mj-pick')) return showScreen('admin');
   const ok = e.target.closest('[data-ok-tech]')?.dataset.okTech;
   if (ok) return void staffAct({ type: 'tech.validate', id: Number(ok), ok: true });
   const no = e.target.closest('[data-no-tech]')?.dataset.noTech;
@@ -1337,7 +1367,6 @@ $('v-mj').addEventListener('click', async (e) => {
 });
 
 /* ═══ Mode MJ : ouvrir la fiche d'un joueur ══════════════════════════════ */
-let players = [];
 async function renderMJ() {
   const viewing = VIEW ? S : null;
   $('mj-body').innerHTML = `
@@ -1381,48 +1410,100 @@ $('mj-body').addEventListener('click', async (e) => {
   const give = e.target.closest('[data-mj-give]')?.dataset.mjGive;
   if (give) return void staffAct({ type: give, key: $('mj-item').value, qty: +$('mj-qty').value || 1 });
 });
-$('open-mj').addEventListener('click', () => {
-  openDialog('d-mj');
-  renderMJ();
-});
+$('open-mj').addEventListener('click', () => (ADMIN ? location.reload() : enterAdmin()));
 
 async function openPlayer(uid, { tab = null } = {}) {
+  if (!ADMIN) return;
   setBusy(1);
   try {
     const st = await API.state(uid === ME.uid ? undefined : uid);
-    VIEW = uid === ME.uid ? null : uid;
     G.setCatalog(st.catalog);
+    if (!st.player) return toast('Tu n’as pas de fiche.');
+    VIEW = uid;
     S = st.player;
     pending = {};
     sel = null;
     shown.photo = null;
-    document.body.classList.toggle('readonly', !!VIEW);
-    $('mj-banner').hidden = !VIEW;
-    $('mj-banner').innerHTML = VIEW ? `<span>Mode MJ : fiche de <b>${esc(fullName())}</b></span><button class="btn sm" id="mj-back">Revenir à ma fiche</button>` : '';
-    document.querySelectorAll('.scr[data-screen="shop"], .scr[data-screen="nav"]').forEach((b) => (b.hidden = !!VIEW));
-    if (VIEW) showScreen('fiche');
+    document.body.classList.add('readonly');
+    updateNav();
+    showScreen('fiche');
     renderAll();
-    if (tab) selectTab($(tab));
+    selectTab($(tab && VIEW !== ME.uid ? tab : 't-perso'));
   } catch (err) {
     toast(esc(err.message));
   } finally {
     setBusy(-1);
   }
 }
-$('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && openPlayer(ME.uid));
+function closePlayer() {
+  VIEW = null;
+  S = null;
+  updateNav();
+  showScreen('admin');
+  renderAll();
+}
+$('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && closePlayer());
+
+/* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
+/** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
+function updateNav() {
+  const vis = { fiche: !ADMIN || !!VIEW, shop: true, nav: !ADMIN, admin: ADMIN, gest: tools() };
+  scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
+  document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
+  document.body.classList.toggle('admin', ADMIN);
+  $('mj-banner').hidden = !ADMIN;
+  $('mj-banner').innerHTML = !ADMIN ? ''
+    : VIEW ? `<span>Panneau admin : fiche de <b>${esc(fullName())}</b>${VIEW === ME.uid ? ' (ta fiche : lecture seule)' : ''}</span><button class="btn sm" id="mj-back">← Liste des joueurs</button>`
+    : '<span>Panneau admin</span>';
+  document.querySelector('.wallet-chips').hidden = ADMIN && !VIEW;
+}
+let players = [], playersLoaded = false;
+async function renderAdminHome() {
+  if (!ADMIN) return;
+  $('v-admin').innerHTML = `
+    <div class="sec-head"><div><h2>Joueurs</h2><p class="lede" style="margin:0">Ouvre une fiche pour la modifier, valider ses techniques ou lui donner des objets.</p></div></div>
+    <input class="mj-search" id="adm-search" type="search" placeholder="Chercher un joueur…" aria-label="Chercher un joueur">
+    <div class="mj-players adm-players" id="mj-players"><p class="note">Chargement…</p></div>
+    <p class="note" style="margin-top:12px">Pour enregistrer un nouveau joueur : <code>/register</code> sur Discord.</p>`;
+  try {
+    players = (await API.staff('players')).players;
+    playersLoaded = true;
+  } catch (err) {
+    $('mj-players').innerHTML = `<p class="req">${esc(err.message)}</p>`;
+    return;
+  }
+  renderPlayers('');
+}
+$('v-admin').addEventListener('input', (e) => e.target.id === 'adm-search' && renderPlayers(e.target.value));
+$('v-admin').addEventListener('click', (e) => {
+  const open = e.target.closest('[data-open]')?.dataset.open;
+  if (open) openPlayer(open, { tab: 't-mj' });
+});
+/** Passe en panneau admin ; option : ouvrir directement la fiche d'un joueur. */
+async function enterAdmin({ target = null } = {}) {
+  if (!ME?.staff) return;
+  ADMIN = true;
+  VIEW = null;
+  S = null;
+  updateNav();
+  showScreen('admin');
+  renderAll();
+  renderAdminHome();
+  if (target) await openPlayer(target, { tab: 't-mj' });
+}
 
 /* ═══ Gestion (staff) : base d'objets et recettes ════════════════════════ */
 let gestTab = 'items', gestQuery = '';
 let itemDraft = null, itemDraftId = null, recipeDraft = null, recipeDraftId = null;
 function renderGestion() {
-  if (!ME?.staff) return;
+  if (!tools()) return;
   const q = gestQuery.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   const match = (s) => !q || s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().includes(q);
   const items = Object.entries(G.ITEMS).filter(([, it]) => match(it.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
   const recs = Object.entries(G.RECIPES).filter(([, r]) => match(r.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
   $('v-gest').innerHTML = `
     <div class="sec-head">
-      <div><h2>Gestion</h2><p class="lede" style="margin:0">Les objets et les recettes du RP. Les boutiques se gèrent dans leur salon (double-clic sur le vendeur).</p></div>
+      <div><h2>Gestion</h2><p class="lede" style="margin:0">Les objets et les recettes du RP. La boutique de ce salon se gère dans l’écran Boutique.</p></div>
     </div>
     <div class="shop-bar">
       <div class="seg" role="group" aria-label="Section">
@@ -1645,16 +1726,24 @@ tabs.forEach((t, i) => {
 });
 function renderAll() {
   const has = !!S;
-  $('no-fiche').hidden = has;
+  $('no-fiche').hidden = has || ADMIN;
   document.querySelector('#s-fiche .hero').hidden = !has;
   document.querySelector('#s-fiche .log').hidden = !has;
-  $('scr-gest').hidden = !ME?.staff;
+  if (ADMIN) {
+    renderGestion();
+    renderShop();
+    if (has) {
+      renderHero();
+      [renderPerso, renderTech, renderInv, renderJob, renderMjTab].forEach((f) => f());
+    }
+    paintStatic();
+    return;
+  }
   if (!has) {
     $('no-fiche').innerHTML = `<div class="no-shop">${ico(233)}<h2>Pas encore de fiche</h2>
       <p class="note">Un MJ doit d’abord t’enregistrer avec la commande <code>/register</code>.</p>
-      ${ME?.staff ? '<p class="note">Tu fais partie du staff : tu peux quand même ouvrir la fiche d’un joueur (Mode MJ, en bas) ou gérer les objets et recettes (Gestion).</p>' : ''}</div>`;
+      ${ME?.staff ? '<p class="note">Tu fais partie du staff : les outils sont dans <code>/panel admin</code>.</p>' : ''}</div>`;
     $('purse').innerHTML = '';
-    renderGestion();
     renderNav();
     if (!S) $('v-shop').innerHTML = `<div class="no-shop">${ico(265)}<h2>Boutique fermée pour toi</h2><p class="note">Il faut une fiche pour acheter et vendre.</p></div>`;
     paintStatic();
@@ -1700,7 +1789,12 @@ async function refresh() {
     const st = await API.state();
     G.setCatalog(st.catalog);
     if (st.openDenied) toast(OPEN_DENIED);
-    if (st.open && ME.staff) return void (await openPlayer(st.open, { tab: 't-mj' }));
+    if (st.open && ME.staff) return void (await enterAdmin(st.open));
+    if (ADMIN) {
+      SHOP = st.shop;
+      if (screen === 'shop') renderShop();
+      return;
+    }
     if (busy || VIEW) return;
     S = st.player;
     SHOP = st.shop;
@@ -1732,16 +1826,17 @@ async function refresh() {
     $('boot-msg').textContent = `Impossible de charger ta fiche : ${err.message || err}. Ferme puis relance l’Activity.`;
     return;
   }
-  $('open-mj').hidden = !ME.staff;
+  $('open-mj').hidden = API.mode !== 'demo';
   $('reset').hidden = API.mode !== 'demo';
   $('foot-note').textContent = API.mode === 'demo' ? 'Démo : les données restent dans ce navigateur.' : `Connecté en tant que ${ME.name}.`;
+  updateNav();
   renderAll();
   selectTab(tabs[0]);
   showScreen('fiche');
   fillGauges(document.querySelector('.hero'));
   $('boot').hidden = true;
-  // Ouverte avec /edit profil : directement sur la fiche du joueur, onglet Édition MJ
-  if (st.open && ME.staff) await openPlayer(st.open, { tab: 't-mj' });
+  // Ouverte avec /panel admin ou /edit profil : panneau admin (et fiche du joueur pour /edit profil)
+  if (st.open && ME.staff) await enterAdmin(st.open);
   if (st.openDenied) toast(OPEN_DENIED);
   // Boutique et navigation : toutes les 10 s. Staff : toutes les 5 s (pour /edit profil).
   let tick = 0;

@@ -148,17 +148,17 @@ test('boutique avec les objets du staff', async () => {
 });
 
 test('/edit profil : ouverture une seule fois, refus signalé pour un non-staff, joueur sans fiche refusé', async () => {
-  let r = await call('bot', { body: { op: 'open', userId: 'u2', target: 'u1' }, headers: BOT });
+  let r = await call('bot', { body: { op: 'open', userId: 'u2', mode: 'edit', target: 'u1' }, headers: BOT });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
-  assert.equal(r.out.open, 'u1');
+  assert.deepEqual(r.out.open, { mode: 'edit', target: 'u1' });
   assert.equal(r.out.player, null, 'le MJ peut ne pas avoir de fiche');
   r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
   assert.equal(r.out.open, null);
-  await call('bot', { body: { op: 'open', userId: 'u1', target: 'u1' }, headers: BOT });
+  await call('bot', { body: { op: 'open', userId: 'u1', mode: 'admin' }, headers: BOT });
   r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: J });
   assert.equal(r.out.openDenied, true);
-  r = await call('bot', { body: { op: 'open', userId: 'u2', target: 'personne' }, headers: BOT });
+  r = await call('bot', { body: { op: 'open', userId: 'u2', mode: 'edit', target: 'personne' }, headers: BOT });
   assert.equal(r.status, 404);
   r = await call('state', { method: 'GET', query: { player: 'u1' }, headers: MJ });
   assert.equal(r.out.player.id.name, 'Monkey D. Lucien');
@@ -176,4 +176,30 @@ test('écriture concurrente : la version empêche d’écraser', async () => {
   const row = await read('players', 'u1');
   await write('players', 'u1', row.data, row.version);
   await assert.rejects(write('players', 'u1', row.data, row.version), Conflict);
+});
+
+test('/delete profil : fiche supprimée, puis le joueur n’a plus de fiche', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  await call('bot', { body: { op: 'register', userId: 'u7', name: 'À supprimer', race: 'Géant', classe: 'Fighter' }, headers: H });
+  let r = await call('bot', { body: { op: 'delete', userId: 'u7', by: 'u2' }, headers: H });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.name, 'À supprimer');
+  r = await call('bot', { body: { op: 'delete', userId: 'u7' }, headers: H });
+  assert.equal(r.status, 404);
+  r = await call('bot', { body: { op: 'delete', userId: 'u1' }, headers: { 'x-bot-secret': 'faux' } });
+  assert.equal(r.status, 401);
+});
+
+test('/panel admin : ouverture en mode admin, sans joueur', async () => {
+  let r = await call('bot', { body: { op: 'open', userId: 'u2', mode: 'admin' }, headers: { 'x-bot-secret': 'secret' } });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
+  assert.deepEqual(r.out.open, { mode: 'admin', target: null });
+});
+
+test('anti-triche : le staff ne peut pas modifier sa propre fiche', async () => {
+  await call('bot', { body: { op: 'register', userId: 'u2', name: 'Le MJ', race: 'Humain', classe: 'Fighter' }, headers: { 'x-bot-secret': 'secret' } });
+  const r = await call('staff', { body: { op: 'act', target: 'u2', action: { type: 'edit', patch: { berry: 999999999 } } }, headers: MJ });
+  assert.equal(r.status, 403);
+  assert.match(r.out.error, /propre fiche/);
 });

@@ -21,12 +21,12 @@ export default handler(['GET'], async (req) => {
     need(staff, 403, 'Réservé au staff.');
     target = req.query.player;
   } else {
-    // /edit profil : le bot a demandé d'ouvrir la fiche d'un joueur (valable 2 minutes, une seule fois)
+    // /panel admin ou /edit profil : le bot a demandé d'ouvrir le panneau admin (valable 2 minutes, une seule fois)
     const pending = await read('meta', `open:${me.uid}`);
     if (pending) {
       await remove('meta', `open:${me.uid}`);
       if (Date.now() - pending.data.at < 120_000) {
-        if (staff) open = pending.data.target;
+        if (staff) open = { mode: pending.data.mode || 'edit', target: pending.data.target || null };
         else openDenied = true; // le bot l'a accepté mais le site ne reconnaît pas ce membre comme staff
       }
     }

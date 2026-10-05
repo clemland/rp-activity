@@ -1037,3 +1037,8 @@ body.busy{cursor:progress}
 .nav-soon{text-align:center;padding:40px 20px}
 @media (max-width:620px){.craft-now{grid-template-columns:1fr}.recipes,.gest-grid{grid-template-columns:1fr}}
 .voyage:has(.nav-soon){display:block;max-width:720px;margin:0 auto}
+
+/* ═══ v23 : panneau admin ════════════════════════════ */
+body.admin .mj-banner{background:#7a2318}
+.adm-players{max-height:none}
+body:not(.admin) #t-mj{display:none!important}

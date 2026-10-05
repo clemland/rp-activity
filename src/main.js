@@ -19,13 +19,19 @@ import {
   openDialog, closeDialog, readAsDataUrl,
 } from './ui.js';
 
-const { ITEMS, JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, JOB_NEED, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
+const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
+const itemOf = (k) => G.itemOf(k);
+/** Icône d'un objet : son image si le staff en a mis une, sinon une icône selon sa catégorie. */
+const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237 };
+const itemIco = (k) => {
+  const it = itemOf(k);
+  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${esc(it.img)}" alt="" loading="lazy"></span>` : ico(KIND_ICON[it.kind] ?? 237);
+};
 
 /* ═══ État ═══════════════════════════════════════════════════════════════ */
 let ME = null; // { uid, name, staff }
 let S = null; // fiche affichée
 let SHOP = null; // boutique du salon (ou null)
-let NAV = null; // navigation du salon
 let CHNAME = ''; // nom du salon
 let VIEW = null; // uid d'un autre joueur ouvert par le staff (lecture seule pour lui)
 const shown = {};
@@ -35,7 +41,7 @@ const isEquipped = (k) => G.isEquipped(S, k);
 const equippedCount = (k) => G.equippedCount(S, k);
 
 /* ═══ Actions : optimistes quand le résultat ne dépend pas du hasard ═════ */
-const OPTIMISTIC = new Set(['stats', 'inv.move', 'inv.drop', 'equip', 'unequip', 'job.do', 'job.up', 'shop.buy', 'tech.delete', 'nav.toggle', 'photo.remove']);
+const OPTIMISTIC = new Set(['stats', 'inv.move', 'inv.drop', 'equip', 'unequip', 'craft.start', 'craft.cancel', 'shop.buy', 'tech.delete', 'photo.remove']);
 let busy = 0;
 const setBusy = (d) => {
   busy += d;
@@ -52,20 +58,22 @@ $('levelup').addEventListener('click', () => $('levelup').close());
 function applyOut(out, { quiet = false, noUps = false } = {}) {
   if (out.player) S = out.player;
   if (out.shop) SHOP = out.shop;
-  if (out.nav) NAV = out.nav;
   renderAll();
-  if (!quiet && out.toast) toast(esc(out.toast), out.icon);
+  if (!quiet && out.toast) toast(esc(out.toast), out.item ? itemIco(out.item) : out.icon);
   if (!noUps) showLevelUp(out.ups);
 }
+
+const OPEN_DENIED = 'Le site ne te reconnaît pas comme staff : /edit profil est refusé. Mets les mêmes OWNER_IDS / STAFF_ROLE_IDS que le bot dans les variables Vercel, puis redéploie.';
 
 /** Action du joueur sur sa fiche. Renvoie le résultat, ou null en cas d'erreur. */
 async function run(action) {
   if (VIEW) return null;
-  const before = { S, SHOP, NAV };
+  if (!S) return null;
+  const before = { S, SHOP };
   let local = null;
   if (OPTIMISTIC.has(action.type)) {
     try {
-      local = G.playerAction(S, action, { shop: SHOP, nav: NAV, channelId: API.channelId });
+      local = G.playerAction(S, action, { shop: SHOP, channelId: API.channelId });
     } catch (e) {
       if (e instanceof G.GameError) {
         toast(esc(e.message));
@@ -82,7 +90,7 @@ async function run(action) {
     return out;
   } catch (e) {
     if (local) {
-      ({ S, SHOP, NAV } = before);
+      ({ S, SHOP } = before);
       renderAll();
     }
     toast(esc(e.message || 'Erreur.'));
@@ -141,7 +149,7 @@ const FACTION = {
   'Chasseur de primes': { cls: 'f-chasseur', icon: 153 },
   Civil: { cls: 'f-civil', icon: 121 },
 };
-const CLASS_ICON = { Épéiste: { icon: 147 }, Combattant: { icon: 128 }, Tireur: { icon: 153 }, Stratège: { icon: 231 }, Soigneur: { icon: 192 }, Voleur: { icon: 240 } };
+const CLASS_ICON = { Fighter: { icon: 128 }, Sabreur: { icon: 147 }, Tireur: { icon: 153 } };
 
 function photoHTML(p = S) {
   if (!p.photo) return PORTRAIT;
@@ -179,11 +187,11 @@ function renderHero() {
   const aff = affiliation();
   $('h-aff').innerHTML = aff;
   $('h-aff').hidden = !aff;
-  const job = JOBS[S.job.id];
+  const job = S.job.id ? JOBS[S.job.id] : { name: 'Aucun', pic: null };
   $('h-traits').innerHTML = [
     ['Race', S.id.race, 121],
     ['Classe', S.id.classe, CLASS_ICON[S.id.classe]?.icon ?? 147],
-    ['Métier', job.name, job.pic],
+    ['Métier', job.name, job.pic ?? 121],
     ...(S.fruit ? [['Fruit', S.fruit.name, 'fruit']] : []),
   ].map(([k, v, i]) => `<li>${glyph(i)}<span><small>${k}</small>${esc(v)}</span></li>`).join('');
 
@@ -618,12 +626,12 @@ function renderInv() {
   if (!selItem) sel = null;
   let det = `<div class="detail empty">Choisis un objet pour voir sa description. Fais-le glisser pour le ranger ailleurs, ou une arme sur un emplacement pour l'équiper.</div>`;
   if (selItem) {
-    const [k, q] = selItem, it = ITEMS[k], eq = isEquipped(k);
+    const [k, q] = selItem, it = itemOf(k), eq = isEquipped(k);
     det = `<div class="detail" id="inv-detail">
-      <div class="slot-ico">${ico(it.icon)}</div>
+      <div class="slot-ico">${itemIco(k)}</div>
       <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
       <div class="acts">
-        ${it.slot ? `<button class="btn sm" data-equip="${k}">${eq && equippedCount(k) >= count(k) ? 'Retirer' : 'Équiper'}</button>` : ''}
+        ${G.isWeapon(k) ? `<button class="btn sm" data-equip="${k}">${eq && equippedCount(k) >= count(k) ? 'Retirer' : 'Équiper'}</button>` : ''}
         <button class="btn sm ghost" data-drop="${sel}" ${eq && equippedCount(k) >= count(k) ? 'disabled title="Retire-le d’abord"' : ''}>Jeter un</button>
       </div>
     </div>`;
@@ -633,9 +641,9 @@ function renderInv() {
     <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''}.</p>
     <div class="equip">
       ${Object.entries(SLOTS).map(([sl, label]) => {
-        const k = S.equip[sl], it = k && ITEMS[k];
+        const k = S.equip[sl], it = k && itemOf(k);
         return `<button class="eslot ${it ? 'filled' : ''}" data-eslot="${sl}" aria-label="${label}${it ? ' : ' + esc(it.name) + ', cliquer pour retirer' : ' vide'}">
-          <span class="frame">${it ? ico(it.icon) : ''}</span>
+          <span class="frame">${it ? itemIco(k) : ''}</span>
           <span><b>${label}</b><span class="n">${it ? esc(it.name) : 'Glisse une arme ici'}</span></span>
         </button>`;
       }).join('')}
@@ -643,8 +651,8 @@ function renderInv() {
     <div class="hold" id="hold">
       ${S.inv.map((s, i) => {
         if (!s) return `<div class="cell empty" data-slot="${i}"></div>`;
-        const [k, q] = s, it = ITEMS[k];
-        return `<button class="cell" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${isEquipped(k) ? ', équipé' : ''}">${ico(it.icon)}${isEquipped(k) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+        const [k, q] = s, it = itemOf(k);
+        return `<button class="cell" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${isEquipped(k) ? ', équipé' : ''}">${itemIco(k)}${isEquipped(k) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
       }).join('')}
     </div>
     ${det}`;
@@ -666,7 +674,7 @@ function ghostMove(d, e, icon, selector) {
     d.on = true;
     d.ghost = document.createElement('div');
     d.ghost.className = 'drag-ghost';
-    d.ghost.innerHTML = ico(icon);
+    d.ghost.innerHTML = icon;
     document.body.appendChild(d.ghost);
     d.cell.classList.add('dragging');
     document.body.classList.add('is-dragging');
@@ -688,8 +696,8 @@ function ghostEnd(d) {
   document.body.classList.remove('is-dragging');
 }
 window.addEventListener('pointermove', (e) => {
-  if (drag) ghostMove(drag, e, ITEMS[S.inv[drag.from]?.[0]]?.icon, '#v-inv .cell, #v-inv .eslot');
-  if (sdrag) ghostMove(sdrag, e, ITEMS[sdrag.k].icon, '#drop-counter');
+  if (drag) ghostMove(drag, e, itemIco(S.inv[drag.from]?.[0]), '#v-inv .cell, #v-inv .eslot');
+  if (sdrag) ghostMove(sdrag, e, itemIco(sdrag.k), '#drop-counter');
 }, { passive: false });
 window.addEventListener('pointerup', () => {
   if (drag) {
@@ -703,9 +711,9 @@ window.addEventListener('pointerup', () => {
     if (!t) return;
     if (t.dataset.eslot) {
       const k = S.inv[d.from][0];
-      if (ITEMS[k].slot !== 'arme') {
+      if (!G.isWeapon(k)) {
         replay(t, 'shake');
-        return toast(`${esc(ITEMS[k].name)} n’est pas une arme`);
+        return toast(`${esc(itemOf(k).name)} n’est pas une arme`);
       }
       return void equip(k, t.dataset.eslot);
     }
@@ -760,150 +768,97 @@ $('v-inv').addEventListener('click', (e) => {
   }
 });
 
-/* ═══ Métier ═════════════════════════════════════════════════════════════ */
-let jobAction = null;
+/* ═══ Métier : atelier de fabrication ════════════════════════════════════ */
+const fmtEnd = (ms) => G.duree(Math.max(0, ms - Date.now()) / 1000);
+let craftFilter = 'dispo';
+function needChip([k, q], have = true) {
+  const h = count(k), it = itemOf(k);
+  return `<span class="need ${have ? (h >= q ? 'have' : 'miss') : ''}">${itemIco(k)}${esc(it.name)} ${have ? `${h}/${q}` : `× ${q}`}</span>`;
+}
 function renderJob() {
-  const job = JOBS[S.job.id], lvl = S.job.lvl, need = JOB_NEED[lvl - 1];
-  const full = need != null && S.job.xp >= need;
-  const acts = job.actions;
-  if (!jobAction || !acts.find((a) => a.id === jobAction)) jobAction = acts.find((a) => a.lvl <= lvl)?.id ?? acts[0].id;
-  const a = acts.find((x) => x.id === jobAction);
-  const needs = Object.entries(a.needs), tools = Object.entries(a.tools || {});
-  const missing = [...needs, ...tools].some(([k, q]) => count(k) < q);
-  const chip = ([k, q], showQty = true) => {
-    const h = count(k);
-    return `<span class="need ${h >= q ? 'have' : 'miss'}">${ico(ITEMS[k].icon)}${ITEMS[k].name}${showQty ? ` ${h}/${q}` : ''}</span>`;
-  };
+  if (!S) return;
+  const job = S.job.id ? JOBS[S.job.id] : null;
+  const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.job || r.job === S.job.id);
+  const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r)) : recs;
+  const c = S.craft;
+  const ready = c && Date.now() >= c.end;
   $('v-job').innerHTML = `
     <div class="job-head">
-      <div class="badge">${pic(job.pic)}</div>
+      <div class="badge">${job ? pic(job.pic) : ico(121)}</div>
       <div>
-        <h2>${job.name} <span class="pips" aria-label="Niveau ${lvl} sur 3">${[1, 2, 3].map((i) => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</span></h2>
-        <p class="lede" style="margin:0">${JOB_LEVELS[lvl - 1]}. ${job.desc}</p>
+        <h2>${job ? esc(job.name) : 'Aucun métier'} ${job ? `<span class="pips" aria-label="Niveau ${S.job.lvl} sur 3">${[1, 2, 3].map((i) => `<i class="${i <= S.job.lvl ? 'on' : ''}"></i>`).join('')}</span>` : ''}</h2>
+        <p class="lede" style="margin:0">${job ? `${JOB_LEVELS[S.job.lvl - 1]}. Ta maîtrise débloque de nouvelles recettes.` : 'Tu peux réaliser les recettes ouvertes à tous.'}</p>
       </div>
     </div>
-    <div style="margin-top:14px">
-      ${need != null ? `
-        <div class="gauge ${full ? 'full' : ''}" role="progressbar" aria-label="Expérience de métier" aria-valuenow="${Math.min(S.job.xp, need)}" aria-valuemax="${need}"><i style="width:${Math.min(100, (S.job.xp / need) * 100)}%"></i></div>
-        <div class="gauge-cap"><span>Vers ${JOB_LEVELS[lvl]}</span><span>${Math.min(S.job.xp, need)} / ${need}</span></div>
-        ${full ? `<div style="margin-top:10px"><button class="btn" id="job-up">Passer ${JOB_LEVELS[lvl]}</button></div>` : ''}`
-      : '<p class="note">Niveau maximal atteint : tu es Maître dans ton métier.</p>'}
-    </div>
-    <div class="field">
-      <label for="job-select">Réaliser une action</label>
-      <select class="menu" id="job-select">
-        ${acts.map((x) => `<option value="${x.id}" ${x.id === jobAction ? 'selected' : ''}>${x.lvl > lvl ? '🔒 ' : ''}${x.name} (${JOB_LEVELS[x.lvl - 1]})</option>`).join('')}
-      </select>
-    </div>
-    <div class="recipe" id="recipe">
-      <h3>${a.name}</h3>
-      <p>${a.desc}</p>
-      <b>Objets requis</b>
-      <div class="needs">${needs.length ? needs.map((x) => chip(x)).join('') : '<span class="note">Aucun objet nécessaire.</span>'}</div>
-      ${tools.length ? `<b>Outils (non consommés)</b><div class="needs">${tools.map((x) => chip(x, false)).join('')}</div>` : ''}
-      ${Object.keys(a.gives).length ? `<b>Résultat</b><div class="needs">${Object.entries(a.gives).map(([k, q]) => `<span class="need">${ico(ITEMS[k].icon)}${q} × ${ITEMS[k].name}</span>`).join('')}</div>` : ''}
-      <div class="recipe-foot">
-        <span class="note">+${a.xp} XP${a.jxp && need != null ? ` · +${a.jxp} XP de métier` : ''}</span>
-        ${a.lvl > lvl ? `<span class="req">Demande le niveau ${JOB_LEVELS[a.lvl - 1]}</span>`
-          : `<button class="btn" id="job-do" ${missing ? 'disabled' : ''}>${missing ? 'Objets manquants' : 'Réaliser l’action'}</button>`}
-      </div>
-    </div>`;
-}
-$('v-job').addEventListener('change', (e) => {
-  if (e.target.id !== 'job-select') return;
-  jobAction = e.target.value;
-  renderJob();
-  replay($('recipe'), 'in');
-});
-$('v-job').addEventListener('click', async (e) => {
-  if (e.target.id === 'job-up' && (await run({ type: 'job.up' }))) replay(document.querySelector('#v-job .badge'), 'bought');
-  if (e.target.id === 'job-do' && (await run({ type: 'job.do', id: jobAction }))) replay($('recipe'), 'bought');
-});
 
-/* ═══ Navigation ═════════════════════════════════════════════════════════ */
-const WHEEL = `<svg class="wheel" viewBox="0 0 100 100" aria-hidden="true"><g stroke="#17255e" stroke-width="3" stroke-linecap="round">
-  ${[0, 45, 90, 135].map((a) => `<g transform="rotate(${a} 50 50)"><line x1="50" y1="4" x2="50" y2="96" stroke-width="7"/><line x1="50" y1="4" x2="50" y2="96" stroke="#b9772f" stroke-width="3"/><circle cx="50" cy="5" r="4.5" fill="#b9772f"/><circle cx="50" cy="95" r="4.5" fill="#b9772f"/></g>`).join('')}
-  <circle cx="50" cy="50" r="31" fill="none" stroke-width="10"/><circle cx="50" cy="50" r="31" fill="none" stroke="#8a5320" stroke-width="5"/>
-  <circle cx="50" cy="50" r="10" fill="#e6a223"/></g></svg>`;
-let navSeen = Infinity;
-function logHTML(entry, i) {
-  const nw = i >= navSeen ? ' new' : '';
-  if (entry.t === 'msg') return `<div class="msg${nw}"><small>${esc(entry.name || '')}</small>${esc(entry.text)}</div>`;
-  if (entry.t === 'sys') return `<div class="sys${nw}">${esc(entry.text)}</div>`;
-  const mine = entry.uid === S.uid && !VIEW;
-  const v = G.eventView(entry, mine ? S : null);
-  if (!v) return '';
-  const res = entry.result ? `${entry.ok === true ? '<span class="ok">Réussi.</span> ' : entry.ok === false ? '<span class="req">Raté.</span> ' : ''}${esc(entry.result)}` : '';
-  return `<div class="event ${v.tone}${nw}">
-    <h3>${ico(v.icon)}${esc(v.title)}</h3>
-    ${entry.name ? `<small class="note">Pour ${esc(entry.name)}</small>` : ''}
-    <p>${esc(v.text)}</p>
-    ${res ? `<div class="result">${entry.roll ? `<span class="roll">${esc(entry.roll)}</span>` : ''}${res}</div>`
-      : v.choices.length ? (mine ? `<div class="choices">${v.choices.map((c) => `<button class="btn sm" data-choice="${c.i}" data-entry="${esc(entry.id)}">${esc(c.label)} <small>(${esc(c.hint)})</small></button>`).join('')}</div>` : '<p class="note">En attente du choix du joueur.</p>') : ''}
-  </div>`;
-}
-function renderNav() {
-  if (!NAV) NAV = G.newNav();
-  const active = NAV.active, demo = API.mode === 'demo';
-  $('v-nav').innerHTML = `
-    <aside class="helm ${active ? 'sailing' : ''}">
-      <h2>Navigation</h2>
-      <p class="note" style="margin:0">Dans ce salon RP, chaque message peut déclencher un événement en mer.</p>
-      ${WHEEL}
-      <div class="state">${active ? 'En mer' : 'Au port'}</div>
-      <div class="chance">${active ? `<b>${G.NAV_CHANCE} %</b> de chances d’événement par message RP` : 'La navigation est arrêtée.'}</div>
-      <button class="btn" id="nav-toggle" ${VIEW ? 'disabled' : ''}>${active ? 'Jeter l’ancre' : 'Lever l’ancre'}</button>
-      <ul>
-        <li>Chaque message RP rapporte ${G.NAV_XP} XP (au plus un toutes les ${G.NAV_COOLDOWN_MS / 1000} s).</li>
-        <li>Les choix se jouent au d20 + ta stat, ton Haki ou ta Volonté.</li>
-        ${S.effects.meteo > 0 ? `<li class="ok">Météo lue : mauvaises rencontres divisées par deux (${S.effects.meteo} événement${S.effects.meteo > 1 ? 's' : ''}).</li>` : '<li>Un navigateur qui lit la météo réduit les mauvaises rencontres.</li>'}
-        ${S.effects.coque > 0 ? `<li class="ok">Coque renforcée : mauvaises rencontres divisées par deux (${S.effects.coque} événement${S.effects.coque > 1 ? 's' : ''}).</li>` : ''}
-      </ul>
-    </aside>
-    <section class="logbook">
-      <h2>Journal de bord</h2>
-      <div class="sea-log" id="sea-log" aria-live="polite">
-        ${NAV.log.length ? NAV.log.map(logHTML).join('') : `<p class="empty">${active ? 'Écris tes actions RP dans le salon : les événements apparaîtront ici.' : 'Lève l’ancre pour commencer la navigation dans ce salon.'}</p>`}
+    ${c ? `<div class="craft-now ${ready ? 'ready' : ''}">
+      <div class="craft-gives">${Object.entries(c.gives).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>
+      <div class="craft-info">
+        <b>${esc(c.name)}</b>
+        ${ready ? '<span class="ok">Prête à récupérer !</span>' : `<span>Encore <b id="craft-left">${fmtEnd(c.end)}</b></span>`}
+        <div class="gauge" aria-hidden="true"><i id="craft-bar" style="width:${c.end > c.start ? Math.min(100, ((Date.now() - c.start) / (c.end - c.start)) * 100) : 100}%"></i></div>
       </div>
-      ${demo ? `<form class="composer" id="nav-form">
-        <label for="nav-input" style="position:absolute;left:-9999px">Ton action RP</label>
-        <textarea id="nav-input" placeholder="${active ? 'Démo : écris une action RP comme dans le salon…' : 'Lève l’ancre pour commencer'}" ${active ? '' : 'disabled'} maxlength="400"></textarea>
-        <button class="btn" type="submit" ${active ? '' : 'disabled'}>Envoyer</button>
-      </form>` : `<p class="discord-hint">Écris tes actions RP directement dans le salon Discord. Le bot y annonce les événements, et tu peux faire tes choix ici ou avec ses boutons.</p>`}
-    </section>`;
-  navSeen = NAV.log.length;
-  const log = $('sea-log');
-  log.scrollTop = log.scrollHeight;
+      <div class="craft-acts">
+        ${ready ? '<button class="btn" id="craft-collect">Récupérer</button>' : '<button class="btn sm ghost" id="craft-cancel">Annuler</button>'}
+        ${ME.staff && !ready ? '<button class="btn sm ghost" id="craft-finish" title="Outil MJ">Terminer (MJ)</button>' : ''}
+      </div>
+    </div>` : ''}
+
+    <div class="sec-head" style="margin-top:16px">
+      <h2 style="font-size:20px">Recettes</h2>
+      <div class="seg" role="group" aria-label="Filtre">
+        <button aria-pressed="${craftFilter === 'dispo'}" data-cf="dispo">Réalisables</button>
+        <button aria-pressed="${craftFilter === 'toutes'}" data-cf="toutes">Toutes</button>
+      </div>
+    </div>
+    ${shownRecs.length ? `<div class="recipes">${shownRecs.map(([id, r]) => {
+      const why = G.craftBlock(S, r);
+      return `<article class="recipe ${why ? 'locked' : ''}">
+        <h3>${esc(r.name)}</h3>
+        <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}</p>
+        ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
+        <b>Il faut</b>
+        <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
+        <b>Donne</b>
+        <div class="needs">${Object.entries(r.gives).map((x) => needChip(x, false)).join('')}</div>
+        <div class="recipe-foot">
+          ${why ? `<span class="req">${esc(why)}</span>` : '<span></span>'}
+          <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
+        </div>
+      </article>`;
+    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}`;
 }
-$('v-nav').addEventListener('click', async (e) => {
-  if (e.target.closest('#nav-toggle')) {
-    if (await run({ type: 'nav.toggle' })) {
-      replay(document.querySelector('.helm .wheel'), 'turn');
-      $('nav-input')?.focus();
-    }
-    return;
+$('v-job').addEventListener('click', async (e) => {
+  const cf = e.target.closest('[data-cf]')?.dataset.cf;
+  if (cf) {
+    craftFilter = cf;
+    return renderJob();
   }
-  const ch = e.target.closest('[data-choice]');
-  if (ch) {
-    ch.disabled = true;
-    await run({ type: 'nav.choose', entryId: ch.dataset.entry, choice: +ch.dataset.choice });
-  }
+  const id = e.target.closest('[data-craft]')?.dataset.craft;
+  if (id) return void run({ type: 'craft.start', id });
+  if (e.target.id === 'craft-collect' && (await run({ type: 'craft.collect' }))) replay(document.querySelector('#v-job .badge'), 'bought');
+  if (e.target.id === 'craft-cancel' && confirm('Annuler la fabrication ? Les ingrédients te seront rendus.')) run({ type: 'craft.cancel' });
+  if (e.target.id === 'craft-finish') staffAct({ type: 'craft.finish' });
 });
-$('v-nav').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const input = $('nav-input');
-  const text = input.value.trim();
-  if (!text) return input.focus();
-  const out = API.demoMessage(text);
-  applyOut({ ...out, toast: null });
-  $('nav-input')?.focus();
-});
-$('v-nav').addEventListener('keydown', (e) => {
-  if (e.target.id === 'nav-input' && e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    $('nav-form').requestSubmit();
-  }
-});
+// Compte à rebours de la fabrication en cours
+setInterval(() => {
+  const left = $('craft-left');
+  if (!left || !S?.craft) return;
+  const c = S.craft;
+  if (Date.now() >= c.end) return renderJob();
+  left.textContent = fmtEnd(c.end);
+  const bar = $('craft-bar');
+  if (bar) bar.style.width = `${Math.min(100, ((Date.now() - c.start) / (c.end - c.start)) * 100)}%`;
+}, 1000);
+
+/* ═══ Navigation (à venir) ═══════════════════════════════════════════════ */
+function renderNav() {
+  $('v-nav').innerHTML = `<section class="logbook nav-soon">
+    <h2>Navigation</h2>
+    <p class="lede">La navigation arrive bientôt.</p>
+  </section>`;
+}
+
 
 /* ═══ Boutique ═══════════════════════════════════════════════════════════ */
 let shopMode = 'buy';
@@ -921,14 +876,14 @@ function sellHTML() {
   const n = Math.max(6, Math.ceil((last + 1) / 6) * 6);
   const cells = S.inv.slice(0, n).map((s, i) => {
     if (!s) return '<div class="cell empty"></div>';
-    const [k, q] = s, it = ITEMS[k];
-    return `<button class="cell scell ${!it.value ? 'nosell' : ''} ${sellItem === k ? 'on-counter' : ''}" data-sslot="${i}" aria-label="${esc(it.name)}, quantité ${q}${!it.value ? ', invendable' : ''}">${ico(it.icon)}${isEquipped(k) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+    const [k, q] = s, it = itemOf(k);
+    return `<button class="cell scell ${!it.value ? 'nosell' : ''} ${sellItem === k ? 'on-counter' : ''}" data-sslot="${i}" aria-label="${esc(it.name)}, quantité ${q}${!it.value ? ', invendable' : ''}">${itemIco(k)}${isEquipped(k) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
   }).join('');
   let counter = `<div class="drop-hint">${ico(261)}<b>Glisse un objet ici</b><span>ou clique dessus dans ton inventaire</span></div>`;
   if (sellItem) {
-    const k = sellItem, it = ITEMS[k], eq = isEquipped(k) && equippedCount(k) >= count(k), a = askBlock(k);
+    const k = sellItem, it = itemOf(k), eq = isEquipped(k) && equippedCount(k) >= count(k), a = askBlock(k);
     counter = `<div class="offer">
-      <div class="offer-head"><div class="slot-ico">${ico(it.icon)}</div><div><h3>${esc(it.name)}</h3><p class="note">Tu en as ${count(k)}.</p></div><button class="close sm-close" data-unsell aria-label="Reprendre l’objet">×</button></div>
+      <div class="offer-head"><div class="slot-ico">${itemIco(k)}</div><div><h3>${esc(it.name)}</h3><p class="note">Tu en as ${count(k)}.</p></div><button class="close sm-close" data-unsell aria-label="Reprendre l’objet">×</button></div>
       <div class="ref">Prix de référence <b>${berry(a.ref)}</b></div>
       ${eq ? '<p class="req">Objet équipé : retire-le de ton équipement pour le vendre.</p>'
         : locked(k) ? `<p class="req">${esc(SHOP.seller)} a refusé ton prix : ce sera le prix de référence.</p>`
@@ -946,7 +901,7 @@ function sellHTML() {
   </div>`;
 }
 function putOnCounter(k) {
-  if (!ITEMS[k].value) return toast(`${esc(ITEMS[k].name)} ne se vend pas`, ITEMS[k].icon);
+  if (!itemOf(k).value) return toast(`${esc(itemOf(k).name)} ne se vend pas`, itemIco(k));
   sellItem = k;
   renderShop();
   replay($('drop-counter'), 'bought');
@@ -961,10 +916,10 @@ function renderShop() {
     return;
   }
   const rows = shopMode === 'buy'
-    ? SHOP.items.map(([k, price, left]) => {
-        const it = ITEMS[k], out = left === 0, poor = S.berry < price;
+    ? SHOP.items.filter(([k]) => G.ITEMS[k]).map(([k, price, left]) => {
+        const it = itemOf(k), out = left === 0, poor = S.berry < price;
         return `<div class="ware" data-ware="${k}">
-          <div class="slot-ico">${ico(it.icon)}</div>
+          <div class="slot-ico">${itemIco(k)}</div>
           <div>
             <h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3>
             <p>${esc(it.desc)}</p>
@@ -1074,7 +1029,7 @@ function openShopEdit(base = SHOP) {
 }
 function renderShopEdit() {
   const d = shopDraft;
-  const opts = (s) => Object.entries(ITEMS).map(([k, it]) => `<option value="${k}" ${k === s ? 'selected' : ''}>${esc(it.name)}</option>`).join('');
+  const opts = (s) => Object.entries(G.ITEMS).map(([k, it]) => `<option value="${k}" ${k === s ? 'selected' : ''}>${esc(it.name)}</option>`).join('');
   $('se-body').innerHTML = `
     <div class="form">
       <div><label for="se-chan">Salon</label><input id="se-chan" value="${esc(d.channel)}" maxlength="40"></div>
@@ -1096,7 +1051,7 @@ function renderShopEdit() {
       <div class="se-head"><span>Objet</span><span>Prix</span><span>Stock</span><span></span></div>
       ${d.items.map(([k, price, stock], i) => `
         <div class="se-item" data-i="${i}">
-          <span class="se-ico">${ico(ITEMS[k].icon)}</span>
+          <span class="se-ico">${itemIco(k)}</span>
           <select data-f="k" aria-label="Objet">${opts(k)}</select>
           <input data-f="price" type="number" min="0" value="${price}" aria-label="Prix">
           <span class="se-stock"><input data-f="stock" type="number" min="0" value="${stock < 0 ? '' : stock}" placeholder="∞" ${stock < 0 ? 'disabled' : ''} aria-label="Stock">
@@ -1124,7 +1079,9 @@ function readShopEdit() {
 $('d-shopedit').addEventListener('click', async (e) => {
   if (e.target.id === 'se-add') {
     readShopEdit();
-    shopDraft.items.push(['gigot', 1000, -1]);
+    const first = Object.keys(G.ITEMS).find((k) => !shopDraft.items.some((x) => x[0] === k));
+    if (!first) return void ($('se-err').textContent = Object.keys(G.ITEMS).length ? 'Tous les objets sont déjà en vente.' : 'Crée d’abord des objets dans Gestion.');
+    shopDraft.items.push([first, G.ITEMS[first].value || 100, -1]);
     renderShopEdit();
     $('se-body').querySelector('.se-item:last-child select')?.focus();
   }
@@ -1179,7 +1136,6 @@ $('d-shopedit').addEventListener('change', async (e) => {
 });
 $('se-save').addEventListener('click', async () => {
   readShopEdit();
-  if (!shopDraft.items.length) return void ($('se-err').textContent = 'La boutique doit vendre au moins un objet.');
   const keys = shopDraft.items.map((x) => x[0]);
   if (new Set(keys).size !== keys.length) return void ($('se-err').textContent = 'Un même objet apparaît deux fois.');
   $('se-save').disabled = true;
@@ -1228,24 +1184,24 @@ new ResizeObserver(drawAwning).observe(document.querySelector('.stall'));
 
 /* ═══ Édition de la fiche (staff) ════════════════════════════════════════ */
 const FIELDS = () => [
-  ['first', 'Prénom', 'text'], ['last', 'Nom', 'text'], ['epithet', 'Surnom', 'text'],
+  ['name', 'Nom (prénom et nom)', 'text'], ['epithet', 'Surnom', 'text'],
   ['faction', 'Faction', 'select', G.FACTIONS],
   ['crew', 'Équipage', 'text', null, 'nomarine'], ['crewRole', 'Rôle', 'text'],
   ['grade', 'Grade Marine', 'select', G.GRADES, 'marine'],
   ['race', 'Race', 'select', G.RACES], ['classe', 'Classe', 'select', G.CLASSES],
-  ['job', 'Métier', 'select', Object.keys(JOBS), null, JOBS],
+  ['job', 'Métier', 'select', ['', ...Object.keys(JOBS)], null, { '': { name: 'Aucun métier' }, ...JOBS }],
   ['bounty', 'Prime (berrys)', 'number', null, 'nomarine'],
   ['fruitName', 'Fruit du démon (vide = aucun)', 'text'], ['fruitType', 'Type de fruit', 'select', G.FRUIT_TYPES],
 ];
-const fieldVal = (k) => (k === 'job' ? S.job.id : k === 'fruitName' ? S.fruit?.name ?? '' : k === 'fruitType' ? S.fruit?.type ?? 'Paramecia' : S.id[k]);
+const fieldVal = (k) => (k === 'job' ? S.job.id ?? '' : k === 'fruitName' ? S.fruit?.name ?? '' : k === 'fruitType' ? S.fruit?.type ?? 'Paramecia' : S.id[k]);
 function openEdit() {
   if (!ME.staff) return;
   $('edit-fields').innerHTML = FIELDS().map(([k, label, type, opts, show, labels]) => {
     const id = `f-${k}`, v = fieldVal(k);
     const control = type === 'select'
       ? `<select id="${id}" name="${k}">${opts.map((o) => `<option value="${o}" ${o === v ? 'selected' : ''}>${labels ? labels[o].name : o}</option>`).join('')}</select>`
-      : `<input id="${id}" name="${k}" type="${type}" value="${esc(v)}" ${type === 'number' ? 'min="0" inputmode="numeric"' : 'maxlength="40"'}>`;
-    return `<div data-show="${show || ''}"><label for="${id}">${label}</label>${control}${k === 'job' ? '<small class="note">Changer de métier remet son niveau à Apprenti.</small>' : ''}</div>`;
+      : `<input id="${id}" name="${k}" type="${type}" value="${esc(v)}" ${type === 'number' ? 'min="0" inputmode="numeric"' : `maxlength="${k === 'name' ? 60 : 40}"`}>`;
+    return `<div data-show="${show || ''}" class="${k === 'name' ? 'wide' : ''}"><label for="${id}">${label}</label>${control}</div>`;
   }).join('');
   syncEditFields();
   const picker = (name, label, v, glyphHTML, zero) => `
@@ -1298,14 +1254,14 @@ $('open-edit').addEventListener('click', openEdit);
 $('edit-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const d = Object.fromEntries(new FormData(e.target));
-  if (!d.first.trim() && !d.last.trim()) {
-    $('edit-err').textContent = 'Indique au moins un prénom ou un nom.';
-    return $('f-first').focus();
+  if (!d.name.trim()) {
+    $('edit-err').textContent = 'Indique un nom.';
+    return $('f-name').focus();
   }
   const patch = {
-    id: { first: d.first, last: d.last, epithet: d.epithet, faction: d.faction, crewRole: d.crewRole, race: d.race, classe: d.classe,
+    id: { name: d.name, epithet: d.epithet, faction: d.faction, crewRole: d.crewRole, race: d.race, classe: d.classe,
       ...(d.crew != null && { crew: d.crew }), ...(d.grade != null && { grade: d.grade }), ...(d.bounty != null && { bounty: +d.bounty }) },
-    job: d.job, jobLvl: +d.jobLvl, volonte: +d.vol,
+    job: d.job || null, jobLvl: +d.jobLvl, volonte: +d.vol,
     fruit: d.fruitName.trim() ? { name: d.fruitName.trim(), type: d.fruitType, stars: +d.fruitStars } : null,
     haki: Object.fromEntries(HAKI.map((h) => [h.key, +d[`haki_${h.key}`]])),
     level: +d.level, xp: +d.xp, berry: +d.berry, statPts: +d.statPts,
@@ -1325,7 +1281,7 @@ function renderMjTab() {
   tab.hidden = !ME?.staff;
   if (!ME?.staff) return;
   const wait = S.techniques.filter((t) => !t.ok);
-  const job = JOBS[S.job.id];
+  const job = S.job.id ? JOBS[S.job.id] : null;
   $('v-mj').innerHTML = `
     <div class="sec-head">
       <div><h2>Édition MJ</h2><p class="lede" style="margin:0">Fiche de <b>${esc(fullName())}</b>. Les modifications s’appliquent tout de suite.</p></div>
@@ -1335,7 +1291,7 @@ function renderMjTab() {
       <span><small>Niveau</small><b>${S.level}</b></span>
       <span><small>Berrys</small><b>${berry(S.berry)}</b></span>
       <span><small>Points à répartir</small><b>${S.statPts}</b></span>
-      <span><small>Métier</small><b>${esc(job.name)} · ${JOB_LEVELS[S.job.lvl - 1]}</b></span>
+      <span><small>Métier</small><b>${job ? `${esc(job.name)} · ${JOB_LEVELS[S.job.lvl - 1]}` : 'Aucun'}</b></span>
       <span><small>Volonté</small>${stars(S.volonte)}</span>
     </div>
 
@@ -1353,7 +1309,7 @@ function renderMjTab() {
     <h3 class="ed-h">Objets et expérience</h3>
     <div class="mj-tools">
       <div class="mj-row">
-        <select id="mjt-item" aria-label="Objet">${Object.entries(ITEMS).map(([k, it]) => `<option value="${k}">${esc(it.name)}</option>`).join('')}</select>
+        <select id="mjt-item" aria-label="Objet">${Object.entries(G.ITEMS).map(([k, it]) => `<option value="${k}">${esc(it.name)}</option>`).join('')}</select>
         <input id="mjt-qty" type="number" min="1" value="1" style="width:76px" aria-label="Quantité">
         <button class="btn sm" data-mjt-give="give">Donner</button><button class="btn sm ghost" data-mjt-give="take">Retirer</button>
       </div>
@@ -1387,7 +1343,7 @@ async function renderMJ() {
   $('mj-body').innerHTML = `
     ${viewing ? `<div class="mj-block"><h3>Fiche ouverte : ${esc(fullName())}</h3>
       <div class="mj-row"><button class="btn sm" data-mj-xp="100">+100 XP</button><button class="btn sm" data-mj-xp="500">+500 XP</button></div>
-      <div class="mj-row"><select id="mj-item">${Object.entries(ITEMS).map(([k, it]) => `<option value="${k}">${esc(it.name)}</option>`).join('')}</select>
+      <div class="mj-row"><select id="mj-item">${Object.entries(G.ITEMS).map(([k, it]) => `<option value="${k}">${esc(it.name)}</option>`).join('')}</select>
         <input id="mj-qty" type="number" min="1" value="1" style="width:70px" aria-label="Quantité">
         <button class="btn sm" data-mj-give="give">Donner</button><button class="btn sm ghost" data-mj-give="take">Retirer</button></div>
       <p class="note" style="margin:8px 0 0">Le reste (identité, Haki, stats, berrys…) se modifie avec « Modifier » sur la fiche. Les techniques se valident dans l’onglet Techniques.</p>
@@ -1405,7 +1361,7 @@ async function renderMJ() {
 }
 function renderPlayers(q) {
   const norm = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-  const list = players.filter((p) => !q || norm(`${p.ident.first || ''} ${p.ident.last || ''} ${p.ident.epithet || ''}`).includes(norm(q)));
+  const list = players.filter((p) => !q || norm(`${G.fullName({ id: p.ident })} ${p.ident.epithet || ''}`).includes(norm(q)));
   $('mj-players').innerHTML = list.map((p) => `
     <button class="mj-player" data-open="${esc(p.uid)}">
       <span class="av">${photoHTML({ photo: p.photo, id: p.ident })}</span>
@@ -1435,6 +1391,7 @@ async function openPlayer(uid, { tab = null } = {}) {
   try {
     const st = await API.state(uid === ME.uid ? undefined : uid);
     VIEW = uid === ME.uid ? null : uid;
+    G.setCatalog(st.catalog);
     S = st.player;
     pending = {};
     sel = null;
@@ -1454,8 +1411,214 @@ async function openPlayer(uid, { tab = null } = {}) {
 }
 $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && openPlayer(ME.uid));
 
+/* ═══ Gestion (staff) : base d'objets et recettes ════════════════════════ */
+let gestTab = 'items', gestQuery = '';
+let itemDraft = null, itemDraftId = null, recipeDraft = null, recipeDraftId = null;
+function renderGestion() {
+  if (!ME?.staff) return;
+  const q = gestQuery.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const match = (s) => !q || s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().includes(q);
+  const items = Object.entries(G.ITEMS).filter(([, it]) => match(it.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const recs = Object.entries(G.RECIPES).filter(([, r]) => match(r.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  $('v-gest').innerHTML = `
+    <div class="sec-head">
+      <div><h2>Gestion</h2><p class="lede" style="margin:0">Les objets et les recettes du RP. Les boutiques se gèrent dans leur salon (double-clic sur le vendeur).</p></div>
+    </div>
+    <div class="shop-bar">
+      <div class="seg" role="group" aria-label="Section">
+        <button aria-pressed="${gestTab === 'items'}" data-gt="items">Objets (${Object.keys(G.ITEMS).length})</button>
+        <button aria-pressed="${gestTab === 'recipes'}" data-gt="recipes">Recettes (${Object.keys(G.RECIPES).length})</button>
+      </div>
+      <input class="mj-search gest-search" id="gest-q" type="search" placeholder="Chercher…" value="${esc(gestQuery)}" aria-label="Chercher">
+      <button class="btn" id="gest-new">${gestTab === 'items' ? '+ Nouvel objet' : '+ Nouvelle recette'}</button>
+    </div>
+    ${gestTab === 'items'
+      ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
+          <button class="gest-card" data-item="${esc(id)}">
+            <span class="slot-ico">${itemIco(id)}</span>
+            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'}</small></span>
+          </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
+      : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
+          <button class="gest-card" data-recipe="${esc(id)}">
+            <span class="slot-ico">${itemIco(Object.keys(r.gives)[0])}</span>
+            <span><b>${esc(r.name)}</b><small>${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'}</small></span>
+          </button>`).join('')}</div>` : `<p class="note">${Object.keys(G.ITEMS).length ? 'Aucune recette. Crée la première avec « + Nouvelle recette ».' : 'Crée d’abord des objets : une recette transforme des objets en d’autres objets.'}</p>`}`;
+}
+$('v-gest').addEventListener('input', (e) => {
+  if (e.target.id !== 'gest-q') return;
+  gestQuery = e.target.value;
+  const pos = e.target.selectionStart;
+  renderGestion();
+  const inp = $('gest-q');
+  inp.focus();
+  inp.setSelectionRange(pos, pos);
+});
+$('v-gest').addEventListener('click', (e) => {
+  const gt = e.target.closest('[data-gt]')?.dataset.gt;
+  if (gt) {
+    gestTab = gt;
+    return renderGestion();
+  }
+  if (e.target.closest('#gest-new')) return gestTab === 'items' ? openItemEdit() : openRecipeEdit();
+  const it = e.target.closest('[data-item]')?.dataset.item;
+  if (it) return openItemEdit(it);
+  const rc = e.target.closest('[data-recipe]')?.dataset.recipe;
+  if (rc) return openRecipeEdit(rc);
+});
+async function gestCall(op, payload, dialog) {
+  setBusy(1);
+  try {
+    const out = await API.staff(op, payload);
+    if (out.catalog) G.setCatalog(out.catalog);
+    if (dialog) closeDialog(dialog);
+    renderAll();
+    toast(esc(out.toast));
+    return out;
+  } catch (err) {
+    toast(esc(err.message));
+    return null;
+  } finally {
+    setBusy(-1);
+  }
+}
+
+/* Objet */
+function openItemEdit(id = null) {
+  itemDraftId = id;
+  itemDraft = structuredClone(id ? G.itemOf(id) : { name: '', kind: 'mat', value: 0, desc: '', img: null });
+  $('it-title').textContent = id ? 'Modifier l’objet' : 'Nouvel objet';
+  $('it-name').value = itemDraft.name;
+  $('it-kind').innerHTML = Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === itemDraft.kind ? 'selected' : ''}>${l}</option>`).join('');
+  $('it-value').value = itemDraft.value;
+  $('it-desc').value = itemDraft.desc;
+  $('it-url').value = '';
+  $('it-del').hidden = !id;
+  $('it-err').textContent = '';
+  showItemImg();
+  openDialog('d-item');
+}
+function showItemImg() {
+  $('it-preview').innerHTML = itemDraft.img ? `<img src="${esc(itemDraft.img)}" alt="">` : ico(KIND_ICON[$('it-kind').value] ?? 237);
+  $('it-noimg').hidden = !itemDraft.img;
+}
+$('it-kind').addEventListener('change', showItemImg);
+$('it-pick').addEventListener('click', () => $('it-file').click());
+$('it-file').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f?.type.startsWith('image/')) return;
+  if (f.size > 2 * 1024 * 1024) return void ($('it-err').textContent = 'Image trop lourde (2 Mo maximum).');
+  itemDraft.img = await readAsDataUrl(f);
+  showItemImg();
+});
+$('it-url-go').addEventListener('click', () => {
+  const v = $('it-url').value.trim();
+  if (!/^https?:\/\//.test(v)) return void ($('it-err').textContent = 'Le lien doit commencer par http:// ou https://');
+  itemDraft.img = v;
+  showItemImg();
+});
+$('it-noimg').addEventListener('click', () => {
+  itemDraft.img = null;
+  showItemImg();
+});
+$('it-save').addEventListener('click', () => {
+  const item = { name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, desc: $('it-desc').value, img: itemDraft.img };
+  if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');
+  gestCall('item.save', { id: itemDraftId, item }, $('d-item'));
+});
+$('it-del').addEventListener('click', () => {
+  if (confirm(`Supprimer « ${G.itemOf(itemDraftId).name} » ? Les joueurs qui l’ont le verront comme « Objet supprimé ».`)) gestCall('item.delete', { id: itemDraftId }, $('d-item'));
+});
+
+/* Recette */
+const UNITS = { 1: 'secondes', 60: 'minutes', 3600: 'heures', 86400: 'jours' };
+function openRecipeEdit(id = null) {
+  if (!Object.keys(G.ITEMS).length) return toast('Crée d’abord des objets.');
+  recipeDraftId = id;
+  const first = Object.keys(G.ITEMS)[0];
+  recipeDraft = structuredClone(id ? G.RECIPES[id] : { name: '', job: null, lvl: 1, seconds: 3600, needs: {}, gives: { [first]: 1 }, desc: '' });
+  $('rc-title').textContent = id ? 'Modifier la recette' : 'Nouvelle recette';
+  $('rc-del').hidden = !id;
+  $('rc-err').textContent = '';
+  renderRecipeEdit();
+  openDialog('d-recipe');
+}
+function renderRecipeEdit() {
+  const r = recipeDraft;
+  const unit = [86400, 3600, 60, 1].find((u) => r.seconds && r.seconds % u === 0) || 60;
+  const opts = (sel) => Object.entries(G.ITEMS).sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([k, it]) => `<option value="${esc(k)}" ${k === sel ? 'selected' : ''}>${esc(it.name)}</option>`).join('');
+  const rows = (list, kind) => Object.entries(list).map(([k, q], i) => `
+    <div class="rc-row" data-kind="${kind}" data-i="${i}">
+      <span class="se-ico">${itemIco(k)}</span>
+      <select data-f="k" aria-label="Objet">${opts(k)}</select>
+      <input data-f="q" type="number" min="1" value="${q}" aria-label="Quantité">
+      <button type="button" class="close sm-close" data-rc-del="${kind}:${esc(k)}" aria-label="Retirer">×</button>
+    </div>`).join('');
+  $('rc-body').innerHTML = `
+    <div class="form">
+      <div class="wide"><label for="rc-name">Nom de la recette</label><input id="rc-name" value="${esc(r.name)}" maxlength="60"></div>
+      <div><label for="rc-job">Métier</label><select id="rc-job"><option value="">Tous les métiers</option>${Object.entries(JOBS).map(([k, j]) => `<option value="${k}" ${r.job === k ? 'selected' : ''}>${j.name}</option>`).join('')}</select></div>
+      <div><label for="rc-lvl">Maîtrise requise</label><select id="rc-lvl" ${r.job ? '' : 'disabled'}>${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label for="rc-time">Temps de fabrication</label><div class="rc-time"><input id="rc-time" type="number" min="0" value="${r.seconds / unit}"><select id="rc-unit">${Object.entries(UNITS).map(([u, l]) => `<option value="${u}" ${+u === unit ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      <div class="wide"><label for="rc-desc">Description (facultative)</label><input id="rc-desc" value="${esc(r.desc)}" maxlength="400"></div>
+    </div>
+    <h3 class="ed-h">Ingrédients</h3>
+    <div class="se-items">${rows(r.needs, 'needs') || '<p class="note">Aucun ingrédient.</p>'}</div>
+    <button type="button" class="btn sm ghost" data-rc-add="needs">+ Ajouter un ingrédient</button>
+    <h3 class="ed-h">Résultat</h3>
+    <div class="se-items">${rows(r.gives, 'gives')}</div>
+    <button type="button" class="btn sm ghost" data-rc-add="gives">+ Ajouter un objet produit</button>`;
+}
+function readRecipeEdit() {
+  const r = recipeDraft;
+  r.name = $('rc-name').value;
+  r.job = $('rc-job').value || null;
+  r.lvl = +$('rc-lvl').value || 1;
+  r.seconds = Math.round((+$('rc-time').value || 0) * +$('rc-unit').value);
+  r.desc = $('rc-desc').value;
+  for (const kind of ['needs', 'gives']) {
+    const next = {};
+    document.querySelectorAll(`#rc-body .rc-row[data-kind="${kind}"]`).forEach((row) => {
+      const k = row.querySelector('[data-f=k]').value, q = Math.max(1, Math.round(+row.querySelector('[data-f=q]').value || 1));
+      next[k] = (next[k] || 0) + q;
+    });
+    r[kind] = next;
+  }
+}
+$('d-recipe').addEventListener('change', (e) => {
+  if (e.target.closest('#rc-body')) {
+    readRecipeEdit();
+    renderRecipeEdit();
+  }
+});
+$('d-recipe').addEventListener('click', (e) => {
+  const add = e.target.closest('[data-rc-add]')?.dataset.rcAdd;
+  if (add) {
+    readRecipeEdit();
+    const free = Object.keys(G.ITEMS).find((k) => !recipeDraft[add][k]) || Object.keys(G.ITEMS)[0];
+    recipeDraft[add][free] = (recipeDraft[add][free] || 0) + 1;
+    return renderRecipeEdit();
+  }
+  const del = e.target.closest('[data-rc-del]')?.dataset.rcDel;
+  if (del) {
+    readRecipeEdit();
+    const [kind, k] = del.split(':');
+    delete recipeDraft[kind][k];
+    renderRecipeEdit();
+  }
+});
+$('rc-save').addEventListener('click', () => {
+  readRecipeEdit();
+  if (!recipeDraft.name.trim()) return void ($('rc-err').textContent = 'Donne un nom à la recette.');
+  if (!Object.keys(recipeDraft.gives).length) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet.');
+  gestCall('recipe.save', { id: recipeDraftId, recipe: recipeDraft }, $('d-recipe'));
+});
+$('rc-del').addEventListener('click', () => {
+  if (confirm(`Supprimer la recette « ${G.RECIPES[recipeDraftId].name} » ?`)) gestCall('recipe.delete', { id: recipeDraftId }, $('d-recipe'));
+});
+
 /* ═══ Onglets, écrans, rendu ═════════════════════════════════════════════ */
-const RENDER = [renderPerso, renderTech, renderInv, renderJob, renderMjTab, renderNav, renderShop];
+const RENDER = [renderPerso, renderTech, renderInv, renderJob, renderMjTab, renderNav, renderShop, renderGestion];
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(tab) {
   tabs.forEach((t) => {
@@ -1481,6 +1644,22 @@ tabs.forEach((t, i) => {
   });
 });
 function renderAll() {
+  const has = !!S;
+  $('no-fiche').hidden = has;
+  document.querySelector('#s-fiche .hero').hidden = !has;
+  document.querySelector('#s-fiche .log').hidden = !has;
+  $('scr-gest').hidden = !ME?.staff;
+  if (!has) {
+    $('no-fiche').innerHTML = `<div class="no-shop">${ico(233)}<h2>Pas encore de fiche</h2>
+      <p class="note">Un MJ doit d’abord t’enregistrer avec la commande <code>/register</code>.</p>
+      ${ME?.staff ? '<p class="note">Tu fais partie du staff : tu peux quand même ouvrir la fiche d’un joueur (Mode MJ, en bas) ou gérer les objets et recettes (Gestion).</p>' : ''}</div>`;
+    $('purse').innerHTML = '';
+    renderGestion();
+    renderNav();
+    if (!S) $('v-shop').innerHTML = `<div class="no-shop">${ico(265)}<h2>Boutique fermée pour toi</h2><p class="note">Il faut une fiche pour acheter et vendre.</p></div>`;
+    paintStatic();
+    return;
+  }
   renderHero();
   RENDER.forEach((f) => f());
   paintStatic();
@@ -1508,20 +1687,32 @@ function showScreen(name) {
 }
 scrBtns.forEach((b) => b.addEventListener('click', () => showScreen(b.dataset.screen)));
 
-/** Rafraîchit la boutique et la navigation du salon (achats et événements des autres joueurs). */
+/**
+ * Rafraîchit la boutique et la navigation du salon (achats et événements des autres joueurs).
+ * Pour le staff, vérifie aussi si /edit profil a demandé d'ouvrir une fiche : l'Activity
+ * peut être déjà ouverte, et Discord ne la relance pas dans ce cas.
+ */
+let refreshing = false;
 async function refresh() {
-  if (API.mode !== 'discord' || VIEW || busy || document.hidden) return;
+  if (API.mode !== 'discord' || busy || refreshing || document.hidden) return;
+  refreshing = true;
   try {
     const st = await API.state();
+    G.setCatalog(st.catalog);
+    if (st.openDenied) toast(OPEN_DENIED);
+    if (st.open && ME.staff) return void (await openPlayer(st.open, { tab: 't-mj' }));
     if (busy || VIEW) return;
     S = st.player;
     SHOP = st.shop;
-    NAV = st.nav;
     if (screen === 'nav') renderNav();
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
     renderHero();
+    renderMjTab();
     paintStatic();
-  } catch {}
+  } catch {
+  } finally {
+    refreshing = false;
+  }
 }
 
 /* ═══ Démarrage ══════════════════════════════════════════════════════════ */
@@ -1530,10 +1721,10 @@ async function refresh() {
   let st;
   try {
     st = await API.boot();
+    G.setCatalog(st.catalog);
     ME = st.me;
     S = st.player;
     SHOP = st.shop;
-    NAV = st.nav;
     CHNAME = st.channelName || '';
   } catch (err) {
     console.error(err);
@@ -1551,7 +1742,13 @@ async function refresh() {
   $('boot').hidden = true;
   // Ouverte avec /edit profil : directement sur la fiche du joueur, onglet Édition MJ
   if (st.open && ME.staff) await openPlayer(st.open, { tab: 't-mj' });
-  setInterval(() => screen !== 'fiche' && refresh(), 10_000);
+  if (st.openDenied) toast(OPEN_DENIED);
+  // Boutique et navigation : toutes les 10 s. Staff : toutes les 5 s (pour /edit profil).
+  let tick = 0;
+  setInterval(() => {
+    tick++;
+    if (ME.staff || (screen !== 'fiche' && tick % 2 === 0)) refresh();
+  }, 5_000);
   document.addEventListener('visibilitychange', () => !document.hidden && refresh());
 })();
 

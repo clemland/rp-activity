@@ -16,6 +16,7 @@
     <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
     <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
     <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
+    <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
   </div>
   <div class="wallet-chips">
     <span class="chip purse" title="Ta bourse"><span class="ico" data-i="261"></span><span class="money" id="purse"></span></span>
@@ -24,6 +25,7 @@
 
 <main class="screen" id="s-fiche" role="tabpanel">
   <div class="mj-banner" id="mj-banner" hidden></div>
+  <section class="sheet no-fiche" id="no-fiche" hidden></section>
   <section class="hero" aria-label="Identité">
     <div class="portrait" id="portrait" role="button" tabindex="0" aria-label="Changer la photo du personnage"></div>
     <div class="who">
@@ -72,6 +74,10 @@
 
 <main class="screen" id="s-nav" role="tabpanel" hidden>
   <section class="voyage" id="v-nav"></section>
+</main>
+
+<main class="screen" id="s-gest" role="tabpanel" hidden>
+  <section class="sheet" id="v-gest"></section>
 </main>
 
 <footer>
@@ -144,6 +150,58 @@
       <div class="form-actions">
         <button type="button" class="btn ghost" data-close>Annuler</button>
         <button type="button" class="btn" id="se-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-item" aria-labelledby="it-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="it-title">Nouvel objet</h2><p>Il pourra être vendu, donné, fabriqué ou utilisé dans une recette.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div class="form">
+        <div class="wide"><label for="it-name">Nom</label><input id="it-name" maxlength="60"></div>
+        <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
+        <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
+        <div class="wide"><label for="it-desc">Description</label><input id="it-desc" maxlength="400"></div>
+      </div>
+      <div class="se-face">
+        <div class="face it-preview" id="it-preview"></div>
+        <div class="se-face-ctl">
+          <b>Image de l’objet (facultative)</b>
+          <div class="se-row"><button type="button" class="btn sm" id="it-pick">Choisir une image</button><input type="file" id="it-file" accept="image/*" hidden><button type="button" class="btn sm ghost" id="it-noimg" hidden>Retirer</button></div>
+          <div class="ph-url-row"><input type="url" id="it-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="it-url-go">Utiliser</button></div>
+          <p class="note" style="margin:0">Sans image, une icône est choisie selon la catégorie. Seules les armes s’équipent. La valeur sert au prix de revente.</p>
+        </div>
+      </div>
+      <p class="err" id="it-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="it-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="it-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-recipe" aria-labelledby="rc-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="rc-title">Nouvelle recette</h2><p>Les ingrédients sont pris au lancement ; le résultat se récupère une fois le temps écoulé.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="rc-body"></div>
+      <p class="err" id="rc-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="rc-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="rc-save">Enregistrer</button>
       </div>
     </div>
   </div>

@@ -1007,3 +1007,33 @@ body.busy{cursor:progress}
 .mj-tools{display:grid;gap:10px;border:3px solid var(--ink);border-radius:8px;padding:12px 14px;background:#fbf0d2}
 .linklike{background:none;border:none;padding:0;font:inherit;font-weight:800;color:var(--sea);text-decoration:underline;cursor:pointer}
 @media (max-width:560px){.val-card{grid-template-columns:1fr}}
+
+/* ═══ v22 : atelier, gestion, sans fiche ═════════════ */
+.ico.item-img{background:none;display:inline-grid;place-items:center;overflow:hidden}
+.ico.item-img img{width:100%;height:100%;object-fit:contain;display:block}
+.no-fiche{min-height:280px;display:grid;place-items:center}
+.no-fiche .ico,.no-shop .ico{--s:56px}
+.craft-now{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;margin-top:16px;border:3px solid var(--ink);border-radius:10px;padding:12px 14px;background:#fff7e0;box-shadow:4px 4px 0 rgba(23,37,94,.25)}
+.craft-now.ready{background:#e9f7ea;border-color:#1d7a3a}
+.craft-info{display:grid;gap:4px}
+.craft-gives{display:flex;flex-direction:column;gap:6px}
+.craft-acts{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.recipes{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.recipes .recipe{margin-top:0}
+.recipes .recipe h3{margin:0}
+.recipes .recipe .note{margin:2px 0 8px}
+.recipe.locked{opacity:.75}
+.gest-search{max-width:280px}
+.gest-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-top:12px}
+.gest-card{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;text-align:left;border:2px solid var(--ink);border-radius:8px;background:#fbf0d2;padding:8px 10px;cursor:pointer;font:inherit;color:inherit;transition:transform .12s}
+.gest-card:hover{transform:translateY(-2px);background:#fff6dc}
+.gest-card .slot-ico{width:52px;height:52px}
+.gest-card .slot-ico .ico{--s:40px}
+.gest-card small{display:block;color:var(--muted);font-size:13px}
+.it-preview .ico{--s:56px}
+.rc-row{display:grid;grid-template-columns:34px minmax(0,1fr) 90px 32px;gap:8px;align-items:center}
+.rc-row select,.rc-row input{width:100%;min-width:0;font:inherit;font-size:15px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:4px 6px}
+.rc-time{display:grid;grid-template-columns:1fr 1.2fr;gap:6px}
+.nav-soon{text-align:center;padding:40px 20px}
+@media (max-width:620px){.craft-now{grid-template-columns:1fr}.recipes,.gest-grid{grid-template-columns:1fr}}
+.voyage:has(.nav-soon){display:block;max-width:720px;margin:0 auto}

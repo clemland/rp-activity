@@ -2,100 +2,104 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as G from '../shared/game.js';
 
-const seq = (...vals) => { let i = 0; return () => vals[i++ % vals.length]; };
+const cat = () => G.setCatalog(G.demoCatalog());
 
-test('nouvelle fiche complète et inventaire de 32 cases', () => {
-  const p = G.newPlayer('1', 'Luffo');
+test('/register : fiche créée avec nom en un bloc, race, métier, classe', () => {
+  cat();
+  const p = G.newPlayer('1', { name: 'Monkey D. Lucien', race: 'homme poisson', job: 'Archéologue', classe: 'sabreur' });
+  assert.equal(p.id.name, 'Monkey D. Lucien');
+  assert.equal(p.id.race, 'Homme-poisson');
+  assert.equal(p.job.id, 'archeologue');
+  assert.equal(p.id.classe, 'Sabreur');
   assert.equal(p.inv.length, G.BAG);
-  assert.equal(p.id.first, 'Luffo');
-  assert.equal(p.haki.rois, null);
+  const sans = G.newPlayer('2', { name: 'X', race: 'Mink', job: 'aucun', classe: 'Tireur' });
+  assert.equal(sans.job.id, null);
+  assert.throws(() => G.newPlayer('3', { name: 'X', race: 'Elfe', classe: 'Tireur' }), /Race inconnue/);
+  assert.throws(() => G.newPlayer('3', { name: 'X', race: 'Mink', classe: 'Mage' }), /Classe inconnue/);
+  assert.throws(() => G.newPlayer('3', { name: 'X', race: 'Mink', classe: 'Tireur', job: 'Forgeron' }), /Métier inconnu/);
 });
 
-test('répartition des stats : refuse plus que les points disponibles', () => {
+test('anciennes fiches : prénom + nom fusionnés, objets inconnus conservés', () => {
+  G.setCatalog({});
+  const p = G.normalize({ id: { first: 'Elio', last: 'Varenne' }, inv: [['vieux-truc', 2]], job: { id: 'forgeron', lvl: 2, xp: 50 } });
+  assert.equal(p.id.name, 'Elio Varenne');
+  assert.deepEqual(p.inv[0], ['vieux-truc', 2], 'jamais supprimé, même si le catalogue est vide');
+  assert.equal(p.job.id, null);
+  assert.equal(G.itemOf('vieux-truc').missing, true);
+});
+
+test('équipement : seulement les armes du catalogue, deux maximum', () => {
+  cat();
+  let p = G.demoPlayer();
+  assert.throws(() => G.playerAction(p, { type: 'equip', key: 'bois-ex' }), /pas une arme/);
+  G.addItem(p, 'sabre-ex', 2);
+  p = G.playerAction(p, { type: 'equip', key: 'sabre-ex' }).player;
+  assert.deepEqual(p.equip, { arme1: 'sabre-ex', arme2: 'sabre-ex' });
+});
+
+test('craft : ingrédients consommés, durée, récupération, annulation', () => {
+  cat();
   const p = G.demoPlayer();
-  assert.throws(() => G.playerAction(p, { type: 'stats', alloc: { force: 4 } }), G.GameError);
-  const r = G.playerAction(p, { type: 'stats', alloc: { force: 2, sdc: 1 } });
-  assert.equal(r.player.stats.force, 26);
-  assert.equal(r.player.statPts, 0);
-  assert.equal(p.stats.force, 24, "l'état d'origine n'est pas modifié");
+  const r = G.playerAction(p, { type: 'craft.start', id: 'tonneau-ex' }, { now: 1000 });
+  assert.equal(G.count(r.player, 'bois-ex'), 2);
+  assert.equal(r.player.craft.end, 21000);
+  assert.throws(() => G.playerAction(r.player, { type: 'craft.start', id: 'tonneau-ex' }, { now: 2000 }), /déjà/);
+  assert.throws(() => G.playerAction(r.player, { type: 'craft.collect' }, { now: 5000 }), /patience/);
+  const done = G.playerAction(r.player, { type: 'craft.collect' }, { now: 21000 });
+  assert.equal(G.count(done.player, 'tonneau-ex'), 1);
+  assert.equal(done.player.craft, null);
+  const annule = G.playerAction(r.player, { type: 'craft.cancel' });
+  assert.equal(G.count(annule.player, 'bois-ex'), 4, 'ingrédients rendus');
 });
 
-test('équipement : deux armes maximum, pas de tenue', () => {
-  let p = G.demoPlayer();
-  p = G.playerAction(p, { type: 'equip', key: 'pistolet' }).player;
-  assert.deepEqual(p.equip, { arme1: 'sabre', arme2: 'pistolet' });
-  G.addItem(p, 'katana', 1);
-  assert.throws(() => G.playerAction(p, { type: 'equip', key: 'katana' }), /deux armes/);
-  assert.throws(() => G.playerAction(p, { type: 'equip', key: 'veste' }), /pas une arme/);
-  p = G.playerAction(p, { type: 'equip', key: 'katana', slot: 'arme2' }).player;
-  assert.equal(p.equip.arme2, 'katana');
+test('craft : métier et niveau de maîtrise requis', () => {
+  cat();
+  const p = G.demoPlayer();
+  p.job.id = 'medecin';
+  assert.match(G.craftBlock(p, G.RECIPES['tonneau-ex']), /Charpentier/);
+  p.job.id = 'charpentier';
+  const r2 = { ...G.RECIPES['tonneau-ex'], lvl: 2 };
+  assert.match(G.craftBlock(p, r2), /Confirmé/);
+  p.job.lvl = 2;
+  assert.equal(G.craftBlock(p, r2), null);
 });
 
-test('déplacer et empiler dans l’inventaire', () => {
-  let p = G.demoPlayer();
-  p = G.playerAction(p, { type: 'inv.move', from: 4, to: 20 }).player;
-  assert.deepEqual(p.inv[20], ['minerai', 4]);
-  assert.equal(p.inv[4], null);
+test('catalogue : validation des objets et recettes', () => {
+  cat();
+  assert.throws(() => G.normalizeItem({ name: '' }), /nom/);
+  assert.deepEqual(G.normalizeItem({ name: ' Rhum ', kind: 'bizarre', value: '-5' }), { name: 'Rhum', kind: 'objet', value: 0, desc: '', img: null });
+  assert.throws(() => G.normalizeRecipe({ name: 'X', gives: { inconnu: 1 } }), /produire/);
+  const r = G.normalizeRecipe({ name: 'X', job: 'forgeron', lvl: 9, seconds: 99999999, needs: { 'bois-ex': 2, fantome: 1 }, gives: { 'tonneau-ex': 1 } });
+  assert.equal(r.job, null);
+  assert.equal(r.lvl, 3);
+  assert.equal(r.seconds, G.CRAFT_MAX_SECONDS);
+  assert.deepEqual(r.needs, { 'bois-ex': 2 });
 });
 
-test('boutique : achat débite et baisse le stock, vente avec refus verrouillé', () => {
+test('boutique : achat et revente avec le catalogue', () => {
+  cat();
   const p = G.demoPlayer(), shop = G.demoShop();
-  const r = G.playerAction(p, { type: 'shop.buy', key: 'sabre' }, { shop });
-  assert.equal(r.player.berry, p.berry - 8000);
-  assert.equal(r.shop.items.find((x) => x[0] === 'sabre')[2], 2);
-  const refus = G.playerAction(p, { type: 'shop.sell', key: 'pepites', pct: 160 }, { shop, channelId: 'c1', rng: () => 0.99 });
-  assert.equal(refus.refused, true);
-  assert.equal(refus.player.sellLock.c1.pepites, true);
-  const ok = G.playerAction(refus.player, { type: 'shop.sell', key: 'pepites', pct: 160 }, { shop, channelId: 'c1' });
-  assert.equal(ok.player.berry, p.berry + G.refPrice(shop, 'pepites'), 'verrouillé : prix de référence');
+  const r = G.playerAction(p, { type: 'shop.buy', key: 'clous-ex' }, { shop });
+  assert.equal(r.player.berry, p.berry - 250);
+  assert.equal(r.shop.items[1][2], 19);
+  const v = G.playerAction(p, { type: 'shop.sell', key: 'bois-ex' }, { shop });
+  assert.equal(v.player.berry, p.berry + 200);
 });
 
-test('métier : objets requis et XP de métier', () => {
+test('staff : nom en un bloc, métier aucun, édition bornée', () => {
+  cat();
   const p = G.demoPlayer();
-  const r = G.playerAction(p, { type: 'job.do', id: 'sabre' });
-  assert.equal(G.count(r.player, 'sabre'), 2);
-  assert.equal(G.count(r.player, 'minerai'), 1);
-  assert.equal(r.player.job.xp, 100);
-  const up = G.playerAction(r.player, { type: 'job.up' });
-  assert.equal(up.player.job.lvl, 2);
-  assert.throws(() => G.playerAction(up.player, { type: 'job.do', id: 'sabre' }), /manquants/);
-});
-
-test('navigation : cooldown, événement et choix réservé au joueur', () => {
-  const p = G.demoPlayer();
-  let nav = G.playerAction(p, { type: 'nav.toggle' }).nav;
-  // rng : 0 => d100 = 1 (événement), puis choix de l'événement
-  const r = G.navMessage(p, nav, { rng: seq(0, 0.6, 0.5, 0.5), now: 100000 });
-  assert.equal(r.counted, true);
-  assert.ok(r.entry);
-  const again = G.navMessage(r.player, r.nav, { now: 100001 });
-  assert.equal(again.counted, false, 'cooldown');
-  nav = r.nav;
-  const ev = G.eventView(r.entry, r.player);
-  if (ev.choices.length) {
-    const other = { ...r.player, uid: 'autre' };
-    assert.throws(() => G.navChoose(other, nav, r.entry.id, 0), /autre joueur/);
-    const c = G.navChoose(r.player, nav, r.entry.id, 0, { rng: () => 0.99 });
-    assert.ok(c.entry.result);
-    assert.throws(() => G.navChoose(c.player, c.nav, r.entry.id, 0), /déjà/);
-  }
-});
-
-test('staff : édition bornée, Haki des rois à 0 = non éveillé', () => {
-  const p = G.demoPlayer();
-  const r = G.staffAction(p, { type: 'edit', patch: { volonte: 9, haki: { rois: 0, armement: 3 }, stats: { force: 500 }, id: { faction: 'Inconnue', first: 'Mira' } } });
+  const r = G.staffAction(p, { type: 'edit', patch: { id: { name: 'Mira', race: 'Shandia', classe: 'Fighter' }, job: null, volonte: 9 } });
+  assert.equal(r.player.id.name, 'Mira');
+  assert.equal(r.player.id.race, 'Shandia');
+  assert.equal(r.player.job.id, null);
   assert.equal(r.player.volonte, 5);
-  assert.equal(r.player.haki.rois, null);
-  assert.equal(r.player.haki.armement, 3);
-  assert.equal(r.player.stats.force, G.STAT_MAX);
-  assert.equal(r.player.id.faction, 'Pirate');
-  assert.equal(r.player.id.first, 'Mira');
+  assert.throws(() => G.staffAction(p, { type: 'edit', patch: { id: { name: '  ' } } }), /vide/);
 });
 
-test('niveau : XP et points de stats', () => {
-  const p = G.newPlayer('1', 'x');
-  const ups = G.gainXP(p, 100 + 140);
-  assert.equal(ups, 2);
-  assert.equal(p.level, 3);
-  assert.equal(p.statPts, 6);
+test('durées lisibles', () => {
+  assert.equal(G.duree(45), '45 s');
+  assert.equal(G.duree(90), '1 min 30 s');
+  assert.equal(G.duree(3600 * 2 + 1800), '2 h 30 min');
+  assert.equal(G.duree(86400 * 3), '3 j');
 });

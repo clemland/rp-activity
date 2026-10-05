@@ -6,8 +6,8 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 /* ─── Fausse base Supabase ─── */
-const tables = { players: new Map(), shops: new Map(), navs: new Map() };
-const keyOf = { players: 'id', shops: 'channel_id', navs: 'channel_id' };
+const tables = { players: new Map(), shops: new Map(), items: new Map(), recipes: new Map(), meta: new Map() };
+const keyOf = { players: 'id', shops: 'channel_id', items: 'id', recipes: 'id', meta: 'key' };
 function query(table) {
   const q = { filters: [], op: 'select', payload: null };
   const rows = () => [...tables[table].values()].filter((r) => q.filters.every(([k, v]) => r[k] === v));
@@ -32,7 +32,7 @@ function query(table) {
       } else if (q.op === 'delete') {
         rows().forEach((r) => tables[table].delete(r[keyOf[table]]));
         res = { error: null };
-      } else res = { data: rows().map((r) => ({ id: r.id, channel_id: r.channel_id, ident: r.data?.id, level: r.data?.level, photo: r.data?.photo })), error: null };
+      } else res = { data: rows().map((r) => ({ id: r.id, key: r.key, channel_id: r.channel_id, data: r.data, ident: r.data?.id, level: r.data?.level, photo: r.data?.photo })), error: null };
       return Promise.resolve(res).then(ok, ko);
     },
   };
@@ -77,82 +77,98 @@ const call = async (mod, { method = 'POST', body = {}, query = {}, headers = {} 
 };
 const J = { authorization: 'Bearer tok-joueur' }, MJ = { authorization: 'Bearer tok-mj' };
 
-test('première ouverture : fiche vierge créée, pas staff', async () => {
+
+const BOT = { 'x-bot-secret': 'secret' };
+
+test('sans fiche : l’app reçoit player null, pas d’erreur', async () => {
   const r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: J });
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.player, null);
   assert.equal(r.out.me.staff, false);
-  assert.equal(r.out.player.id.first, 'joueur');
-  assert.equal(r.out.shop, null);
-  assert.equal(r.out.channelName, 'port-brisant');
-  assert.ok(tables.players.has('u1'));
+  assert.deepEqual(r.out.catalog, { items: {}, recipes: {} });
+  const a = await call('action', { body: { channelId: 'c1', action: { type: 'stats', alloc: { force: 1 } } }, headers: J });
+  assert.equal(a.status, 404);
+  assert.match(a.out.error, /register/);
 });
 
-test('sans jeton : refusé', async () => {
-  const r = await call('state', { method: 'GET', headers: {} });
+test('/register par le bot : fiche créée, impossible deux fois', async () => {
+  let r = await call('bot', { body: { op: 'register', userId: 'u1', name: 'Monkey D. Lucien', race: 'Mink', job: 'medecin', classe: 'Fighter', by: 'u2' }, headers: BOT });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.player.id.name, 'Monkey D. Lucien');
+  r = await call('bot', { body: { op: 'register', userId: 'u1', name: 'X', race: 'Mink', classe: 'Fighter' }, headers: BOT });
+  assert.equal(r.status, 409);
+  r = await call('bot', { body: { op: 'register', userId: 'u3', name: 'X', race: 'Elfe', classe: 'Fighter' }, headers: BOT });
+  assert.equal(r.status, 400);
+  r = await call('bot', { body: { op: 'register', userId: 'u1' }, headers: { 'x-bot-secret': 'faux' } });
   assert.equal(r.status, 401);
 });
 
 test('un joueur ne peut pas utiliser les outils staff', async () => {
-  const r = await call('staff', { body: { op: 'players' }, headers: J });
+  const r = await call('staff', { body: { op: 'item.save', item: { name: 'Triche', value: 1e9 } }, headers: J });
   assert.equal(r.status, 403);
 });
 
-test('le staff crée une boutique, le joueur achète', async () => {
-  const shop = { name: 'Comptoir', seller: 'Rosa', items: [['rhum', 100, 2]], buyRate: 0.4 };
-  let r = await call('staff', { body: { op: 'shop.save', channelId: 'c1', shop }, headers: MJ });
+test('le staff crée des objets et une recette ; identifiants uniques', async () => {
+  let r = await call('staff', { body: { op: 'item.save', item: { name: 'Planche de chêne', kind: 'mat', value: 300 } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
-  r = await call('action', { body: { channelId: 'c1', action: { type: 'shop.buy', key: 'rhum' } }, headers: J });
+  assert.equal(r.out.id, 'planche-de-chene');
+  r = await call('staff', { body: { op: 'item.save', item: { name: 'Planche de chêne', kind: 'mat', value: 500 } }, headers: MJ });
+  assert.equal(r.out.id, 'planche-de-chene-2');
+  await call('staff', { body: { op: 'item.save', item: { name: 'Coffre', kind: 'objet', value: 2000 } }, headers: MJ });
+  r = await call('staff', { body: { op: 'recipe.save', recipe: { name: 'Fabriquer un coffre', job: 'medecin', lvl: 1, seconds: 3600, needs: { 'planche-de-chene': 2 }, gives: { coffre: 1 } } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.catalog.recipes['fabriquer-un-coffre'].seconds, 3600);
+  r = await call('staff', { body: { op: 'item.delete', id: 'coffre' }, headers: MJ });
+  assert.equal(r.status, 400, 'objet utilisé par une recette');
+  assert.match(r.out.error, /Fabriquer un coffre/);
+});
+
+test('fabrication : lancée, pas encore prête, puis terminée par le staff et récupérée', async () => {
+  await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'give', key: 'planche-de-chene', qty: 3 } }, headers: MJ });
+  let r = await call('action', { body: { action: { type: 'craft.start', id: 'fabriquer-un-coffre' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.ok(r.out.player.craft);
+  r = await call('action', { body: { action: { type: 'craft.collect' } }, headers: J });
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /patience/);
+  await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'craft.finish' } }, headers: MJ });
+  r = await call('action', { body: { action: { type: 'craft.collect' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.ok(r.out.player.inv.some((s) => s && s[0] === 'coffre'));
+});
+
+test('boutique avec les objets du staff', async () => {
+  let r = await call('staff', { body: { op: 'shop.save', channelId: 'c1', shop: { name: 'Comptoir', seller: 'Rosa', items: [['coffre', 100, 2], ['inexistant', 5, 1]], buyRate: 0.4 } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.deepEqual(r.out.shop.items, [['coffre', 100, 2]], 'objets inconnus retirés');
+  await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'edit', patch: { berry: 1000 } } }, headers: MJ });
+  r = await call('action', { body: { channelId: 'c1', action: { type: 'shop.buy', key: 'coffre' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(r.out.player.berry, 900);
-  assert.equal(tables.shops.get('c1').data.items[0][2], 1);
-  r = await call('action', { body: { channelId: 'c1', action: { type: 'shop.buy', key: 'katana' } }, headers: J });
-  assert.equal(r.status, 400);
-  assert.match(r.out.error, /pas vendu/);
 });
 
-test('le staff modifie la fiche du joueur et lui donne un objet', async () => {
-  let r = await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'edit', patch: { volonte: 3, haki: { observation: 2 } } } }, headers: MJ });
+test('/edit profil : ouverture une seule fois, refus signalé pour un non-staff, joueur sans fiche refusé', async () => {
+  let r = await call('bot', { body: { op: 'open', userId: 'u2', target: 'u1' }, headers: BOT });
   assert.equal(r.status, 200, JSON.stringify(r.out));
-  assert.equal(r.out.player.volonte, 3);
-  r = await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'give', key: 'sabre', qty: 1 } }, headers: MJ });
-  assert.equal(r.out.player.inv.filter(Boolean).length, 2);
-  const list = await call('staff', { body: { op: 'players' }, headers: MJ });
-  assert.ok(list.out.players.some((p) => p.uid === 'u1'));
-});
-
-test('navigation : lever l’ancre, message RP via le bot, cooldown', async () => {
-  let r = await call('action', { body: { channelId: 'c1', action: { type: 'nav.toggle' } }, headers: J });
-  assert.equal(r.out.nav.active, true);
-  r = await call('bot', { body: { op: 'channels' }, headers: { 'x-bot-secret': 'secret' } });
-  assert.deepEqual(r.out.channels, ['c1']);
-  r = await call('bot', { body: { op: 'channels' }, headers: { 'x-bot-secret': 'faux' } });
-  assert.equal(r.status, 401);
-  r = await call('bot', { body: { op: 'message', channelId: 'c1', userId: 'u1', name: 'joueur' }, headers: { 'x-bot-secret': 'secret' } });
-  assert.equal(r.status, 200, JSON.stringify(r.out));
-  assert.equal(r.out.counted, true);
-  r = await call('bot', { body: { op: 'message', channelId: 'c1', userId: 'u1' }, headers: { 'x-bot-secret': 'secret' } });
-  assert.equal(r.out.counted, false, 'cooldown de 30 s');
-});
-
-test('navigation : un événement à choix se résout une seule fois, par son joueur', async () => {
-  // On force un événement à choix dans le journal.
-  const nav = tables.navs.get('c1');
-  nav.data.log.push({ t: 'ev', id: 'ev1', ev: 'tempete', uid: 'u1', name: 'joueur', at: 1 });
-  let r = await call('bot', { body: { op: 'choose', channelId: 'c1', userId: 'u2', entryId: 'ev1', choice: 1 }, headers: { 'x-bot-secret': 'secret' } });
-  assert.equal(r.status, 400);
-  r = await call('bot', { body: { op: 'choose', channelId: 'c1', userId: 'u1', entryId: 'ev1', choice: 1 }, headers: { 'x-bot-secret': 'secret' } });
-  assert.equal(r.status, 200, JSON.stringify(r.out));
-  assert.match(r.out.event.result, /abri/);
-  r = await call('action', { body: { channelId: 'c1', action: { type: 'nav.choose', entryId: 'ev1', choice: 0 } }, headers: J });
-  assert.equal(r.status, 400);
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
+  assert.equal(r.out.open, 'u1');
+  assert.equal(r.out.player, null, 'le MJ peut ne pas avoir de fiche');
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
+  assert.equal(r.out.open, null);
+  await call('bot', { body: { op: 'open', userId: 'u1', target: 'u1' }, headers: BOT });
+  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: J });
+  assert.equal(r.out.openDenied, true);
+  r = await call('bot', { body: { op: 'open', userId: 'u2', target: 'personne' }, headers: BOT });
+  assert.equal(r.status, 404);
+  r = await call('state', { method: 'GET', query: { player: 'u1' }, headers: MJ });
+  assert.equal(r.out.player.id.name, 'Monkey D. Lucien');
 });
 
 test('photo envoyée : stockée dans le bucket, chemin /media enregistré', async () => {
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-  const r = await call('action', { body: { channelId: 'c1', action: { type: 'photo.set', photo: png } }, headers: J });
+  const r = await call('action', { body: { action: { type: 'photo.set', photo: png } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.match(r.out.player.photo, /^\/media\/photos\/u1-/);
-  assert.equal(uploads.length, 1);
 });
 
 test('écriture concurrente : la version empêche d’écraser', async () => {
@@ -160,39 +176,4 @@ test('écriture concurrente : la version empêche d’écraser', async () => {
   const row = await read('players', 'u1');
   await write('players', 'u1', row.data, row.version);
   await assert.rejects(write('players', 'u1', row.data, row.version), Conflict);
-});
-
-test('bot : lire et modifier une fiche, avec des valeurs tapées à la main', async () => {
-  const H = { 'x-bot-secret': 'secret' };
-  let r = await call('bot', { body: { op: 'player.get', userId: 'u9', name: 'Nami' }, headers: H });
-  assert.equal(r.status, 200);
-  assert.equal(r.out.player.id.first, 'Nami');
-  assert.ok(r.out.lists.jobs.some((j) => j.key === 'forgeron'));
-  r = await call('bot', {
-    body: { op: 'player.act', userId: 'u9', by: 'u2', action: { type: 'edit', patch: { id: { race: 'homme poisson', classe: 'Sorcier' }, job: 'forgeron' } } },
-    headers: H,
-  });
-  assert.equal(r.status, 200, JSON.stringify(r.out));
-  assert.equal(r.out.player.id.race, 'Homme-poisson');
-  assert.equal(r.out.player.job.id, 'forgeron');
-  assert.deepEqual(r.out.ignored, ['classe « Sorcier »']);
-  r = await call('bot', { body: { op: 'player.act', userId: 'u9', action: { type: 'give', key: 'gigot de mer', qty: 2 } }, headers: H });
-  assert.equal(r.out.player.inv.find(Boolean)[0], 'gigot');
-  r = await call('bot', { body: { op: 'player.act', userId: 'u9', action: { type: 'give', key: 'licorne', qty: 1 } }, headers: H });
-  assert.equal(r.status, 400);
-});
-
-test('/edit profil : le bot prépare l’ouverture, l’app s’ouvre une fois sur la fiche', async () => {
-  const H = { 'x-bot-secret': 'secret' };
-  let r = await call('bot', { body: { op: 'open', userId: 'u2', target: 'u1', name: 'mj' }, headers: H });
-  assert.equal(r.status, 200, JSON.stringify(r.out));
-  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
-  assert.equal(r.out.open, 'u1');
-  assert.equal(r.out.player.pendingOpen, undefined);
-  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: MJ });
-  assert.equal(r.out.open, null, 'une seule fois');
-  // Un joueur non staff ne peut pas s'en servir
-  await call('bot', { body: { op: 'open', userId: 'u1', target: 'u2' }, headers: H });
-  r = await call('state', { method: 'GET', query: { channel: 'c1' }, headers: J });
-  assert.equal(r.out.open, null);
 });

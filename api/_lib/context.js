@@ -1,16 +1,18 @@
-/** Chargement commun : fiche du joueur, boutique et navigation du salon. */
-import { newPlayer, normalize, normalizeShop, newNav } from '../../shared/game.js';
-import { read, write } from './db.js';
+/** Chargement commun : fiche, boutique du salon, catalogue d'objets et de recettes. */
+import { normalize, normalizeShop, setCatalog } from '../../shared/game.js';
+import { read, readAll } from './db.js';
 import { channelName } from './discord.js';
+import { HttpError } from './http.js';
 
-/** Fiche du joueur ; créée (vierge) au premier passage. */
-export async function loadPlayer(uid, name) {
+/** Fiche du joueur, ou null s'il n'est pas encore enregistré (/register). */
+export async function findPlayer(uid) {
   const row = await read('players', uid);
-  if (row) return { player: normalize(row.data), version: row.version };
-  const player = newPlayer(uid, name);
-  await write('players', uid, player, null).catch(() => {}); // déjà créée par une autre requête : sans gravité
-  const again = await read('players', uid);
-  return { player: normalize(again?.data || player), version: again?.version ?? 1 };
+  return row ? { player: normalize(row.data), version: row.version } : null;
+}
+export async function loadPlayer(uid) {
+  const found = await findPlayer(uid);
+  if (!found) throw new HttpError(404, 'Pas encore de fiche : demande à un MJ de t’enregistrer avec /register.');
+  return found;
 }
 
 export async function loadShop(channelId) {
@@ -19,10 +21,12 @@ export async function loadShop(channelId) {
   return row ? { shop: normalizeShop(row.data), version: row.version } : { shop: null, version: null };
 }
 
-export async function loadNav(channelId) {
-  if (!channelId) return { nav: null, version: null };
-  const row = await read('navs', channelId);
-  return row ? { nav: row.data, version: row.version } : { nav: newNav(), version: null };
+/** Objets et recettes du staff ; à charger avant d'appliquer une règle du jeu. */
+export async function loadCatalog() {
+  const [items, recipes] = await Promise.all([readAll('items'), readAll('recipes')]);
+  const catalog = { items, recipes };
+  setCatalog(catalog);
+  return catalog;
 }
 
 export async function channelInfo(channelId) {
@@ -30,7 +34,4 @@ export async function channelInfo(channelId) {
 }
 
 /** Ce que voit le site : on ne renvoie pas les champs internes. */
-export const publicPlayer = (p) => {
-  const { navCd, pendingOpen, ...rest } = p;
-  return rest;
-};
+export const publicPlayer = (p) => p;

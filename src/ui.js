@@ -14,7 +14,7 @@ const pos = (id) => {
 };
 export const ico = (id) => `<span class="ico" aria-hidden="true" style="background-position:${pos(id)}"></span>`;
 export const pic = (key) => `<span class="ico pic pic-${key}" aria-hidden="true"></span>`;
-export const glyph = (g) => (typeof g === 'string' ? pic(g) : ico(g));
+export const glyph = (g) => (typeof g === 'string' ? (g.startsWith('<') ? g : pic(g)) : ico(g));
 export const paintStatic = (root = document) =>
   root.querySelectorAll('.ico[data-i]').forEach((el) => {
     el.style.backgroundPosition = pos(el.dataset.i);

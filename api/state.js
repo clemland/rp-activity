@@ -1,38 +1,37 @@
 /**
  * GET /api/state?channel=ID[&player=ID]
- * Tout ce qu'il faut pour afficher l'Activity : la fiche, la boutique et la
- * navigation du salon, et si l'utilisateur fait partie du staff.
- * Le staff peut demander la fiche d'un autre joueur (&player=ID).
+ * Tout ce qu'il faut pour afficher l'Activity : la fiche (ou null si le joueur
+ * n'est pas enregistré), la boutique du salon, le catalogue, et si
+ * l'utilisateur fait partie du staff. Le staff peut demander la fiche d'un
+ * autre joueur (&player=ID).
  */
 import { handler, need } from './_lib/http.js';
 import { userFromRequest, isStaff } from './_lib/discord.js';
-import { loadPlayer, loadShop, loadNav, channelInfo, publicPlayer } from './_lib/context.js';
-import { read, write, retry } from './_lib/db.js';
-import { normalize } from '../shared/game.js';
+import { findPlayer, loadShop, loadCatalog, channelInfo } from './_lib/context.js';
+import { read, remove } from './_lib/db.js';
 
 export default handler(['GET'], async (req) => {
   const me = await userFromRequest(req);
   const staff = await isStaff(me.uid);
   const channel = req.query.channel || null;
-  let player, open = null;
+  const [catalog, { shop }, info] = await Promise.all([loadCatalog(), loadShop(channel), channelInfo(channel)]);
+
+  let target = me.uid, open = null, openDenied = false;
   if (req.query.player && req.query.player !== me.uid) {
     need(staff, 403, 'Réservé au staff.');
-    const row = await read('players', req.query.player);
-    need(row, 404, 'Fiche introuvable.');
-    player = normalize(row.data);
+    target = req.query.player;
   } else {
-    player = (await loadPlayer(me.uid, me.name)).player;
     // /edit profil : le bot a demandé d'ouvrir la fiche d'un joueur (valable 2 minutes, une seule fois)
-    if (player.pendingOpen) {
-      if (staff && Date.now() - player.pendingOpen.at < 120_000) open = player.pendingOpen.target;
-      await retry(async () => {
-        const fresh = await loadPlayer(me.uid, me.name);
-        delete fresh.player.pendingOpen;
-        await write('players', me.uid, fresh.player, fresh.version);
-        player = fresh.player;
-      });
+    const pending = await read('meta', `open:${me.uid}`);
+    if (pending) {
+      await remove('meta', `open:${me.uid}`);
+      if (Date.now() - pending.data.at < 120_000) {
+        if (staff) open = pending.data.target;
+        else openDenied = true; // le bot l'a accepté mais le site ne reconnaît pas ce membre comme staff
+      }
     }
   }
-  const [{ shop }, { nav }, info] = await Promise.all([loadShop(channel), loadNav(channel), channelInfo(channel)]);
-  return { me: { uid: me.uid, name: me.name, staff }, player: publicPlayer(player), shop, nav, open, ...info };
+  const found = await findPlayer(target);
+  need(found || target === me.uid, 404, 'Ce joueur n’a pas de fiche.');
+  return { me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied, ...info };
 });

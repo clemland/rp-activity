@@ -21,13 +21,17 @@ async function call(method, path, body) {
 }
 
 /* ─── Mode démo : tout reste dans ce navigateur ─── */
-const KEY = 'op_rp_demo_v4';
+const KEY = 'op_rp_demo_v5';
 let store;
 function loadStore() {
   try {
     store = JSON.parse(localStorage.getItem(KEY));
   } catch {}
-  if (!store?.player) store = { player: G.demoPlayer(), shop: G.demoShop(), nav: G.newNav() };
+  if (!store?.player) {
+    G.setCatalog(G.demoCatalog());
+    store = { player: G.demoPlayer(), shop: G.demoShop(), catalog: G.demoCatalog() };
+  }
+  G.setCatalog(store.catalog);
   G.normalize(store.player);
 }
 const saveStore = () => {
@@ -41,7 +45,7 @@ export function resetDemo() {
 }
 const demoState = () => ({
   me: { uid: 'demo', name: 'Démo', staff: true },
-  player: structuredClone(store.player), shop: structuredClone(store.shop), nav: structuredClone(store.nav),
+  player: structuredClone(store.player), shop: structuredClone(store.shop), catalog: structuredClone(store.catalog),
   channelId: 'demo', channelName: 'port-brisant',
 });
 
@@ -70,10 +74,10 @@ export async function state(playerId) {
 /** Action du joueur sur sa propre fiche. */
 export async function act(action) {
   if (mode === 'demo') {
-    const out = G.playerAction(store.player, action, { shop: store.shop, nav: store.nav, channelId: 'demo' });
+    G.setCatalog(store.catalog);
+    const out = G.playerAction(store.player, action, { shop: store.shop, channelId: 'demo' });
     store.player = out.player;
     if (out.shop) store.shop = out.shop;
-    if (out.nav) store.nav = out.nav;
     saveStore();
     return structuredClone(out);
   }
@@ -95,6 +99,27 @@ export async function staff(op, payload = {}) {
       saveStore();
       return { shop: structuredClone(store.shop), toast: 'Boutique mise à jour' };
     }
+    if (op === 'item.save' || op === 'recipe.save') {
+      const items = op === 'item.save', table = items ? store.catalog.items : store.catalog.recipes;
+      G.setCatalog(store.catalog);
+      const data = items ? G.normalizeItem(payload.item) : G.normalizeRecipe(payload.recipe);
+      let id = payload.id && table[payload.id] ? payload.id : G.slug(data.name);
+      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(data.name)}-${n}`;
+      const isNew = !table[id];
+      table[id] = data;
+      saveStore();
+      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${data.name}` };
+    }
+    if (op === 'item.delete' || op === 'recipe.delete') {
+      const items = op === 'item.delete';
+      if (items) {
+        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map((r) => r.name);
+        if (used.length) throw new Error(`Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
+      }
+      delete (items ? store.catalog.items : store.catalog.recipes)[payload.id];
+      saveStore();
+      return { catalog: structuredClone(store.catalog), toast: items ? 'Objet supprimé' : 'Recette supprimée' };
+    }
     if (op === 'shop.delete') {
       store.shop = null;
       saveStore();
@@ -104,13 +129,3 @@ export async function staff(op, payload = {}) {
   return call('POST', '/api/staff', { op, ...payload, channelId });
 }
 
-/** Démo seulement : simule un message RP dans le salon (sur Discord, c'est le bot). */
-export function demoMessage(text) {
-  store.nav.log.push({ t: 'msg', at: Date.now(), text: String(text).slice(0, 400), name: G.fullName(store.player) });
-  const r = G.navMessage(store.player, store.nav, { ignoreCooldown: true });
-  store.player = r.player;
-  store.nav = r.nav;
-  if (!r.entry) store.nav.log.push({ t: 'sys', at: Date.now(), text: `+${G.NAV_XP} XP · rien à signaler` });
-  saveStore();
-  return { player: structuredClone(r.player), nav: structuredClone(r.nav), ups: r.ups };
-}

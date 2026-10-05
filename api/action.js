@@ -1,17 +1,14 @@
 /**
  * POST /api/action { channelId, action }
- * Une action du joueur sur SA fiche (stats, inventaire, métier, boutique,
- * navigation...). Toutes les règles sont appliquées ici, côté serveur.
+ * Une action du joueur sur SA fiche (stats, inventaire, fabrication, boutique...).
+ * Toutes les règles sont appliquées ici, côté serveur.
  */
 import { handler, need } from './_lib/http.js';
 import { userFromRequest } from './_lib/discord.js';
-import { loadPlayer, loadShop, loadNav, publicPlayer } from './_lib/context.js';
+import { loadPlayer, loadShop, loadCatalog } from './_lib/context.js';
 import { write, retry } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { playerAction } from '../shared/game.js';
-
-const SHOP = ['shop.buy', 'shop.sell'];
-const NAV = ['nav.toggle', 'nav.choose'];
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
@@ -27,24 +24,20 @@ export default handler(['POST'], async (req, body) => {
   }
   if (action.type === 'tech.save' && action.media !== undefined) action.media = await ingest(action.media, 'techniques', me.uid);
 
+  await loadCatalog();
   return retry(async () => {
-    const { player, version } = await loadPlayer(me.uid, me.name);
+    const { player, version } = await loadPlayer(me.uid);
     const ctx = { channelId, now: Date.now() };
-    let shopV = null, navV = null;
-    if (SHOP.includes(action.type)) {
+    let shopV = null;
+    if (action.type.startsWith('shop.')) {
       need(channelId, 400, 'Salon inconnu.');
       const s = await loadShop(channelId);
-      ctx.shop = s.shop; shopV = s.version;
-    }
-    if (NAV.includes(action.type)) {
-      need(channelId, 400, 'Salon inconnu.');
-      const n = await loadNav(channelId);
-      ctx.nav = n.nav; navV = n.version;
+      ctx.shop = s.shop;
+      shopV = s.version;
     }
     const out = playerAction(player, action, ctx);
     if (out.shop) await write('shops', channelId, out.shop, shopV);
-    if (out.nav) await write('navs', channelId, out.nav, navV, { active: !!out.nav.active });
     await write('players', me.uid, out.player, version);
-    return { ...out, player: publicPlayer(out.player) };
+    return out;
   });
 });

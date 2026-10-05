@@ -16,7 +16,7 @@ export function db() {
   return client;
 }
 
-const TABLES = { players: 'id', shops: 'channel_id', navs: 'channel_id' };
+const TABLES = { players: 'id', shops: 'channel_id', items: 'id', recipes: 'id', meta: 'key' };
 
 export async function read(table, id) {
   const { data, error } = await db().from(table).select('data, version').eq(TABLES[table], id).maybeSingle();
@@ -75,8 +75,10 @@ export async function listPlayers() {
   return data.map((r) => ({ uid: r.id, ident: r.ident || {}, level: r.level, photo: r.photo }));
 }
 
-export async function activeNavChannels() {
-  const { data, error } = await db().from('navs').select('channel_id').eq('active', true);
+/** Toute une table sous forme { id: data } (objets, recettes). */
+export async function readAll(table) {
+  const key = TABLES[table];
+  const { data, error } = await db().from(table).select(`${key}, data`).limit(5000);
   if (error) throw error;
-  return data.map((r) => r.channel_id);
+  return Object.fromEntries(data.map((r) => [r[key], r.data]));
 }

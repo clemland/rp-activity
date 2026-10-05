@@ -107,3 +107,32 @@ export const readAsDataUrl = (file) =>
     r.onerror = ko;
     r.readAsDataURL(file);
   });
+
+/**
+ * Confirmation dans l'app. Les fenêtres du navigateur (confirm, alert) sont
+ * bloquées dans les Activities Discord : on utilise la nôtre.
+ */
+export function askConfirm(message, { title = 'Confirmer', ok = 'Confirmer', danger = false } = {}) {
+  const d = $('d-confirm');
+  $('cf-title').textContent = title;
+  $('cf-text').textContent = message;
+  const btn = $('cf-ok');
+  btn.textContent = ok;
+  btn.classList.toggle('danger', danger);
+  return new Promise((resolve) => {
+    const done = (v) => {
+      btn.removeEventListener('click', yes);
+      d.removeEventListener('close', no);
+      resolve(v);
+    };
+    const yes = () => {
+      done(true);
+      closeDialog(d);
+    };
+    const no = () => done(false);
+    btn.addEventListener('click', yes);
+    d.addEventListener('close', no);
+    openDialog('d-confirm');
+    btn.focus();
+  });
+}

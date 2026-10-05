@@ -17,6 +17,7 @@
     <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
     <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
     <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
+    <button class="scr" role="tab" data-screen="ashop" aria-controls="s-ashop" id="scr-ashop" hidden><span class="ico" data-i="265"></span><span>Boutiques</span></button>
     <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
   </div>
   <div class="wallet-chips">
@@ -79,6 +80,10 @@
 
 <main class="screen" id="s-admin" role="tabpanel" hidden>
   <section class="sheet" id="v-admin"></section>
+</main>
+
+<main class="screen" id="s-ashop" role="tabpanel" hidden>
+  <section class="sheet" id="v-ashop"></section>
 </main>
 
 <main class="screen" id="s-gest" role="tabpanel" hidden>
@@ -207,6 +212,22 @@
         <button type="button" class="btn ghost" id="rc-del" hidden>Supprimer</button>
         <button type="button" class="btn ghost" data-close>Annuler</button>
         <button type="button" class="btn" id="rc-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-confirm" aria-labelledby="cf-title" class="confirm">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="cf-title">Confirmer</h2></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <p id="cf-text"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="cf-ok">Confirmer</button>
       </div>
     </div>
   </div>

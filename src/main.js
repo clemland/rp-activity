@@ -16,7 +16,7 @@ import * as G from '../shared/game.js';
 import * as API from './api.js';
 import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
-  openDialog, closeDialog, readAsDataUrl,
+  openDialog, closeDialog, readAsDataUrl, askConfirm,
 } from './ui.js';
 
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
@@ -828,7 +828,7 @@ $('v-job').addEventListener('click', async (e) => {
   const id = e.target.closest('[data-craft]')?.dataset.craft;
   if (id) return void run({ type: 'craft.start', id });
   if (e.target.id === 'craft-collect' && (await run({ type: 'craft.collect' }))) replay(document.querySelector('#v-job .badge'), 'bought');
-  if (e.target.id === 'craft-cancel' && confirm('Annuler la fabrication ? Les ingrédients te seront rendus.')) run({ type: 'craft.cancel' });
+  if (e.target.id === 'craft-cancel' && (await askConfirm('Les ingrédients te seront rendus.', { title: 'Annuler la fabrication ?', ok: 'Annuler la fabrication', danger: true }))) run({ type: 'craft.cancel' });
   if (e.target.id === 'craft-finish') staffAct({ type: 'craft.finish' });
 });
 // Compte à rebours de la fabrication en cours
@@ -901,7 +901,6 @@ function putOnCounter(k) {
 }
 /* Panneau admin : toutes les boutiques, consultables et modifiables depuis n'importe quel salon */
 let adminShops = null; // { channelId: shop }
-let adminShopCh = null; // boutique affichée
 async function loadAdminShops() {
   try {
     adminShops = (await API.staff('shops')).shops;
@@ -909,45 +908,74 @@ async function loadAdminShops() {
     adminShops = {};
     toast(esc(err.message));
   }
-  if (!adminShopCh || !(adminShopCh in adminShops)) adminShopCh = API.channelId in adminShops ? API.channelId : Object.keys(adminShops)[0] ?? null;
-  renderShop();
+  renderAdminShops();
 }
-function renderShopAdmin() {
-  const el = $('v-shop');
+/** Écran Boutiques du panneau admin : toutes les boutiques, hors RP. */
+let openShopRow = null;
+function renderAdminShops() {
+  const el = $('v-ashop');
+  if (!tools()) return;
   if (!adminShops) {
     el.innerHTML = '<p class="note">Chargement des boutiques…</p>';
     return;
   }
   const list = Object.entries(adminShops).sort((a, b) => a[1].channel.localeCompare(b[1].channel));
-  const shop = adminShopCh ? adminShops[adminShopCh] : null;
-  const picker = `
-    <div class="shop-bar adm-shopbar">
-      <label class="flt"><span>Boutique</span><select id="adm-shop">${list.map(([id, sh]) => `<option value="${esc(id)}" ${id === adminShopCh ? 'selected' : ''}>${esc(sh.channel)} · ${esc(sh.name)}</option>`).join('') || '<option value="">Aucune boutique</option>'}</select></label>
-      <button class="btn" id="shop-create">+ Nouvelle boutique</button>
-    </div>`;
-  if (!shop) {
-    el.innerHTML = `${picker}<div class="no-shop">${ico(265)}<h2>Aucune boutique</h2><p class="note">Crée la première avec « + Nouvelle boutique » : il suffira de coller l’ID du salon.</p></div>`;
-    return;
-  }
-  const rows = shop.items.map(([k, price, left]) => {
-    const it = itemOf(k);
-    return `<div class="ware">
-      <div class="slot-ico">${itemIco(k)}</div>
-      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><div class="stock">${left < 0 ? 'Stock illimité' : left === 0 ? 'Épuisé' : `${left} en stock`}</div></div>
-      <div class="buy"><span class="price">${berry(price)}</span></div>
-    </div>`;
-  }).join('');
-  el.innerHTML = `${picker}
-    <div class="counter">
-      <div class="face" id="seller-face">${shop.img ? `<img src="${esc(shop.img)}" alt="${esc(shop.seller)}">` : `<span aria-hidden="true">${esc(shop.face || '🙂')}</span>`}</div>
-      <div><h2>${esc(shop.name)}</h2><p>${esc(shop.seller)} · rachat à ${Math.round(shop.buyRate * 100)} %</p></div>
-      <button class="btn" id="shop-edit">Modifier la boutique</button>
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Boutiques</h2><p class="lede" style="margin:0">Une boutique par salon RP : les joueurs la voient quand ils ouvrent <code>/profil</code> dans ce salon.</p></div>
+      <button class="btn" id="ashop-new">+ Nouvelle boutique</button>
     </div>
-    <div class="shop-bar"><span class="chan-tag">${esc(shop.channel)}</span><span class="note">ID du salon : ${esc(adminShopCh)}</span></div>
-    <div class="wares">${rows || '<p class="note">Aucun objet en vente.</p>'}</div>`;
+    ${list.length ? `<div class="ashop-list">${list.map(([ch, sh]) => {
+      const items = sh.items.filter(([k]) => G.ITEMS[k]);
+      const open = openShopRow === ch;
+      return `<article class="ashop ${open ? 'open' : ''}">
+        <button class="ashop-row" data-ashop-toggle="${esc(ch)}" aria-expanded="${open}">
+          <span class="face mini-face">${sh.img ? `<img src="${esc(sh.img)}" alt="">` : `<span aria-hidden="true">${esc(sh.face || '🙂')}</span>`}</span>
+          <span class="ashop-main"><b>${esc(sh.name)}</b><small>${esc(sh.seller)} · ${items.length} objet${items.length > 1 ? 's' : ''} · rachat ${Math.round(sh.buyRate * 100)} %</small></span>
+          <span class="chan-tag">${esc(sh.channel)}</span>
+          <span class="chev" aria-hidden="true">▾</span>
+        </button>
+        ${open ? `<div class="ashop-body">
+          <p class="note">ID du salon : <code>${esc(ch)}</code></p>
+          ${items.length ? `<table class="ashop-items"><thead><tr><th>Objet</th><th>Prix</th><th>Stock</th></tr></thead><tbody>${items.map(([k, price, left]) => `<tr><td>${itemIco(k)} ${esc(itemOf(k).name)}</td><td>${berry(price)}</td><td>${left < 0 ? 'illimité' : left}</td></tr>`).join('')}</tbody></table>` : '<p class="note">Aucun objet en vente.</p>'}
+          <div class="ashop-acts">
+            <button class="btn sm" data-ashop-edit="${esc(ch)}">Modifier</button>
+            <button class="btn sm ghost danger-txt" data-ashop-del="${esc(ch)}">Supprimer la boutique</button>
+          </div>
+        </div>` : ''}
+      </article>`;
+    }).join('')}</div>` : '<div class="no-shop">' + ico(265) + '<h2>Aucune boutique</h2><p class="note">Crée la première avec « + Nouvelle boutique » : il suffira de coller l’ID du salon.</p></div>'}`;
+  paintStatic(el);
 }
+$('v-ashop').addEventListener('click', async (e) => {
+  if (e.target.closest('#ashop-new')) return openShopEdit(G.newShop(), null);
+  const t = e.target.closest('[data-ashop-toggle]')?.dataset.ashopToggle;
+  if (t) {
+    openShopRow = openShopRow === t ? null : t;
+    return renderAdminShops();
+  }
+  const ed = e.target.closest('[data-ashop-edit]')?.dataset.ashopEdit;
+  if (ed) return openShopEdit(adminShops[ed], ed);
+  const del = e.target.closest('[data-ashop-del]')?.dataset.ashopDel;
+  if (del) {
+    const sh = adminShops[del];
+    if (!(await askConfirm(`La boutique « ${sh.name} » de ${sh.channel} et ses objets en vente seront supprimés. Les objets déjà achetés restent aux joueurs.`, { title: 'Supprimer cette boutique ?', ok: 'Supprimer', danger: true }))) return;
+    setBusy(1);
+    try {
+      const out = await API.staff('shop.delete', { channelId: del });
+      if (del === API.channelId) SHOP = null;
+      openShopRow = null;
+      toast(esc(out.toast));
+      await loadAdminShops();
+    } catch (err) {
+      toast(esc(err.message));
+    } finally {
+      setBusy(-1);
+    }
+  }
+});
 function renderShop() {
-  if (ADMIN) return renderShopAdmin();
+  if (ADMIN) return;
   if (!S) return;
   const el = $('v-shop');
   if (!SHOP) {
@@ -1014,8 +1042,7 @@ $('v-shop').addEventListener('input', (e) => {
 });
 $('v-shop').addEventListener('click', async (e) => {
   if (sJust) return;
-  if (e.target.closest('#shop-create')) return openShopEdit(G.newShop(), null);
-  if (e.target.closest('#shop-edit')) return openShopEdit(adminShops[adminShopCh], adminShopCh);
+  if (e.target.closest('#shop-create')) return;
   const sc = e.target.closest('.scell');
   if (sc && !VIEW) return putOnCounter(S.inv[+sc.dataset.sslot][0]);
   if (e.target.closest('[data-unsell]')) {
@@ -1106,7 +1133,7 @@ function renderShopEdit() {
         </div>`).join('')}
     </div>
     <div class="se-row"><button type="button" class="btn sm ghost" id="se-add">+ Ajouter un objet</button>
-      ${shopEditCh ? '<button type="button" class="btn sm ghost" id="se-close-shop">Fermer la boutique</button>' : ''}</div>`;
+</div>`;
 }
 function readShopEdit() {
   const d = shopDraft;
@@ -1144,17 +1171,7 @@ $('d-shopedit').addEventListener('click', async (e) => {
     shopDraft.img = null;
     renderShopEdit();
   }
-  if (e.target.id === 'se-close-shop' && confirm(`Fermer la boutique ${shopDraft.channel} ? Ses objets en vente seront supprimés.`)) {
-    const out = await API.staff('shop.delete', { channelId: shopEditCh }).catch((err) => toast(esc(err.message)));
-    if (out) {
-      if (shopEditCh === API.channelId) SHOP = null;
-      delete adminShops?.[shopEditCh];
-      adminShopCh = null;
-      closeDialog($('d-shopedit'));
-      loadAdminShops();
-      toast(out.toast);
-    }
-  }
+
 });
 $('d-shopedit').addEventListener('change', async (e) => {
   if (e.target.dataset?.f === 'inf') {
@@ -1193,7 +1210,7 @@ $('se-save').addEventListener('click', async () => {
     const out = await API.staff('shop.save', { channelId: shopDraftCh, from: shopEditCh, shop: shopDraft });
     if (out.channelId === API.channelId) SHOP = out.shop;
     else if (shopEditCh === API.channelId) SHOP = null;
-    adminShopCh = out.channelId;
+    openShopRow = out.channelId;
     closeDialog($('d-shopedit'));
     await loadAdminShops();
     toast(esc(out.toast));
@@ -1203,19 +1220,7 @@ $('se-save').addEventListener('click', async () => {
     $('se-save').disabled = false;
   }
 });
-let faceTimer = null;
-const editShown = () => ADMIN && adminShops?.[adminShopCh] && openShopEdit(adminShops[adminShopCh], adminShopCh);
-$('v-shop').addEventListener('dblclick', (e) => e.target.closest('#seller-face') && editShown());
-$('v-shop').addEventListener('pointerdown', (e) => {
-  if (!e.target.closest('#seller-face') || e.pointerType === 'mouse') return;
-  faceTimer = setTimeout(editShown, 650);
-});
-$('v-shop').addEventListener('change', (e) => {
-  if (e.target.id !== 'adm-shop') return;
-  adminShopCh = e.target.value || null;
-  renderShop();
-});
-['pointerup', 'pointerleave', 'pointercancel'].forEach((t) => $('v-shop').addEventListener(t, () => clearTimeout(faceTimer)));
+
 
 /** Auvent : dessiné à la largeur exacte, festons tangents. */
 function drawAwning() {
@@ -1508,7 +1513,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: true, nav: !ADMIN, admin: ADMIN, gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, nav: !ADMIN, admin: ADMIN, ashop: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -1603,7 +1608,8 @@ const describe = (a) =>
     : `${a.amount > 0 ? 'ajouter' : 'retirer'} ${fmt(Math.abs(a.amount))} ${a.type === 'xp' ? 'XP' : a.type === 'levels' ? `niveau${Math.abs(a.amount) > 1 ? 'x' : ''}` : 'berrys'}`;
 async function bulk(action) {
   const n = picked.size;
-  if (!confirm(`${describe(action)[0].toUpperCase()}${describe(action).slice(1)} à ${n} joueur${n > 1 ? 's' : ''} ?`)) return;
+  const txt = describe(action);
+  if (!(await askConfirm(`${txt[0].toUpperCase()}${txt.slice(1)} à ${n} joueur${n > 1 ? 's' : ''}.`, { title: 'Action en groupe', ok: 'Appliquer' }))) return;
   setBusy(1);
   try {
     const out = await API.staff('bulk', { targets: [...picked], action });
@@ -1782,8 +1788,8 @@ $('it-save').addEventListener('click', () => {
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');
   gestCall('item.save', { id: itemDraftId, item }, $('d-item'));
 });
-$('it-del').addEventListener('click', () => {
-  if (confirm(`Supprimer « ${G.itemOf(itemDraftId).name} » ? Les joueurs qui l’ont le verront comme « Objet supprimé ».`)) gestCall('item.delete', { id: itemDraftId }, $('d-item'));
+$('it-del').addEventListener('click', async () => {
+  if (await askConfirm(`Les joueurs qui l’ont le verront comme « Objet supprimé ».`, { title: `Supprimer « ${G.itemOf(itemDraftId).name} » ?`, ok: 'Supprimer', danger: true })) gestCall('item.delete', { id: itemDraftId }, $('d-item'));
 });
 
 /* Recette */
@@ -1869,8 +1875,8 @@ $('rc-save').addEventListener('click', () => {
   if (!Object.keys(recipeDraft.gives).length) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet.');
   gestCall('recipe.save', { id: recipeDraftId, recipe: recipeDraft }, $('d-recipe'));
 });
-$('rc-del').addEventListener('click', () => {
-  if (confirm(`Supprimer la recette « ${G.RECIPES[recipeDraftId].name} » ?`)) gestCall('recipe.delete', { id: recipeDraftId }, $('d-recipe'));
+$('rc-del').addEventListener('click', async () => {
+  if (await askConfirm('Les fabrications déjà lancées avec cette recette restent récupérables.', { title: `Supprimer la recette « ${G.RECIPES[recipeDraftId].name} » ?`, ok: 'Supprimer', danger: true })) gestCall('recipe.delete', { id: recipeDraftId }, $('d-recipe'));
 });
 
 /* ═══ Onglets, écrans, rendu ═════════════════════════════════════════════ */
@@ -1906,7 +1912,7 @@ function renderAll() {
   document.querySelector('#s-fiche .log').hidden = !has;
   if (ADMIN) {
     renderGestion();
-    renderShop();
+    renderAdminShops();
     if (has) {
       renderHero();
       [renderPerso, renderTech, renderInv, renderJob, renderMjTab].forEach((f) => f());
@@ -1943,6 +1949,7 @@ function showScreen(name) {
       fillGauges(el);
     }
   });
+  if (name === 'ashop') renderAdminShops();
   if (name === 'shop') {
     renderShop();
     paintStatic();
@@ -1969,11 +1976,7 @@ async function refresh() {
     G.setCatalog(st.catalog);
     if (st.openDenied) toast(OPEN_DENIED);
     if (st.open && ME.staff) return void (await enterAdmin(st.open));
-    if (ADMIN) {
-      SHOP = st.shop;
-      if (screen === 'shop') renderShop();
-      return;
-    }
+    if (ADMIN) return;
     if (busy || VIEW) return;
     S = st.player;
     SHOP = st.shop;

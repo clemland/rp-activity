@@ -87,12 +87,27 @@ export async function act(action) {
 /** Outils du staff. */
 export async function staff(op, payload = {}) {
   if (mode === 'demo') {
-    if (op === 'players') return { players: [{ uid: 'demo', ident: store.player.id, level: store.player.level, photo: store.player.photo }] };
+    if (op === 'players') return { players: [{ uid: 'demo', ident: store.player.id, level: store.player.level, photo: store.player.photo, job: store.player.job.id }] };
     if (op === 'act') {
       const out = G.staffAction(store.player, payload.action);
       store.player = out.player;
       saveStore();
       return structuredClone(out);
+    }
+    if (op === 'bulk') {
+      let ok = 0;
+      const failed = [];
+      for (const uid of payload.targets) {
+        try {
+          if (uid !== 'demo') throw new Error('pas de fiche');
+          store.player = G.staffAction(store.player, payload.action).player;
+          ok++;
+        } catch (err) {
+          failed.push({ uid, error: err.message });
+        }
+      }
+      saveStore();
+      return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}` };
     }
     if (op === 'shop.save') {
       store.shop = G.normalizeShop(structuredClone(payload.shop));

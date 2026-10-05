@@ -197,9 +197,21 @@ test('/panel admin : ouverture en mode admin, sans joueur', async () => {
   assert.deepEqual(r.out.open, { mode: 'admin', target: null });
 });
 
-test('anti-triche : le staff ne peut pas modifier sa propre fiche', async () => {
+test('panneau admin : le staff peut modifier sa propre fiche', async () => {
   await call('bot', { body: { op: 'register', userId: 'u2', name: 'Le MJ', race: 'Humain', classe: 'Fighter' }, headers: { 'x-bot-secret': 'secret' } });
-  const r = await call('staff', { body: { op: 'act', target: 'u2', action: { type: 'edit', patch: { berry: 999999999 } } }, headers: MJ });
+  const r = await call('staff', { body: { op: 'act', target: 'u2', action: { type: 'levels', amount: 3 } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.player.level, 4);
+});
+
+test('actions en groupe : XP à plusieurs joueurs, échecs signalés sans bloquer les autres', async () => {
+  let r = await call('staff', { body: { op: 'bulk', targets: ['u1', 'u2', 'fantome'], action: { type: 'xp', amount: 100 } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.ok, 2);
+  assert.deepEqual(r.out.failed.map((f) => f.uid), ['fantome']);
+  assert.match(r.out.toast, /2 joueurs, 1 échec/);
+  r = await call('staff', { body: { op: 'bulk', targets: ['u1'], action: { type: 'edit', patch: { berry: 1 } } }, headers: MJ });
+  assert.equal(r.status, 400, 'pas d’édition libre en groupe');
+  r = await call('staff', { body: { op: 'bulk', targets: ['u1'], action: { type: 'xp', amount: 5 } }, headers: J });
   assert.equal(r.status, 403);
-  assert.match(r.out.error, /propre fiche/);
 });

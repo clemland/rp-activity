@@ -68,11 +68,11 @@ export async function retry(fn) {
 export async function listPlayers() {
   const { data, error } = await db()
     .from('players')
-    .select('id, ident:data->id, level:data->level, photo:data->photo')
+    .select('id, ident:data->id, level:data->level, photo:data->photo, job:data->job')
     .order('updated_at', { ascending: false })
     .limit(1000);
   if (error) throw error;
-  return data.map((r) => ({ uid: r.id, ident: r.ident || {}, level: r.level, photo: r.photo }));
+  return data.map((r) => ({ uid: r.id, ident: r.ident || {}, level: r.level, photo: r.photo, job: r.job?.id ?? null }));
 }
 
 /** Toute une table sous forme { id: data } (objets, recettes). */

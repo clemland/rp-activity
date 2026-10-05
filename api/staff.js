@@ -2,6 +2,7 @@
  * POST /api/staff { op, ... } : outils réservés au staff.
  *  - players                              : liste des fiches
  *  - act { target, action }                : modifier la fiche d'un joueur
+ *  - bulk { targets, action }              : la même action sur plusieurs joueurs (XP, niveaux, berrys, objets)
  *  - shop.save { channelId, shop } / shop.delete { channelId }
  *  - item.save { id?, item } / item.delete { id }        : base d'objets
  *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
@@ -31,8 +32,6 @@ export default handler(['POST'], async (req, body) => {
 
     case 'act': {
       need(typeof body.target === 'string', 400, 'Joueur manquant.');
-      // Anti-triche : personne ne modifie sa propre fiche, même le staff.
-      need(body.target !== me.uid, 403, 'Tu ne peux pas modifier ta propre fiche : demande à un autre membre du staff.');
       return retry(async () => {
         const row = await read('players', body.target);
         need(row, 404, 'Ce joueur n’a pas de fiche.');
@@ -40,6 +39,31 @@ export default handler(['POST'], async (req, body) => {
         await write('players', body.target, out.player, row.version);
         return out;
       });
+    }
+
+    case 'bulk': {
+      const targets = [...new Set(Array.isArray(body.targets) ? body.targets : [])].filter((t) => typeof t === 'string');
+      need(targets.length, 400, 'Aucun joueur sélectionné.');
+      need(targets.length <= 500, 400, '500 joueurs maximum à la fois.');
+      need(['xp', 'levels', 'berry', 'give', 'take'].includes(body.action?.type), 400, 'Action non disponible en groupe.');
+      let ok = 0;
+      const failed = [];
+      // Une fiche à la fois : si l'une échoue (inventaire plein...), les autres passent quand même.
+      for (const uid of targets) {
+        try {
+          await retry(async () => {
+            const row = await read('players', uid);
+            need(row, 404, 'pas de fiche');
+            const out = staffAction(normalize(row.data), body.action);
+            await write('players', uid, out.player, row.version);
+          });
+          ok++;
+        } catch (err) {
+          failed.push({ uid, error: err.message });
+        }
+      }
+      console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
+      return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
 
     case 'shop.save': {

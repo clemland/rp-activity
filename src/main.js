@@ -118,31 +118,20 @@ async function staffAct(action) {
 }
 
 /* ═══ Carte d'identité ═══════════════════════════════════════════════════ */
+/** Pas de photo : un grand point d'interrogation, façon avis de recherche sans portrait. */
 const PORTRAIT = `
-<svg viewBox="0 0 200 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Portrait du personnage">
-  <rect width="200" height="230" fill="#9fd3ef"/>
-  <path d="M0 150 Q25 142 50 150 T100 150 T150 150 T200 150 V230 H0Z" fill="#3a78c9"/>
-  <path d="M0 150 Q25 142 50 150 T100 150 T150 150 T200 150" fill="none" stroke="#fff" stroke-width="3"/>
-  <g stroke="#17255e" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M14 232 C22 188 52 172 100 172 C148 172 178 188 186 232Z" fill="#26306e"/>
-    <path d="M60 178 L82 232 M140 178 L118 232" fill="none" stroke-width="3"/>
-    <path d="M78 174 L100 214 L122 174Z" fill="#f4ecd8"/>
-    <path d="M84 150 L84 178 Q100 190 116 178 L116 150Z" fill="#e9b07c"/>
-    <path d="M52 92 L44 60 L64 72 L66 44 L82 64 L92 38 L104 60 L120 40 L126 66 L144 50 L140 78 L158 74 L148 98Z" fill="#3a2418"/>
-    <ellipse cx="100" cy="112" rx="42" ry="47" fill="#f1bf8c"/>
-    <path d="M58 116 Q50 112 52 124 Q54 136 64 134" fill="#f1bf8c"/>
-    <path d="M142 116 Q150 112 148 124 Q146 136 136 134" fill="#f1bf8c"/>
-    <path d="M58 92 Q100 64 142 92 L140 104 Q100 82 60 104Z" fill="#2a9d8f"/>
-    <path d="M140 96 L166 88 L158 104 L170 116 L146 106Z" fill="#2a9d8f"/>
-    <path d="M72 104 L66 96 L74 98 L72 88 L82 100 L90 94 L88 104" fill="#3a2418" stroke-width="3"/>
-    <path d="M70 116 L90 120 M130 116 L110 120" stroke-width="5"/>
-    <path d="M76 128 Q82 124 88 128" fill="none" stroke-width="5"/>
-    <path d="M112 128 Q118 124 124 128" fill="none" stroke-width="5"/>
-    <path d="M100 128 L96 142 L103 143" fill="none" stroke-width="3"/>
-    <path d="M78 150 Q100 166 124 148 Q118 140 100 146 Q86 148 78 150Z" fill="#fff"/>
-    <path d="M86 150 L86 156 M100 147 L100 158 M113 146 L113 155" stroke-width="2"/>
-    <path d="M122 132 L134 142 M132 130 L124 144" stroke="#b5523a" stroke-width="3"/>
-  </g>
+<svg viewBox="0 0 200 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pas encore de photo">
+  <defs>
+    <linearGradient id="pp-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a5fb8"/><stop offset="1" stop-color="#163a7d"/></linearGradient>
+    <pattern id="pp-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="8" fill="#ffffff" opacity=".06"/></pattern>
+  </defs>
+  <rect width="200" height="230" fill="url(#pp-sky)"/>
+  <rect width="200" height="230" fill="url(#pp-hatch)"/>
+  <circle cx="100" cy="104" r="62" fill="none" stroke="#e6a223" stroke-width="3" stroke-dasharray="4 7" opacity=".55"/>
+  <text x="100" y="140" text-anchor="middle" font-family="Ultra, Georgia, serif" font-size="118" fill="#17255e" opacity=".55" transform="translate(5 6)">?</text>
+  <text x="100" y="140" text-anchor="middle" font-family="Ultra, Georgia, serif" font-size="118" fill="#f2c84b" stroke="#17255e" stroke-width="5" paint-order="stroke">?</text>
+  <path d="M0 196 Q25 188 50 196 T100 196 T150 196 T200 196 V230 H0Z" fill="#0f2c63"/>
+  <path d="M0 196 Q25 188 50 196 T100 196 T150 196 T200 196" fill="none" stroke="#9fd3ef" stroke-width="3" opacity=".7"/>
 </svg>`;
 const FACTION = {
   Pirate: { cls: 'f-pirate', icon: 1 },
@@ -229,7 +218,7 @@ function renderHero() {
   shown.berryOf = S.uid;
   document.title = `Fiche de ${fullName()}`;
   $('open-photo').hidden = !!VIEW;
-  $('open-edit').hidden = !(tools() && VIEW && VIEW !== ME.uid);
+  $('open-edit').hidden = !(tools() && VIEW);
 }
 $('portrait').addEventListener('click', () => !VIEW && openPhoto());
 $('open-photo').addEventListener('click', () => openPhoto());
@@ -519,7 +508,7 @@ function renderTech() {
         <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
         <div class="t-actions">
           <button class="btn sm ghost" data-edit-tech="${t.id}">Modifier</button><button class="btn sm ghost" data-del-tech="${t.id}">Supprimer</button>
-          ${tools() && VIEW && VIEW !== ME.uid && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>` : ''}
+          ${tools() && VIEW && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>` : ''}
         </div>
       </details>`).join('') || '<p class="note">Aucune technique pour l’instant.</p>'}`;
 }
@@ -802,7 +791,7 @@ function renderJob() {
       </div>
       <div class="craft-acts">
         ${ready ? '<button class="btn" id="craft-collect">Récupérer</button>' : '<button class="btn sm ghost" id="craft-cancel">Annuler</button>'}
-        ${tools() && VIEW && VIEW !== ME.uid && !ready ? '<button class="btn sm ghost" id="craft-finish" title="Outil MJ">Terminer (MJ)</button>' : ''}
+        ${tools() && VIEW && !ready ? '<button class="btn sm ghost" id="craft-finish" title="Outil MJ">Terminer (MJ)</button>' : ''}
       </div>
     </div>` : ''}
 
@@ -1304,10 +1293,41 @@ $('edit-form').addEventListener('submit', async (e) => {
   }
 });
 
+/* Outils de progression (XP, niveaux, berrys), communs à l'onglet Édition MJ et aux actions de groupe */
+const itemOptions = () => Object.entries(G.ITEMS).sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([k, it]) => `<option value="${esc(k)}">${esc(it.name)}</option>`).join('') || '<option value="">Aucun objet (crée-en dans Gestion)</option>';
+function progressionTools(px) {
+  const row = (key, label, unit, extra = '') => `
+    <div class="mj-row prog-row">
+      <label for="${px}-${key}">${label}</label>
+      <input id="${px}-${key}" type="number" min="1" value="" placeholder="${unit}" inputmode="numeric">
+      <button class="btn sm" data-prog="${key}" data-sign="1">Ajouter</button>
+      <button class="btn sm ghost" data-prog="${key}" data-sign="-1">Retirer</button>
+      ${extra}
+    </div>`;
+  return row('xp', 'Expérience', 'ex. 750')
+    + row('levels', 'Niveaux', 'ex. 2', `<label class="chk"><input type="checkbox" id="${px}-points" checked> avec les points de stats</label>`)
+    + row('berry', 'Berrys', 'ex. 50000');
+}
+/** Lit une ligne de progression cliquée ; renvoie l'action à appliquer ou null. */
+function readProgression(e, px) {
+  const b = e.target.closest('[data-prog]');
+  if (!b) return null;
+  const key = b.dataset.prog, input = $(`${px}-${key}`);
+  const n = Math.round(Math.abs(Number(String(input.value).replace(/[\s.]/g, ''))));
+  if (!n) {
+    input.focus();
+    toast('Indique une quantité.');
+    return null;
+  }
+  const action = { type: key, amount: n * Number(b.dataset.sign) };
+  if (key === 'levels') action.points = $(`${px}-points`).checked;
+  return action;
+}
+
 /* ═══ Onglet Édition MJ (staff) ═══════════════════════════════════════════ */
 function renderMjTab() {
   const tab = $('t-mj');
-  const show = tools() && VIEW && VIEW !== ME.uid;
+  const show = tools() && VIEW;
   tab.hidden = !show;
   if (!show) {
     if (tab.getAttribute('aria-selected') === 'true') selectTab(tabs[0]);
@@ -1339,16 +1359,16 @@ function renderMjTab() {
         </div>
       </article>`).join('')}</div>` : '<p class="note">Aucune technique en attente.</p>'}
 
-    <h3 class="ed-h">Objets et expérience</h3>
+    <h3 class="ed-h">Progression</h3>
+    <div class="mj-tools">
+      ${progressionTools('mjt')}
+    </div>
+    <h3 class="ed-h">Objets</h3>
     <div class="mj-tools">
       <div class="mj-row">
-        <select id="mjt-item" aria-label="Objet">${Object.entries(G.ITEMS).map(([k, it]) => `<option value="${k}">${esc(it.name)}</option>`).join('')}</select>
+        <select id="mjt-item" aria-label="Objet">${itemOptions()}</select>
         <input id="mjt-qty" type="number" min="1" value="1" style="width:76px" aria-label="Quantité">
         <button class="btn sm" data-mjt-give="give">Donner</button><button class="btn sm ghost" data-mjt-give="take">Retirer</button>
-      </div>
-      <div class="mj-row">
-        <span class="note">Expérience :</span>
-        <button class="btn sm" data-mjt-xp="50">+50 XP</button><button class="btn sm" data-mjt-xp="250">+250 XP</button><button class="btn sm" data-mjt-xp="1000">+1000 XP</button>
       </div>
     </div>
     <p class="note" style="margin-top:14px"><button class="linklike" id="mj-pick">← Liste des joueurs</button></p>`;
@@ -1362,8 +1382,8 @@ $('v-mj').addEventListener('click', async (e) => {
   if (no) return void staffAct({ type: 'tech.validate', id: Number(no), ok: false });
   const give = e.target.closest('[data-mjt-give]')?.dataset.mjtGive;
   if (give) return void staffAct({ type: give, key: $('mjt-item').value, qty: +$('mjt-qty').value || 1 });
-  const xp = e.target.closest('[data-mjt-xp]')?.dataset.mjtXp;
-  if (xp) return void staffAct({ type: 'xp', amount: +xp });
+  const act = readProgression(e, 'mjt');
+  if (act) staffAct(act);
 });
 
 /* ═══ Mode MJ : ouvrir la fiche d'un joueur ══════════════════════════════ */
@@ -1428,7 +1448,7 @@ async function openPlayer(uid, { tab = null } = {}) {
     updateNav();
     showScreen('fiche');
     renderAll();
-    selectTab($(tab && VIEW !== ME.uid ? tab : 't-perso'));
+    selectTab($(tab || 't-perso'));
   } catch (err) {
     toast(esc(err.message));
   } finally {
@@ -1441,6 +1461,7 @@ function closePlayer() {
   updateNav();
   showScreen('admin');
   renderAll();
+  loadPlayers(); // les niveaux ou noms ont pu changer
 }
 $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && closePlayer());
 
@@ -1453,31 +1474,143 @@ function updateNav() {
   document.body.classList.toggle('admin', ADMIN);
   $('mj-banner').hidden = !ADMIN;
   $('mj-banner').innerHTML = !ADMIN ? ''
-    : VIEW ? `<span>Panneau admin : fiche de <b>${esc(fullName())}</b>${VIEW === ME.uid ? ' (ta fiche : lecture seule)' : ''}</span><button class="btn sm" id="mj-back">← Liste des joueurs</button>`
+    : VIEW ? `<span>Panneau admin : fiche de <b>${esc(fullName())}</b>${VIEW === ME.uid ? ' (ta fiche)' : ''}</span><button class="btn sm" id="mj-back">← Liste des joueurs</button>`
     : '<span>Panneau admin</span>';
   document.querySelector('.wallet-chips').hidden = ADMIN && !VIEW;
 }
-let players = [], playersLoaded = false;
-async function renderAdminHome() {
+let players = [];
+const filters = { q: '', faction: '', race: '', classe: '', job: '', grade: '', min: '', max: '' };
+const picked = new Set();
+const normTxt = (t) => String(t ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+function filteredPlayers() {
+  const f = filters, q = normTxt(f.q);
+  return players.filter((p) => {
+    const id = p.ident;
+    if (q && !normTxt(`${G.fullName({ id })} ${id.epithet || ''} ${id.crew || ''}`).includes(q)) return false;
+    if (f.faction && id.faction !== f.faction) return false;
+    if (f.race && id.race !== f.race) return false;
+    if (f.classe && id.classe !== f.classe) return false;
+    if (f.grade && !(id.faction === 'Marine' && id.grade === f.grade)) return false;
+    if (f.job && (f.job === 'aucun' ? p.job : p.job !== f.job)) return false;
+    if (f.min && (p.level ?? 1) < +f.min) return false;
+    if (f.max && (p.level ?? 1) > +f.max) return false;
+    return true;
+  });
+}
+function renderAdminHome() {
   if (!ADMIN) return;
+  const sel = (key, label, list, labels) => `<label class="flt"><span>${label}</span><select data-flt="${key}"><option value="">Tous</option>${list.map((v) => `<option value="${esc(v)}" ${filters[key] === v ? 'selected' : ''}>${esc(labels ? labels[v] : v)}</option>`).join('')}</select></label>`;
   $('v-admin').innerHTML = `
-    <div class="sec-head"><div><h2>Joueurs</h2><p class="lede" style="margin:0">Ouvre une fiche pour la modifier, valider ses techniques ou lui donner des objets.</p></div></div>
-    <input class="mj-search" id="adm-search" type="search" placeholder="Chercher un joueur…" aria-label="Chercher un joueur">
+    <div class="sec-head"><div><h2>Joueurs</h2><p class="lede" style="margin:0">Clique sur un joueur pour ouvrir sa fiche, ou coche-en plusieurs pour agir sur tout le groupe.</p></div></div>
+    <div class="filters">
+      <label class="flt flt-q"><span>Recherche</span><input data-flt="q" type="search" placeholder="Nom, surnom, équipage…" value="${esc(filters.q)}"></label>
+      ${sel('faction', 'Faction', G.FACTIONS)}
+      ${sel('grade', 'Grade', G.GRADES)}
+      ${sel('race', 'Race', G.RACES)}
+      ${sel('classe', 'Classe', G.CLASSES)}
+      ${sel('job', 'Métier', [...Object.keys(JOBS), 'aucun'], { ...Object.fromEntries(Object.entries(JOBS).map(([k, j]) => [k, j.name])), aucun: 'Aucun' })}
+      <label class="flt flt-n"><span>Niveau min</span><input data-flt="min" type="number" min="1" value="${esc(filters.min)}"></label>
+      <label class="flt flt-n"><span>Niveau max</span><input data-flt="max" type="number" min="1" value="${esc(filters.max)}"></label>
+      <button class="linklike" id="flt-reset">Effacer les filtres</button>
+    </div>
+    <div class="bulk" id="bulk"></div>
     <div class="mj-players adm-players" id="mj-players"><p class="note">Chargement…</p></div>
     <p class="note" style="margin-top:12px">Pour enregistrer un nouveau joueur : <code>/register</code> sur Discord.</p>`;
+  renderPlayerList();
+}
+function renderPlayerList() {
+  const list = filteredPlayers();
+  const all = list.length && list.every((p) => picked.has(p.uid));
+  $('mj-players').innerHTML = !players.length ? '<p class="note">Aucune fiche pour l’instant.</p>' : `
+    <label class="pick-all"><input type="checkbox" id="pick-all" ${all ? 'checked' : ''} ${list.length ? '' : 'disabled'}> Sélectionner les ${list.length} résultat${list.length > 1 ? 's' : ''}</label>
+    ${list.map((p) => `
+      <div class="mj-player ${picked.has(p.uid) ? 'picked' : ''}">
+        <input type="checkbox" class="pick-one" data-pick="${esc(p.uid)}" ${picked.has(p.uid) ? 'checked' : ''} aria-label="Sélectionner ${esc(G.fullName({ id: p.ident }))}">
+        <button class="mj-player-open" data-open="${esc(p.uid)}">
+          <span class="av">${photoHTML({ photo: p.photo, id: p.ident })}</span>
+          <span><b>${esc(G.fullName({ id: p.ident }))}</b><small>${[p.ident.faction === 'Marine' ? p.ident.grade : p.ident.faction, p.ident.race, p.ident.classe, p.job ? JOBS[p.job]?.name : null, `niveau ${p.level ?? 1}`].filter(Boolean).map(esc).join(' · ')}${p.uid === ME.uid ? ' · toi' : ''}</small></span>
+        </button>
+      </div>`).join('') || '<p class="note">Aucun joueur ne correspond à ces filtres.</p>'}`;
+  renderBulk();
+}
+function renderBulk() {
+  const n = picked.size;
+  $('bulk').hidden = !n;
+  if (!n) return;
+  $('bulk').innerHTML = `
+    <div class="bulk-head"><b>${n} joueur${n > 1 ? 's' : ''} sélectionné${n > 1 ? 's' : ''}</b><button class="linklike" id="pick-none">Tout désélectionner</button></div>
+    ${progressionTools('blk')}
+    <div class="mj-row prog-row">
+      <label for="blk-item">Objet</label>
+      <select id="blk-item">${itemOptions()}</select>
+      <input id="blk-qty" type="number" min="1" value="1" style="width:76px" aria-label="Quantité">
+      <button class="btn sm" data-blk-give="give">Donner</button><button class="btn sm ghost" data-blk-give="take">Retirer</button>
+    </div>`;
+}
+async function loadPlayers() {
   try {
     players = (await API.staff('players')).players;
-    playersLoaded = true;
   } catch (err) {
     $('mj-players').innerHTML = `<p class="req">${esc(err.message)}</p>`;
     return;
   }
-  renderPlayers('');
+  for (const uid of [...picked]) if (!players.some((p) => p.uid === uid)) picked.delete(uid);
+  renderPlayerList();
 }
-$('v-admin').addEventListener('input', (e) => e.target.id === 'adm-search' && renderPlayers(e.target.value));
+const describe = (a) =>
+  a.type === 'give' || a.type === 'take'
+    ? `${a.type === 'give' ? 'donner' : 'retirer'} ${a.qty} × ${itemOf(a.key).name}`
+    : `${a.amount > 0 ? 'ajouter' : 'retirer'} ${fmt(Math.abs(a.amount))} ${a.type === 'xp' ? 'XP' : a.type === 'levels' ? `niveau${Math.abs(a.amount) > 1 ? 'x' : ''}` : 'berrys'}`;
+async function bulk(action) {
+  const n = picked.size;
+  if (!confirm(`${describe(action)[0].toUpperCase()}${describe(action).slice(1)} à ${n} joueur${n > 1 ? 's' : ''} ?`)) return;
+  setBusy(1);
+  try {
+    const out = await API.staff('bulk', { targets: [...picked], action });
+    toast(esc(out.toast));
+    if (out.failed?.length) console.warn('Échecs :', out.failed);
+    await loadPlayers();
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+}
+$('v-admin').addEventListener('input', (e) => {
+  const key = e.target.dataset?.flt;
+  if (!key) return;
+  filters[key] = e.target.value;
+  renderPlayerList();
+});
+$('v-admin').addEventListener('change', (e) => {
+  if (e.target.id === 'pick-all') {
+    filteredPlayers().forEach((p) => (e.target.checked ? picked.add(p.uid) : picked.delete(p.uid)));
+    return renderPlayerList();
+  }
+  const uid = e.target.dataset?.pick;
+  if (uid) {
+    e.target.checked ? picked.add(uid) : picked.delete(uid);
+    renderPlayerList();
+  }
+});
 $('v-admin').addEventListener('click', (e) => {
+  if (e.target.id === 'flt-reset') {
+    Object.keys(filters).forEach((k) => (filters[k] = ''));
+    return renderAdminHome();
+  }
+  if (e.target.id === 'pick-none') {
+    picked.clear();
+    return renderPlayerList();
+  }
   const open = e.target.closest('[data-open]')?.dataset.open;
-  if (open) openPlayer(open, { tab: 't-mj' });
+  if (open) return void openPlayer(open, { tab: 't-mj' });
+  const give = e.target.closest('[data-blk-give]')?.dataset.blkGive;
+  if (give) {
+    if (!$('blk-item').value) return toast('Crée d’abord des objets dans Gestion.');
+    return void bulk({ type: give, key: $('blk-item').value, qty: Math.max(1, +$('blk-qty').value || 1) });
+  }
+  const act = readProgression(e, 'blk');
+  if (act) bulk(act);
 });
 /** Passe en panneau admin ; option : ouvrir directement la fiche d'un joueur. */
 async function enterAdmin({ target = null } = {}) {
@@ -1489,6 +1622,7 @@ async function enterAdmin({ target = null } = {}) {
   showScreen('admin');
   renderAll();
   renderAdminHome();
+  loadPlayers();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 

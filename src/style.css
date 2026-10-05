@@ -1042,3 +1042,23 @@ body.busy{cursor:progress}
 body.admin .mj-banner{background:#7a2318}
 .adm-players{max-height:none}
 body:not(.admin) #t-mj{display:none!important}
+
+/* ═══ v24 : filtres, sélection et actions de groupe ═══ */
+.filters{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:end;margin:12px 0}
+.flt{display:grid;gap:2px;font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+.flt select,.flt input{font:inherit;font-size:15px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:4px 6px;min-width:110px}
+.flt-q input{min-width:220px}
+.flt-n input{min-width:0;width:90px}
+.bulk{border:3px solid var(--ink);border-radius:10px;background:#fff1c9;padding:12px 14px;margin-bottom:12px;display:grid;gap:8px;box-shadow:4px 4px 0 rgba(23,37,94,.25)}
+.bulk-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.prog-row{display:grid;grid-template-columns:110px 130px auto auto 1fr;gap:8px;align-items:center}
+.prog-row > label:first-child{font-weight:800}
+.prog-row input,.prog-row select{font:inherit;font-size:15px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:4px 6px;min-width:0}
+.prog-row .chk{font-size:13px;font-weight:700;display:inline-flex;gap:5px;align-items:center}
+.pick-all{display:flex;gap:8px;align-items:center;font-weight:700;margin-bottom:4px}
+.mj-players .mj-player{grid-template-columns:auto 1fr;padding:0 0 0 10px;cursor:default}
+.mj-player.picked{background:#fff1c9;border-color:var(--gold-deep)}
+.mj-player-open{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center;text-align:left;background:none;border:none;font:inherit;color:inherit;padding:6px 10px;cursor:pointer;width:100%}
+.mj-player input[type=checkbox],.pick-all input{width:18px;height:18px;accent-color:var(--gold-deep)}
+@media (max-width:620px){.prog-row{grid-template-columns:1fr 1fr}.prog-row > label:first-child{grid-column:1/-1}.flt-q input{min-width:0;width:100%}.flt-q{flex:1 1 100%}}
+.prog-row .btn{justify-self:start}

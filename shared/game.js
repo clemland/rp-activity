@@ -474,7 +474,41 @@ export function staffAction(player, action) {
       else { removeItem(p, k, Math.min(q, count(p, k))); out.toast = `Retiré : ${q} × ${ITEMS[k].name}`; }
       break;
     }
-    case 'xp': out.ups = gainXP(p, int(a.amount, 0, 1e6)); out.toast = `+${int(a.amount, 0, 1e6)} XP`; break;
+    case 'xp': {
+      // Ajoute ou retire un nombre précis d'XP ; en retirant, on peut redescendre de niveau.
+      const n = int(a.amount, -1e7, 1e7);
+      if (!n) fail('Indique une quantité d’XP.');
+      if (n > 0) out.ups = gainXP(p, n);
+      else {
+        p.xp += n;
+        while (p.xp < 0 && p.level > 1) {
+          p.level--;
+          p.xp += XP_NEED(p.level);
+        }
+        p.xp = Math.max(0, p.xp);
+      }
+      out.toast = `${n > 0 ? '+' : '−'}${fmt(Math.abs(n))} XP pour ${fullName(p)} (niveau ${p.level})`;
+      break;
+    }
+    case 'levels': {
+      // Ajoute ou retire des niveaux ; par défaut, les niveaux gagnés donnent leurs points de stats.
+      const n = int(a.amount, -998, 998);
+      if (!n) fail('Indique un nombre de niveaux.');
+      const before = p.level;
+      p.level = Math.min(999, Math.max(1, p.level + n));
+      const gained = p.level - before;
+      if (gained > 0 && a.points !== false) p.statPts += gained * LEVEL_STAT_POINTS;
+      p.xp = Math.min(p.xp, XP_NEED(p.level) - 1);
+      out.toast = `${fullName(p)} : niveau ${before} → ${p.level}`;
+      break;
+    }
+    case 'berry': {
+      const n = int(a.amount, -1e12, 1e12);
+      if (!n) fail('Indique un montant.');
+      p.berry = Math.max(0, p.berry + n);
+      out.toast = `${n > 0 ? '+' : '−'}${fmt(Math.abs(n))} berrys pour ${fullName(p)}`;
+      break;
+    }
     case 'craft.finish': {
       if (!p.craft) fail('Aucune fabrication en cours.');
       p.craft.end = Date.now();

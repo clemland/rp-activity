@@ -103,3 +103,35 @@ test('durées lisibles', () => {
   assert.equal(G.duree(3600 * 2 + 1800), '2 h 30 min');
   assert.equal(G.duree(86400 * 3), '3 j');
 });
+
+test('staff : XP précise, positive ou négative, et redescente de niveau', () => {
+  cat();
+  const p = G.newPlayer('1', { name: 'X', race: 'Mink', classe: 'Tireur' });
+  let r = G.staffAction(p, { type: 'xp', amount: 250 }); // 100 pour le niv 2, 140 pour le niv 3, reste 10
+  assert.equal(r.player.level, 3);
+  assert.equal(r.player.xp, 10);
+  assert.equal(r.ups, 2);
+  r = G.staffAction(r.player, { type: 'xp', amount: -20 }); // 10 - 20 → niv 2 avec 140 - 10 = 130
+  assert.equal(r.player.level, 2);
+  assert.equal(r.player.xp, 130);
+  r = G.staffAction(r.player, { type: 'xp', amount: -99999 });
+  assert.equal(r.player.level, 1);
+  assert.equal(r.player.xp, 0);
+  assert.throws(() => G.staffAction(p, { type: 'xp', amount: 0 }), /quantité/);
+});
+
+test('staff : niveaux précis, avec ou sans points de stats ; berrys ±', () => {
+  cat();
+  const p = G.newPlayer('1', { name: 'X', race: 'Mink', classe: 'Tireur' });
+  let r = G.staffAction(p, { type: 'levels', amount: 5 });
+  assert.equal(r.player.level, 6);
+  assert.equal(r.player.statPts, 15);
+  r = G.staffAction(r.player, { type: 'levels', amount: 2, points: false });
+  assert.equal(r.player.level, 8);
+  assert.equal(r.player.statPts, 15);
+  r = G.staffAction(r.player, { type: 'levels', amount: -100 });
+  assert.equal(r.player.level, 1);
+  r = G.staffAction(r.player, { type: 'berry', amount: 5000 });
+  r = G.staffAction(r.player, { type: 'berry', amount: -9000 });
+  assert.equal(r.player.berry, 0, 'jamais négatif');
+});

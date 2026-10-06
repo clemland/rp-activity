@@ -7,7 +7,7 @@
  */
 import { handler, need } from './_lib/http.js';
 import { userFromRequest, isStaff } from './_lib/discord.js';
-import { findPlayer, loadShop, loadCatalog, channelInfo } from './_lib/context.js';
+import { findPlayer, loadShop, loadCatalog, channelInfo, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
 import { read, remove } from './_lib/db.js';
 
 export default handler(['GET'], async (req) => {
@@ -33,5 +33,9 @@ export default handler(['GET'], async (req) => {
   }
   const found = await findPlayer(target);
   need(found || target === me.uid, 404, 'Ce joueur n’a pas de fiche.');
-  return { me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied, ...info };
+  const cs = found ? await loadCrewAndShips(found.player) : null;
+  return {
+    me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied,
+    crew: cs ? publicCrew(cs.crew, cs.memberNames) : null, ships: cs ? shipList(cs.ships) : [], ...info,
+  };
 });

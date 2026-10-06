@@ -6,6 +6,8 @@
  *  - shops                                    : toutes les boutiques
  *  - shop.save { channelId, from?, shop }      : enregistre la boutique du salon channelId (déplacée depuis « from » si l'ID a changé)
  *  - shop.delete { channelId }
+ *  - crews / crew.save { id?, crew } / crew.delete { id }  : équipages (membres, capitaine, banque, coffre, bateau)
+ *  - ships / ship.save { id?, ship } / ship.delete { id }  : bateaux (créés par le staff ou achetés)
  *  - item.save { id?, item } / item.delete { id }        : base d'objets
  *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
  */
@@ -15,7 +17,7 @@ import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog } from './_lib/context.js';
-import { normalize, normalizeShop, normalizeItem, normalizeRecipe, staffAction, slug, ITEMS } from '../shared/game.js';
+import { normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -67,6 +69,110 @@ export default handler(['POST'], async (req, body) => {
       }
       console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
+    }
+
+    case 'crews':
+      return { crews: await readAll('crews'), ships: await readAll('ships') };
+
+    case 'crew.save': {
+      const input = body.crew || {};
+      const crews = await readAll('crews');
+      const id = body.id && crews[body.id] ? body.id : freeId(input.name || 'equipage', crews);
+      const old = crews[id] ? normalizeCrew(structuredClone(crews[id])) : null;
+      const crew = normalizeCrew({ ...(old || {}), ...input, chest: input.chest ?? old?.chest ?? {} });
+      if (input.flag !== undefined) crew.flag = input.flag ? await ingest(input.flag, 'pavillons', id) : null;
+      // Bateau d'équipage : il doit exister, et devient la propriété de l'équipage.
+      if (crew.ship) {
+        const ship = await read('ships', crew.ship);
+        need(ship, 404, 'Bateau introuvable.');
+        if (ship.data.owner?.kind !== 'crew' || ship.data.owner.id !== id) {
+          await write('ships', crew.ship, { ...ship.data, owner: { kind: 'crew', id } }, ship.version);
+        }
+      }
+      // Un joueur n'est que dans un équipage : on met à jour les fiches concernées.
+      const before = new Set(old?.members || []), after = new Set(crew.members);
+      for (const uid of after) {
+        if (before.has(uid)) continue;
+        await retry(async () => {
+          const row = await read('players', uid);
+          need(row, 404, `Le joueur ${uid} n’a pas de fiche.`);
+          const prev = row.data.crewId;
+          if (prev && prev !== id && crews[prev]) {
+            const other = await read('crews', prev);
+            if (other) {
+              const o = normalizeCrew(other.data);
+              o.members = o.members.filter((m) => m !== uid);
+              await write('crews', prev, normalizeCrew(o), other.version);
+            }
+          }
+          await write('players', uid, { ...row.data, crewId: id }, row.version);
+        });
+      }
+      for (const uid of before) {
+        if (after.has(uid)) continue;
+        await retry(async () => {
+          const row = await read('players', uid);
+          if (row && row.data.crewId === id) await write('players', uid, { ...row.data, crewId: null }, row.version);
+        });
+      }
+      await retry(async () => {
+        const row = await read('crews', id);
+        await write('crews', id, crew, row?.version ?? null);
+      });
+      return { id, crew, toast: old ? `Équipage modifié : ${crew.name}` : `Équipage créé : ${crew.name}` };
+    }
+
+    case 'crew.delete': {
+      const row = await read('crews', body.id);
+      need(row, 404, 'Équipage introuvable.');
+      for (const uid of row.data.members || []) {
+        await retry(async () => {
+          const p = await read('players', uid);
+          if (p && p.data.crewId === body.id) await write('players', uid, { ...p.data, crewId: null }, p.version);
+        });
+      }
+      const ships = await readAll('ships');
+      for (const [sid, sh] of Object.entries(ships)) {
+        if (sh.owner?.kind === 'crew' && sh.owner.id === body.id) {
+          const r = await read('ships', sid);
+          await write('ships', sid, { ...r.data, owner: null }, r.version);
+        }
+      }
+      await remove('crews', body.id);
+      return { toast: `Équipage supprimé : ${row.data.name}. Ses bateaux sont maintenant sans propriétaire.` };
+    }
+
+    case 'ships':
+      return { ships: await readAll('ships') };
+
+    case 'ship.save': {
+      const input = body.ship || {};
+      const ships = await readAll('ships');
+      const id = body.id && ships[body.id] ? body.id : freeId(input.name || 'bateau', ships);
+      const old = ships[id] || null;
+      const ship = old ? normalizeShip({ ...old, ...input }) : newShip(input);
+      if (input.photo !== undefined) ship.photo = input.photo ? await ingest(input.photo, 'bateaux', id) : null;
+      // Si le bateau quitte un équipage, celui-ci n'a plus de bateau attitré.
+      if (old?.owner?.kind === 'crew' && (ship.owner?.kind !== 'crew' || ship.owner.id !== old.owner.id)) {
+        const c = await read('crews', old.owner.id);
+        if (c && c.data.ship === id) await write('crews', old.owner.id, { ...c.data, ship: null }, c.version);
+      }
+      await retry(async () => {
+        const row = await read('ships', id);
+        await write('ships', id, ship, row?.version ?? null);
+      });
+      return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}` };
+    }
+
+    case 'ship.delete': {
+      const row = await read('ships', body.id);
+      need(row, 404, 'Bateau introuvable.');
+      if (row.data.owner?.kind === 'crew') {
+        const c = await read('crews', row.data.owner.id);
+        if (c && c.data.ship === body.id) await write('crews', row.data.owner.id, { ...c.data, ship: null }, c.version);
+      }
+      await remove('ships', body.id);
+      return { toast: `Bateau supprimé : ${row.data.name}` };
     }
 
     case 'shops':

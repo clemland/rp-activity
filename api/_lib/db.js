@@ -16,7 +16,7 @@ export function db() {
   return client;
 }
 
-const TABLES = { players: 'id', shops: 'channel_id', items: 'id', recipes: 'id', meta: 'key' };
+const TABLES = { players: 'id', shops: 'channel_id', items: 'id', recipes: 'id', meta: 'key', crews: 'id', ships: 'id' };
 
 export async function read(table, id) {
   const { data, error } = await db().from(table).select('data, version').eq(TABLES[table], id).maybeSingle();
@@ -68,14 +68,23 @@ export async function retry(fn) {
 export async function listPlayers() {
   const { data, error } = await db()
     .from('players')
-    .select('id, ident:data->id, level:data->level, photo:data->photo, job:data->job')
+    .select('id, ident:data->id, level:data->level, photo:data->photo, job:data->job, crewId:data->crewId')
     .order('updated_at', { ascending: false })
     .limit(1000);
   if (error) throw error;
-  return data.map((r) => ({ uid: r.id, ident: r.ident || {}, level: r.level, photo: r.photo, job: r.job?.id ?? null }));
+  return data.map((r) => ({ uid: r.id, ident: r.ident || {}, level: r.level, photo: r.photo, job: r.job?.id ?? null, crewId: r.crewId ?? null }));
 }
 
-/** Toute une table sous forme { id: data } (objets, recettes, boutiques). */
+/** Plusieurs lignes d'un coup : { id: { data, version } }. */
+export async function readMany(table, ids) {
+  if (!ids.length) return {};
+  const key = TABLES[table];
+  const { data, error } = await db().from(table).select(`${key}, data, version`).in(key, ids);
+  if (error) throw error;
+  return Object.fromEntries(data.map((r) => [r[key], { data: r.data, version: r.version }]));
+}
+
+/** Toute une table sous forme { id: data } (objets, recettes, boutiques, bateaux, équipages). */
 export async function readAll(table) {
   const key = TABLES[table];
   const { data, error } = await db().from(table).select(`${key}, data`).limit(5000);

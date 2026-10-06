@@ -34,7 +34,7 @@ export const RACES = ['Humain', 'Mink', 'Géant', 'Shandia', 'Homme-poisson', 'B
 export const CLASSES = ['Fighter', 'Sabreur', 'Tireur'];
 export const FRUIT_TYPES = ['Paramecia', 'Zoan', 'Logia'];
 export const SLOTS = { arme1: 'Arme 1', arme2: 'Arme 2' };
-export const TECH_SOURCES = { physique: 'Physique', arme: 'Arme', haki: 'Haki', fruit: 'Fruit du démon' };
+export const TECH_SOURCES = { combat: 'Style de combat', fruit: 'Fruit du démon' };
 
 /** Métiers. « Aucun métier » = job.id null. */
 export const JOBS = {
@@ -46,7 +46,9 @@ export const JOBS = {
 };
 
 /** Catégories d'objets. Seules les armes s'équipent. */
-export const KIND = { arme: 'Arme', conso: 'Consommable', mat: 'Matériau', tresor: 'Trésor', objet: 'Objet' };
+export const KIND = { arme: 'Arme', conso: 'Consommable', mat: 'Matériau', tresor: 'Trésor', objet: 'Objet', bateau: 'Bateau' };
+export const CHEST_BASE = 100; // capacité (kg) du coffre d'un équipage sans bateau
+export const SHIP_TYPES = ['Caravelle', 'Brick', 'Goélette', 'Frégate', 'Galion', 'Navire de guerre', 'Chaloupe'];
 
 /* ═══ Catalogue (objets et recettes du staff) ════════════════════════════ */
 export let ITEMS = {}; // id → { name, kind, value, desc, img }
@@ -56,7 +58,10 @@ export function setCatalog({ items = {}, recipes = {} } = {}) {
   RECIPES = recipes;
 }
 /** Objet du catalogue, ou un objet « supprimé » si le staff l'a effacé. */
-export const itemOf = (k) => ITEMS[k] || { name: 'Objet supprimé', kind: 'objet', value: 0, desc: 'Cet objet n’existe plus.', img: null, missing: true };
+export const itemOf = (k) => ITEMS[k] || { name: 'Objet supprimé', kind: 'objet', value: 0, weight: 0, desc: 'Cet objet n’existe plus.', img: null, missing: true };
+export const itemWeight = (k) => Number(ITEMS[k]?.weight) || 0;
+/** Poids lisible : « 12,5 kg ». */
+export const kg = (w) => `${(Math.round(w * 10) / 10).toLocaleString('fr-FR')} kg`;
 
 /* ═══ Outils ═════════════════════════════════════════════════════════════ */
 export class GameError extends Error {}
@@ -121,6 +126,8 @@ export function normalize(p) {
   if (p.job.id && !JOBS[p.job.id]) p.job.id = null;
   delete p.job.xp;
   p.techniques ??= [];
+  for (const t of p.techniques) if (!TECH_SOURCES[t.src]) t.src = 'combat';
+  p.crewId ??= null;
   p.inv ??= [];
   p.inv = p.inv.slice(0, BAG).map((s) => (s && s[0] && s[1] > 0 ? s : null));
   while (p.inv.length < BAG) p.inv.push(null);
@@ -138,6 +145,7 @@ export const count = (p, k) => p.inv.reduce((a, s) => a + (s && s[0] === k ? s[1
 export const equippedCount = (p, k) => Object.values(p.equip).filter((x) => x === k).length;
 export const isEquipped = (p, k) => Object.values(p.equip).includes(k);
 export const isWeapon = (k) => ITEMS[k]?.kind === 'arme';
+export const invWeight = (p) => p.inv.reduce((a, s) => a + (s ? itemWeight(s[0]) * s[1] : 0), 0);
 
 export function addItem(p, k, q = 1) {
   if (!ITEMS[k]) fail('Objet inconnu.');
@@ -184,10 +192,13 @@ export function slug(name) {
 export function normalizeItem(x) {
   const name = str(x.name, 60);
   if (!name) fail('Donne un nom à l’objet.');
+  const kind = KIND[x.kind] ? x.kind : 'objet';
   return {
     name,
-    kind: KIND[x.kind] ? x.kind : 'objet',
+    kind,
     value: int(x.value, 0, 1e12),
+    weight: Math.round(Math.min(1e5, Math.max(0, Number(String(x.weight ?? 0).replace(',', '.')) || 0)) * 10) / 10,
+    ...(kind === 'bateau' && { ship: normalizeShipStats(x.ship || {}) }),
     desc: str(x.desc, 400),
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
   };
@@ -351,10 +362,26 @@ export function playerAction(player, action, ctx = {}) {
       out.toast = 'Fabrication annulée, ingrédients rendus';
       break;
     }
+    case 'ship.edit': {
+      // Le propriétaire (ou le capitaine pour un bateau d'équipage) renomme, décrit, change la photo.
+      const ship = clone(ctx.ship);
+      if (!ship) fail('Bateau introuvable.');
+      if (!canEditShip(p, ship, ctx.crew)) fail('Ce bateau ne t’appartient pas.');
+      if ('name' in a) {
+        const n = str(a.name, 60);
+        if (!n) fail('Donne un nom au bateau.');
+        ship.name = n;
+      }
+      if ('desc' in a) ship.desc = str(a.desc, 600);
+      if ('photo' in a) ship.photo = a.photo ? str(a.photo, 600000) : null;
+      out.ship = ship;
+      out.toast = `Bateau mis à jour : ${ship.name}`;
+      break;
+    }
     case 'tech.save': {
       const name = str(a.name, 40);
       if (!name) fail('Donne un nom à ta technique.');
-      const data = { name, src: TECH_SOURCES[a.src] ? a.src : 'physique', desc: str(a.desc, 600), ok: false };
+      const data = { name, src: TECH_SOURCES[a.src] ? a.src : 'combat', desc: str(a.desc, 600), ok: false };
       if (a.media !== undefined) data.media = a.media ? str(a.media, 600000) : null;
       if (a.id != null) {
         const t = p.techniques.find((x) => x.id === a.id);
@@ -393,7 +420,8 @@ export function playerAction(player, action, ctx = {}) {
       const [k, price, stock] = row;
       if (stock === 0) fail('Épuisé.');
       if (p.berry < price) fail('Pas assez de berrys.');
-      if (!addItem(p, k, 1)) fail('Inventaire plein.');
+      if (ITEMS[k].kind === 'bateau') out.newShip = newShip({ model: k, owner: { kind: 'player', id: p.uid } }, now);
+      else if (!addItem(p, k, 1)) fail('Inventaire plein.');
       p.berry -= price;
       if (stock > 0) row[2]--;
       out.shop = shop; out.toast = `Acheté : ${ITEMS[k].name}`; out.item = k; out.delta = -price;
@@ -528,15 +556,131 @@ export function staffAction(player, action) {
   return out;
 }
 
+/* ═══ Bateaux ════════════════════════════════════════════════════════════ */
+/** Caractéristiques enregistrées à la création : type, canons, capacité (kg). */
+export function normalizeShipStats(x) {
+  return {
+    type: str(x.type, 40) || 'Navire',
+    cannons: int(x.cannons, 0, 500),
+    capacity: Math.round(Math.min(1e7, Math.max(0, Number(x.capacity) || 0))),
+  };
+}
+/** Nouveau bateau, à partir d'un modèle (objet « Bateau ») ou de caractéristiques libres. */
+export function newShip({ model = null, name, desc, photo, type, cannons, capacity, owner = null } = {}, now = Date.now()) {
+  const m = model ? ITEMS[model] : null;
+  if (model && m?.kind !== 'bateau') fail('Ce modèle de bateau n’existe pas.');
+  const stats = normalizeShipStats(m ? { ...m.ship, ...(type != null && { type }), ...(cannons != null && { cannons }), ...(capacity != null && { capacity }) } : { type, cannons, capacity });
+  return normalizeShip({ name: str(name, 60) || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, owner, created: now });
+}
+export function normalizeShip(s) {
+  Object.assign(s, normalizeShipStats(s));
+  s.name = str(s.name, 60) || 'Bateau sans nom';
+  s.desc ??= '';
+  s.photo ??= null;
+  s.icon ??= null;
+  s.owner = s.owner && ['player', 'crew'].includes(s.owner.kind) && s.owner.id ? { kind: s.owner.kind, id: String(s.owner.id) } : null;
+  return s;
+}
+const isCaptain = (p, crew) => !!crew && crew.captain === p.uid;
+export function canEditShip(p, ship, crew) {
+  if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
+  if (ship.owner?.kind === 'crew') return isCaptain(p, crew) && crew.id === ship.owner.id;
+  return false;
+}
+
+/* ═══ Équipages ══════════════════════════════════════════════════════════ */
+export function normalizeCrew(c) {
+  c.name = str(c.name, 60) || 'Équipage sans nom';
+  c.flag ??= null; // Jolly Roger (image)
+  c.members = [...new Set((c.members || []).map(String))];
+  c.captain = c.captain && c.members.includes(String(c.captain)) ? String(c.captain) : c.members[0] ?? null;
+  c.bank = int(c.bank, 0, 1e13);
+  c.chest = Object.fromEntries(Object.entries(c.chest || {}).map(([k, q]) => [k, int(q, 0, 1e7)]).filter(([, q]) => q > 0));
+  c.ship ??= null;
+  return c;
+}
+export const chestWeight = (c) => Object.entries(c.chest || {}).reduce((a, [k, q]) => a + itemWeight(k) * q, 0);
+export const crewCapacity = (ship) => (ship ? ship.capacity : CHEST_BASE);
+
+/**
+ * Action d'un membre sur son équipage (banque, coffre, bateau d'équipage).
+ * ctx : { crew, ships: { id: ship } } ; renvoie { player, crew, ships?, toast, item? }.
+ */
+export function crewAction(player, action, ctx = {}) {
+  const p = clone(player), crew = clone(ctx.crew);
+  const a = action || {};
+  if (!crew || !crew.members.includes(p.uid)) fail('Tu ne fais pas partie de cet équipage.');
+  const ship = crew.ship ? ctx.ships?.[crew.ship] ?? null : null;
+  const out = { player: p, crew, toast: null };
+  switch (a.type) {
+    case 'crew.bank.deposit': {
+      const n = int(a.amount, 0, 1e13);
+      if (!n) fail('Indique un montant.');
+      if (p.berry < n) fail('Pas assez de berrys.');
+      p.berry -= n; crew.bank += n;
+      out.toast = `${fmt(n)} berrys déposés dans la banque de l’équipage`;
+      break;
+    }
+    case 'crew.bank.withdraw': {
+      if (!isCaptain(p, crew)) fail('Seul le capitaine peut retirer de l’argent.');
+      const n = int(a.amount, 0, 1e13);
+      if (!n) fail('Indique un montant.');
+      if (crew.bank < n) fail('La banque n’a pas assez de berrys.');
+      crew.bank -= n; p.berry += n;
+      out.toast = `${fmt(n)} berrys retirés de la banque`;
+      break;
+    }
+    case 'crew.chest.deposit': {
+      const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
+      if (count(p, k) < q) fail('Tu n’as pas assez de cet objet.');
+      if (isEquipped(p, k) && count(p, k) - q < equippedCount(p, k)) fail('Retire-le d’abord de ton équipement.');
+      const cap = crewCapacity(ship);
+      if (chestWeight(crew) + itemWeight(k) * q > cap + 1e-9) fail(`Le coffre est trop chargé (${kg(chestWeight(crew))} / ${kg(cap)}).`);
+      removeItem(p, k, q);
+      crew.chest[k] = (crew.chest[k] || 0) + q;
+      out.toast = `Déposé dans le coffre : ${q} × ${itemOf(k).name}`; out.item = k;
+      break;
+    }
+    case 'crew.chest.withdraw': {
+      const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
+      if ((crew.chest[k] || 0) < q) fail('Le coffre n’en contient pas assez.');
+      if (!ITEMS[k]) fail('Objet supprimé : il ne peut plus être sorti.');
+      if (!addItem(p, k, q)) fail('Ton inventaire est plein.');
+      crew.chest[k] -= q;
+      if (!crew.chest[k]) delete crew.chest[k];
+      out.toast = `Sorti du coffre : ${q} × ${itemOf(k).name}`; out.item = k;
+      break;
+    }
+    case 'crew.ship': {
+      if (!isCaptain(p, crew)) fail('Seul le capitaine choisit le bateau de l’équipage.');
+      if (!a.shipId) { crew.ship = null; out.toast = 'L’équipage n’a plus de bateau attitré'; break; }
+      const s = clone(ctx.ships?.[a.shipId]);
+      if (!s) fail('Bateau introuvable.');
+      const mine = s.owner?.kind === 'player' && s.owner.id === p.uid;
+      const ours = s.owner?.kind === 'crew' && s.owner.id === crew.id;
+      if (!mine && !ours) fail('Ce bateau n’appartient ni à toi ni à l’équipage.');
+      if (chestWeight(crew) > s.capacity) fail(`Le coffre (${kg(chestWeight(crew))}) ne tient pas dans ce bateau (${kg(s.capacity)}).`);
+      s.owner = { kind: 'crew', id: crew.id }; // le bateau devient celui de l'équipage
+      crew.ship = a.shipId;
+      out.ships = { [a.shipId]: s };
+      out.toast = `${s.name} est maintenant le bateau de l’équipage`;
+      break;
+    }
+    default: fail('Action inconnue.');
+  }
+  return out;
+}
+
 /* ═══ Mode démo (hors Discord) ═══════════════════════════════════════════ */
 /** Petit catalogue d'exemple, seulement pour la démo : le vrai est vide au départ. */
 export function demoCatalog() {
   return {
     items: {
-      'bois-ex': { name: 'Bois (exemple)', kind: 'mat', value: 500, desc: 'Objet d’exemple de la démo.', img: null },
-      'clous-ex': { name: 'Clous (exemple)', kind: 'mat', value: 200, desc: 'Objet d’exemple de la démo.', img: null },
-      'tonneau-ex': { name: 'Tonneau (exemple)', kind: 'objet', value: 2000, desc: 'Objet d’exemple de la démo.', img: null },
-      'sabre-ex': { name: 'Sabre (exemple)', kind: 'arme', value: 8000, desc: 'Une arme d’exemple.', img: null },
+      'bois-ex': { name: 'Bois (exemple)', kind: 'mat', value: 500, weight: 2, desc: 'Objet d’exemple de la démo.', img: null },
+      'clous-ex': { name: 'Clous (exemple)', kind: 'mat', value: 200, weight: 0.5, desc: 'Objet d’exemple de la démo.', img: null },
+      'tonneau-ex': { name: 'Tonneau (exemple)', kind: 'objet', value: 2000, weight: 15, desc: 'Objet d’exemple de la démo.', img: null },
+      'sabre-ex': { name: 'Sabre (exemple)', kind: 'arme', value: 8000, weight: 3, desc: 'Une arme d’exemple.', img: null },
+      'caravelle-ex': { name: 'Caravelle (exemple)', kind: 'bateau', value: 150000, weight: 0, ship: { type: 'Caravelle', cannons: 4, capacity: 300 }, desc: 'Petit navire rapide, idéal pour débuter.', img: null },
     },
     recipes: {
       'tonneau-ex': { name: 'Assembler un tonneau', job: 'charpentier', lvl: 1, seconds: 20, needs: { 'bois-ex': 2, 'clous-ex': 1 }, gives: { 'tonneau-ex': 1 }, desc: 'Recette d’exemple : 20 secondes.' },
@@ -553,11 +697,20 @@ export function demoPlayer() {
     fruit: { name: 'Shio Shio no Mi', type: 'Paramecia', stars: 2, desc: "Fait naître, durcit et façonne le sel." },
     job: { id: 'charpentier', lvl: 1 },
     techniques: [{ id: 1, name: 'Mur de sel', src: 'fruit', ok: true, media: null, desc: 'Une paroi de sel cristallisé jaillit devant lui.' }],
+    crewId: 'goeland-noir',
     inv: [['sabre-ex', 1], ['bois-ex', 4], ['clous-ex', 2]],
     equip: { arme1: 'sabre-ex', arme2: null },
   });
 }
 export function demoShop() {
   return { channel: '#port-brisant', name: 'Comptoir de Port-Brisant', seller: 'Maman Rosa', face: '👵', img: null, buyRate: 0.4, difficulty: 0,
-    items: [['bois-ex', 600, -1], ['clous-ex', 250, 20], ['sabre-ex', 9000, 2]] };
+    items: [['bois-ex', 600, -1], ['clous-ex', 250, 20], ['sabre-ex', 9000, 2], ['caravelle-ex', 150000, 1]] };
+}
+export function demoCrew() {
+  return normalizeCrew({ id: 'goeland-noir', name: 'Équipage du Goéland Noir', flag: null, captain: 'demo', members: ['demo', 'pnj-1'], bank: 25000, chest: { 'bois-ex': 6 }, ship: 'brise-lames' });
+}
+export function demoShips() {
+  return {
+    'brise-lames': normalizeShip({ name: 'Le Brise-Lames', desc: 'Le navire de l’équipage.', type: 'Brick', cannons: 8, capacity: 500, owner: { kind: 'crew', id: 'goeland-noir' }, created: 0 }),
+  };
 }

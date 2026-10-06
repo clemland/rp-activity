@@ -16,8 +16,10 @@
     <button class="scr" role="tab" data-screen="admin" aria-controls="s-admin" id="scr-admin" hidden><span class="ico" data-i="125"></span><span>Joueurs</span></button>
     <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
     <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
+    <button class="scr" role="tab" data-screen="crew" aria-controls="s-crew"><span class="ico" data-i="1"></span><span>Équipage</span></button>
     <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
     <button class="scr" role="tab" data-screen="ashop" aria-controls="s-ashop" id="scr-ashop" hidden><span class="ico" data-i="265"></span><span>Boutiques</span></button>
+    <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Flotte</span></button>
     <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
   </div>
   <div class="wallet-chips">
@@ -80,6 +82,14 @@
 
 <main class="screen" id="s-admin" role="tabpanel" hidden>
   <section class="sheet" id="v-admin"></section>
+</main>
+
+<main class="screen" id="s-crew" role="tabpanel" hidden>
+  <section class="sheet" id="v-crew"></section>
+</main>
+
+<main class="screen" id="s-fleet" role="tabpanel" hidden>
+  <section class="sheet" id="v-fleet"></section>
 </main>
 
 <main class="screen" id="s-ashop" role="tabpanel" hidden>
@@ -177,6 +187,15 @@
         <div class="wide"><label for="it-name">Nom</label><input id="it-name" maxlength="60"></div>
         <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
         <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
+        <div><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
+        <div class="wide it-ship" id="it-ship" hidden>
+          <div class="form">
+            <div><label for="it-stype">Type de bateau</label><input id="it-stype" list="ship-types" maxlength="40"></div>
+            <div><label for="it-cannons">Canons</label><input id="it-cannons" type="number" min="0" inputmode="numeric"></div>
+            <div><label for="it-cap">Capacité de stockage (kg)</label><input id="it-cap" type="number" min="0" inputmode="numeric"></div>
+          </div>
+          <p class="note" style="margin:4px 0 0">Un objet « Bateau » est un modèle : acheté en boutique, il devient un vrai bateau que le joueur peut nommer.</p>
+        </div>
         <div class="wide"><label for="it-desc">Description</label><input id="it-desc" maxlength="400"></div>
       </div>
       <div class="se-face">
@@ -228,6 +247,44 @@
       <div class="form-actions">
         <button type="button" class="btn ghost" data-close>Annuler</button>
         <button type="button" class="btn" id="cf-ok">Confirmer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-ship" aria-labelledby="sh-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="sh-title">Bateau</h2><p id="sh-sub"></p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="sh-body"></div>
+      <p class="err" id="sh-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="sh-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="sh-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-crew" aria-labelledby="cr-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="cr-title">Équipage</h2><p>Nom, Jolly Roger, membres, capitaine, banque et bateau.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="cr-body"></div>
+      <p class="err" id="cr-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="cr-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="cr-save">Enregistrer</button>
       </div>
     </div>
   </div>
@@ -291,5 +348,6 @@
 
 
 <script type="module" src="/src/main.js"></script>
+<datalist id="ship-types"></datalist>
 </body>
 </html>

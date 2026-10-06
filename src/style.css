@@ -1090,3 +1090,44 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ashop-items td .ico{--s:24px;vertical-align:middle;margin-right:4px}
 .ashop-acts{display:flex;gap:8px;flex-wrap:wrap}
 @media (max-width:620px){.ashop-row{grid-template-columns:auto 1fr auto}.ashop-row .chan-tag{grid-column:2;justify-self:start}}
+
+/* ═══ v26 : inventaire compact, équipage, flotte ══════ */
+.hold{grid-template-columns:repeat(auto-fill,58px)!important;justify-content:start;gap:6px}
+.hold .cell{width:58px;height:58px;aspect-ratio:auto}
+.hold .cell .ico{--s:40px!important}
+.shold{grid-template-columns:repeat(auto-fill,50px)!important}
+.shold .cell{width:50px;height:50px}
+.shold .cell .ico{--s:34px!important}
+.weight{font-weight:700;color:var(--muted)}
+.crew-hero{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center}
+.flag{width:110px;height:110px;border:3px solid var(--ink);border-radius:8px;background:#1b1b1b;display:grid;place-items:center;overflow:hidden;box-shadow:4px 4px 0 var(--shadow)}
+.flag img{width:100%;height:100%;object-fit:cover}
+.flag .ico{--s:70px}
+.crew-hero h2{font-family:"Ultra",Georgia,serif;font-weight:400;font-size:28px;margin:0;line-height:1.1}
+.members{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.members span{border:2px solid var(--ink);border-radius:20px;padding:1px 10px;background:#fff7e0;font-weight:700;font-size:14px}
+.members span.cap{background:var(--gold)}
+.crew-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:18px}
+.crew-box{border:3px solid var(--ink);border-radius:10px;background:#fbf0d2;padding:12px 14px;display:grid;gap:10px;align-content:start}
+.crew-box h3{margin:0;font-family:"Ultra",Georgia,serif;font-weight:400;font-size:19px}
+.bank-amount{font-family:"Ultra",Georgia,serif;font-size:28px}
+.chest{display:flex;flex-wrap:wrap;gap:6px}
+.chest .need{cursor:default}
+.ship-card{display:grid;grid-template-columns:minmax(0,180px) 1fr;gap:14px;border:3px solid var(--ink);border-radius:10px;background:#fbf0d2;padding:12px;box-shadow:4px 4px 0 rgba(23,37,94,.25)}
+.ship-pic{border:3px solid var(--ink);border-radius:8px;overflow:hidden;background:#9fd3ef;aspect-ratio:4/3;display:grid;place-items:center}
+.ship-pic img{width:100%;height:100%;object-fit:cover}
+.ship-pic .ico{--s:64px}
+.ship-card h3{margin:0;font-size:20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ship-card h3 .ico{--s:30px}
+.ship-stats{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.ship-stats span{border:2px solid var(--ink);border-radius:4px;padding:1px 8px;font-weight:700;font-size:13px;background:#fff7e0}
+.ship-card p{margin:4px 0 8px}
+.ships{display:grid;gap:12px}
+.fleet-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:12px}
+.member-pick{display:grid;gap:4px;max-height:240px;overflow:auto;border:2px solid var(--ink);border-radius:6px;padding:6px;background:#fffaea}
+.member-pick label{display:flex;gap:8px;align-items:center;font-weight:600}
+.img-field{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center}
+.img-field .prev{width:96px;height:72px;border:3px solid var(--ink);border-radius:6px;overflow:hidden;background:#9fd3ef;display:grid;place-items:center}
+.img-field .prev img{width:100%;height:100%;object-fit:cover}
+.img-field .prev .ico{--s:44px}
+@media (max-width:620px){.ship-card,.crew-hero{grid-template-columns:1fr}.flag{width:90px;height:90px}}

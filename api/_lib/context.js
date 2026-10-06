@@ -1,6 +1,6 @@
 /** Chargement commun : fiche, boutique du salon, catalogue d'objets et de recettes. */
-import { normalize, normalizeShop, setCatalog } from '../../shared/game.js';
-import { read, readAll } from './db.js';
+import { normalize, normalizeShop, normalizeCrew, normalizeShip, setCatalog, fullName } from '../../shared/game.js';
+import { read, readAll, readMany, db } from './db.js';
 import { channelName } from './discord.js';
 import { HttpError } from './http.js';
 
@@ -35,3 +35,34 @@ export async function channelInfo(channelId) {
 
 /** Ce que voit le site : on ne renvoie pas les champs internes. */
 export const publicPlayer = (p) => p;
+
+/**
+ * Équipage du joueur et bateaux qu'il peut voir (les siens et ceux de son équipage).
+ * Renvoie { crew, crewVersion, ships: { id: ship }, shipVersions, memberNames }.
+ */
+export async function loadCrewAndShips(player) {
+  const out = { crew: null, crewVersion: null, ships: {}, shipVersions: {}, memberNames: {} };
+  if (player.crewId) {
+    const row = await read('crews', player.crewId);
+    if (row) {
+      out.crew = { id: player.crewId, ...normalizeCrew(row.data) };
+      out.crewVersion = row.version;
+      const members = await readMany('players', out.crew.members);
+      for (const uid of out.crew.members) out.memberNames[uid] = members[uid] ? fullName(members[uid].data) : 'Fiche supprimée';
+    }
+  }
+  const { data, error } = await db().from('ships').select('id, data, version');
+  if (error) throw error;
+  for (const r of data) {
+    const o = r.data.owner;
+    if ((o?.kind === 'player' && o.id === player.uid) || (o?.kind === 'crew' && out.crew && o.id === out.crew.id)) {
+      out.ships[r.id] = normalizeShip(r.data);
+      out.shipVersions[r.id] = r.version;
+    }
+  }
+  return out;
+}
+
+/** Ce que voit le site d'un équipage et de ses bateaux. */
+export const publicCrew = (c, names) => (c ? { ...c, memberNames: names } : null);
+export const shipList = (ships) => Object.entries(ships).map(([id, s]) => ({ id, ...s }));

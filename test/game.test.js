@@ -67,7 +67,7 @@ test('craft : métier et niveau de maîtrise requis', () => {
 test('catalogue : validation des objets et recettes', () => {
   cat();
   assert.throws(() => G.normalizeItem({ name: '' }), /nom/);
-  assert.deepEqual(G.normalizeItem({ name: ' Rhum ', kind: 'bizarre', value: '-5' }), { name: 'Rhum', kind: 'objet', value: 0, desc: '', img: null });
+  assert.deepEqual(G.normalizeItem({ name: ' Rhum ', kind: 'bizarre', value: '-5' }), { name: 'Rhum', kind: 'objet', value: 0, weight: 0, desc: '', img: null });
   assert.throws(() => G.normalizeRecipe({ name: 'X', gives: { inconnu: 1 } }), /produire/);
   const r = G.normalizeRecipe({ name: 'X', job: 'forgeron', lvl: 9, seconds: 99999999, needs: { 'bois-ex': 2, fantome: 1 }, gives: { 'tonneau-ex': 1 } });
   assert.equal(r.job, null);
@@ -134,4 +134,70 @@ test('staff : niveaux précis, avec ou sans points de stats ; berrys ±', () => 
   r = G.staffAction(r.player, { type: 'berry', amount: 5000 });
   r = G.staffAction(r.player, { type: 'berry', amount: -9000 });
   assert.equal(r.player.berry, 0, 'jamais négatif');
+});
+
+test('techniques : deux types seulement, anciennes converties', () => {
+  cat();
+  assert.deepEqual(Object.keys(G.TECH_SOURCES), ['combat', 'fruit']);
+  const p = G.normalize({ id: { name: 'X' }, techniques: [{ id: 1, name: 'A', src: 'haki' }, { id: 2, name: 'B', src: 'fruit' }] });
+  assert.equal(p.techniques[0].src, 'combat');
+  assert.equal(p.techniques[1].src, 'fruit');
+});
+
+test('poids des objets et de l’inventaire', () => {
+  cat();
+  const p = G.demoPlayer();
+  assert.equal(G.invWeight(p), 3 + 4 * 2 + 2 * 0.5);
+  assert.equal(G.normalizeItem({ name: 'Ancre', weight: '12,5' }).weight, 12.5);
+  assert.equal(G.kg(12.5), '12,5 kg');
+});
+
+test('bateau : achat en boutique, nom/photo par le propriétaire', () => {
+  cat();
+  const p = G.demoPlayer(), shop = G.demoShop();
+  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop, now: 5 });
+  assert.equal(r.newShip.type, 'Caravelle');
+  assert.equal(r.newShip.cannons, 4);
+  assert.equal(r.newShip.capacity, 300);
+  assert.deepEqual(r.newShip.owner, { kind: 'player', id: 'demo' });
+  assert.equal(G.count(r.player, 'caravelle-ex'), 0, 'pas dans l’inventaire');
+  const e = G.playerAction(r.player, { type: 'ship.edit', name: 'La Mouette', desc: 'Ma barque', photo: '/media/x.jpg' }, { ship: r.newShip });
+  assert.equal(e.ship.name, 'La Mouette');
+  const autre = { ...p, uid: 'autre' };
+  assert.throws(() => G.playerAction(autre, { type: 'ship.edit', name: 'Volé' }, { ship: r.newShip }), /appartient/);
+});
+
+test('équipage : banque, coffre avec capacité du bateau, droits du capitaine', () => {
+  cat();
+  const crew = G.demoCrew(), ships = G.demoShips();
+  const capitaine = G.demoPlayer();
+  const membre = { ...G.demoPlayer(), uid: 'pnj-1' };
+  let r = G.crewAction(membre, { type: 'crew.bank.deposit', amount: 1000 }, { crew, ships });
+  assert.equal(r.crew.bank, 26000);
+  assert.throws(() => G.crewAction(membre, { type: 'crew.bank.withdraw', amount: 10 }, { crew, ships }), /capitaine/);
+  r = G.crewAction(capitaine, { type: 'crew.bank.withdraw', amount: 5000 }, { crew, ships });
+  assert.equal(r.player.berry, capitaine.berry + 5000);
+  r = G.crewAction(membre, { type: 'crew.chest.deposit', key: 'bois-ex', qty: 4 }, { crew, ships });
+  assert.equal(r.crew.chest['bois-ex'], 10);
+  const petit = { ...crew, ship: null, chest: { 'tonneau-ex': 6 } }; // 90 kg sur 100 sans bateau
+  assert.throws(() => G.crewAction(membre, { type: 'crew.chest.deposit', key: 'bois-ex', qty: 4 }, { crew: { ...petit, chest: { 'tonneau-ex': 7 } }, ships }), /trop chargé/);
+  G.crewAction(membre, { type: 'crew.chest.deposit', key: 'bois-ex', qty: 4 }, { crew: petit, ships }); // 98 kg : passe
+  r = G.crewAction(membre, { type: 'crew.chest.withdraw', key: 'bois-ex', qty: 6 }, { crew, ships });
+  assert.equal(r.crew.chest['bois-ex'], undefined);
+  const etranger = { ...G.demoPlayer(), uid: 'x' };
+  assert.throws(() => G.crewAction(etranger, { type: 'crew.bank.deposit', amount: 1 }, { crew, ships }), /fais pas partie/);
+});
+
+test('équipage : le capitaine assigne son bateau, qui devient celui de l’équipage', () => {
+  cat();
+  const crew = G.demoCrew();
+  const ships = { ...G.demoShips(), perso: G.newShip({ name: 'Perso', type: 'Goélette', cannons: 2, capacity: 10, owner: { kind: 'player', id: 'demo' } }) };
+  const p = G.demoPlayer();
+  assert.throws(() => G.crewAction(p, { type: 'crew.ship', shipId: 'perso' }, { crew, ships }), /ne tient pas/);
+  const lighter = { ...crew, chest: {} };
+  const r = G.crewAction(p, { type: 'crew.ship', shipId: 'perso' }, { crew: lighter, ships });
+  assert.equal(r.crew.ship, 'perso');
+  assert.deepEqual(r.ships.perso.owner, { kind: 'crew', id: 'goeland-noir' });
+  const membre = { ...p, uid: 'pnj-1' };
+  assert.throws(() => G.crewAction(membre, { type: 'crew.ship', shipId: null }, { crew, ships }), /capitaine/);
 });

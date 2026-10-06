@@ -6,14 +6,15 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 /* ─── Fausse base Supabase ─── */
-const tables = { players: new Map(), shops: new Map(), items: new Map(), recipes: new Map(), meta: new Map() };
-const keyOf = { players: 'id', shops: 'channel_id', items: 'id', recipes: 'id', meta: 'key' };
+const tables = { players: new Map(), shops: new Map(), items: new Map(), recipes: new Map(), meta: new Map(), crews: new Map(), ships: new Map() };
+const keyOf = { players: 'id', shops: 'channel_id', items: 'id', recipes: 'id', meta: 'key', crews: 'id', ships: 'id' };
 function query(table) {
   const q = { filters: [], op: 'select', payload: null };
-  const rows = () => [...tables[table].values()].filter((r) => q.filters.every(([k, v]) => r[k] === v));
+  const rows = () => [...tables[table].values()].filter((r) => q.filters.every(([k, v, inList]) => (inList ? v.includes(r[k]) : r[k] === v)));
   const api = {
     select: () => api, order: () => api, limit: () => api,
     eq: (k, v) => (q.filters.push([k, v]), api),
+    in: (k, vals) => (q.filters.push([k, vals, true]), api),
     insert: (row) => {
       const id = row[keyOf[table]];
       if (tables[table].has(id)) return Promise.resolve({ error: { code: '23505' } });
@@ -32,7 +33,7 @@ function query(table) {
       } else if (q.op === 'delete') {
         rows().forEach((r) => tables[table].delete(r[keyOf[table]]));
         res = { error: null };
-      } else res = { data: rows().map((r) => ({ id: r.id, key: r.key, channel_id: r.channel_id, data: r.data, ident: r.data?.id, level: r.data?.level, photo: r.data?.photo })), error: null };
+      } else res = { data: rows().map((r) => ({ id: r.id, key: r.key, channel_id: r.channel_id, data: r.data, version: r.version, ident: r.data?.id, level: r.data?.level, photo: r.data?.photo, job: r.data?.job, crewId: r.data?.crewId })), error: null };
       return Promise.resolve(res).then(ok, ko);
     },
   };
@@ -237,4 +238,64 @@ test('boutiques par ID de salon : ID inconnu, autre serveur, déplacement, liste
   r = await call('staff', { body: { op: 'shops' }, headers: MJ });
   assert.deepEqual(Object.keys(r.out.shops).sort(), ['111111111111111111', '222222222222222222']);
   assert.equal(r.out.shops['222222222222222222'].channel, '#île-aux-forges');
+});
+
+test('équipage : création par le staff, membres synchronisés, changement d’équipage', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  await call('bot', { body: { op: 'register', userId: 'u8', name: 'Zoro Bis', race: 'Humain', classe: 'Sabreur' }, headers: H });
+  let r = await call('staff', { body: { op: 'crew.save', crew: { name: 'Les Mouettes', captain: 'u1', members: ['u1', 'u8'], bank: 500 } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.id, 'les-mouettes');
+  assert.equal(tables.players.get('u1').data.crewId, 'les-mouettes');
+  r = await call('state', { method: 'GET', query: {}, headers: J });
+  assert.equal(r.out.crew.name, 'Les Mouettes');
+  assert.equal(r.out.crew.memberNames.u8, 'Zoro Bis');
+  // u8 passe dans un autre équipage : il quitte le premier
+  await call('staff', { body: { op: 'crew.save', crew: { name: 'Les Albatros', members: ['u8'] } }, headers: MJ });
+  assert.deepEqual(tables.crews.get('les-mouettes').data.members, ['u1']);
+  assert.equal(tables.players.get('u8').data.crewId, 'les-albatros');
+  // retiré de l'équipage : plus de crewId
+  await call('staff', { body: { op: 'crew.save', id: 'les-albatros', crew: { members: [] } }, headers: MJ });
+  assert.equal(tables.players.get('u8').data.crewId, null);
+});
+
+test('équipage : banque et coffre par les joueurs, retrait d’argent réservé au capitaine', async () => {
+  await call('staff', { body: { op: 'item.save', item: { name: 'Corde', kind: 'mat', value: 10, weight: 30 } }, headers: MJ });
+  await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'give', key: 'corde', qty: 4 } }, headers: MJ });
+  let r = await call('action', { body: { action: { type: 'crew.bank.deposit', amount: 100 } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.crew.bank, 600);
+  r = await call('action', { body: { action: { type: 'crew.chest.deposit', key: 'corde', qty: 3 } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('action', { body: { action: { type: 'crew.chest.deposit', key: 'corde', qty: 1 } }, headers: J });
+  assert.equal(r.status, 400, 'coffre de 100 kg sans bateau');
+  assert.match(r.out.error, /trop chargé/);
+  r = await call('action', { body: { action: { type: 'crew.bank.withdraw', amount: 50 } }, headers: J });
+  assert.equal(r.status, 200, 'u1 est capitaine');
+});
+
+test('bateaux : création par le staff, achat en boutique, renommage, assignation à l’équipage', async () => {
+  let r = await call('staff', { body: { op: 'ship.save', ship: { name: 'Le Vaillant', type: 'Frégate', cannons: 20, capacity: 800, owner: { kind: 'player', id: 'u1' } } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.id, 'le-vaillant');
+  await call('staff', { body: { op: 'item.save', item: { name: 'Caravelle', kind: 'bateau', value: 1000, ship: { type: 'Caravelle', cannons: 4, capacity: 300 } } }, headers: MJ });
+  await call('staff', { body: { op: 'shop.save', channelId: '111111111111111111', shop: { name: 'Chantier', seller: 'Franky', items: [['caravelle', 100, 1]] } }, headers: MJ });
+  await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'berry', amount: 1000 } }, headers: MJ });
+  r = await call('action', { body: { channelId: '111111111111111111', action: { type: 'shop.buy', key: 'caravelle' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  const achat = r.out.ships.find((s) => s.type === 'Caravelle');
+  assert.ok(achat, 'le bateau acheté apparaît');
+  r = await call('action', { body: { action: { type: 'ship.edit', shipId: achat.id, name: 'La Mouette', desc: 'Petite et vive' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.ok(r.out.ships.some((s) => s.name === 'La Mouette'));
+  r = await call('action', { body: { action: { type: 'crew.ship', shipId: 'le-vaillant' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.crew.ship, 'le-vaillant');
+  assert.deepEqual(tables.ships.get('le-vaillant').data.owner, { kind: 'crew', id: 'les-mouettes' });
+  // Désormais le coffre accepte plus (capacité du bateau : 800 kg)
+  r = await call('action', { body: { action: { type: 'crew.chest.deposit', key: 'corde', qty: 1 } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  // Le staff retire le bateau à l'équipage : l'équipage n'a plus de bateau attitré
+  await call('staff', { body: { op: 'ship.save', id: 'le-vaillant', ship: { owner: null } }, headers: MJ });
+  assert.equal(tables.crews.get('les-mouettes').data.ship, null);
 });

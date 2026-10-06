@@ -22,7 +22,7 @@ import {
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
 const itemOf = (k) => G.itemOf(k);
 /** Icône d'un objet : son image si le staff en a mis une, sinon une icône selon sa catégorie. */
-const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237 };
+const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231 };
 const itemIco = (k) => {
   const it = itemOf(k);
   return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${esc(it.img)}" alt="" loading="lazy"></span>` : ico(KIND_ICON[it.kind] ?? 237);
@@ -33,6 +33,8 @@ let ME = null; // { uid, name, staff }
 let S = null; // fiche affichée
 let SHOP = null; // boutique du salon (ou null)
 let CHNAME = ''; // nom du salon
+let CREW = null; // équipage du joueur affiché
+let SHIPS = []; // ses bateaux et ceux de son équipage
 let ADMIN = false; // panneau admin (/panel admin, /edit profil) ; /profil = vue joueur pure, même pour le staff
 const tools = () => ADMIN && !!ME?.staff;
 let VIEW = null; // uid d'un autre joueur ouvert par le staff (lecture seule pour lui)
@@ -60,6 +62,8 @@ $('levelup').addEventListener('click', () => $('levelup').close());
 function applyOut(out, { quiet = false, noUps = false } = {}) {
   if (out.player) S = out.player;
   if (out.shop) SHOP = out.shop;
+  if ('crew' in out) CREW = out.crew;
+  if (out.ships) SHIPS = out.ships;
   renderAll();
   if (!quiet && out.toast) toast(esc(out.toast), out.item ? itemIco(out.item) : out.icon);
   if (!noUps) showLevelUp(out.ups);
@@ -486,7 +490,7 @@ $('v-perso').addEventListener('click', async (e) => {
 });
 
 /* ═══ Techniques ═════════════════════════════════════════════════════════ */
-const SRC_CLS = { physique: 'src-physique', arme: 'src-lame', haki: 'src-haki', fruit: 'src-fruit' };
+const SRC_CLS = { combat: 'src-lame', fruit: 'src-fruit' };
 let editingTech = null;
 let techMedia;
 function renderTech() {
@@ -620,7 +624,7 @@ function renderInv() {
     const [k, q] = selItem, it = itemOf(k), eq = isEquipped(k);
     det = `<div class="detail" id="inv-detail">
       <div class="slot-ico">${itemIco(k)}</div>
-      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
+      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Poids : ${G.kg((it.weight || 0) * q)}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
       <div class="acts">
         ${G.isWeapon(k) ? `<button class="btn sm" data-equip="${k}">${eq && equippedCount(k) >= count(k) ? 'Retirer' : 'Équiper'}</button>` : ''}
         <button class="btn sm ghost" data-drop="${sel}" ${eq && equippedCount(k) >= count(k) ? 'disabled title="Retire-le d’abord"' : ''}>Jeter un</button>
@@ -629,7 +633,7 @@ function renderInv() {
   }
   $('v-inv').innerHTML = `
     <div class="sec-head"><h2>Inventaire</h2><span class="pill">${ico(261)}<b>${berry(S.berry)}</b></span></div>
-    <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''}.</p>
+    <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight">${G.kg(G.invWeight(S))}</span></p>
     <div class="equip">
       ${Object.entries(SLOTS).map(([sl, label]) => {
         const k = S.equip[sl], it = k && itemOf(k);
@@ -1486,6 +1490,8 @@ async function openPlayer(uid, { tab = null } = {}) {
     if (!st.player) return toast('Tu n’as pas de fiche.');
     VIEW = uid;
     S = st.player;
+    CREW = st.crew;
+    SHIPS = st.ships || [];
     pending = {};
     sel = null;
     shown.photo = null;
@@ -1513,7 +1519,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, nav: !ADMIN, admin: ADMIN, ashop: tools(), gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, admin: ADMIN, ashop: tools(), fleet: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -1670,8 +1676,359 @@ async function enterAdmin({ target = null } = {}) {
   renderAdminHome();
   loadPlayers();
   loadAdminShops();
+  loadFleet();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
+
+/* ═══ Équipage (vue joueur) ══════════════════════════════════════════════ */
+const SHIP_ICON = 231;
+function shipPic(sh) {
+  if (sh.photo) return `<img src="${esc(sh.photo)}" alt="${esc(sh.name)}" loading="lazy">`;
+  if (sh.icon) return `<img src="${esc(sh.icon)}" alt="" loading="lazy">`;
+  return ico(SHIP_ICON);
+}
+function shipCard(sh, { actions = '' } = {}) {
+  return `<article class="ship-card">
+    <div class="ship-pic">${shipPic(sh)}</div>
+    <div>
+      <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${esc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
+      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span></div>
+      ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
+      ${actions}
+    </div>
+  </article>`;
+}
+function renderCrew() {
+  if (!S || ADMIN) return;
+  const c = CREW, captain = c && c.captain === S.uid;
+  const ship = c?.ship ? SHIPS.find((x) => x.id === c.ship) : null;
+  const mine = SHIPS.filter((x) => x.owner?.kind === 'player' && x.owner.id === S.uid);
+  const crewShips = c ? SHIPS.filter((x) => x.owner?.kind === 'crew' && x.owner.id === c.id) : [];
+  const cap = G.crewCapacity(ship), load = c ? G.chestWeight(c) : 0;
+  const invOpts = S.inv.filter(Boolean).filter(([k]) => G.ITEMS[k]).map(([k, q]) => `<option value="${esc(k)}">${esc(itemOf(k).name)} (${q})</option>`).join('');
+  $('v-crew').innerHTML = c ? `
+    <div class="crew-hero">
+      <div class="flag">${c.flag ? `<img src="${esc(c.flag)}" alt="Jolly Roger">` : ico(1)}</div>
+      <div>
+        <h2>${esc(c.name)}</h2>
+        <p class="lede" style="margin:4px 0 0">${c.members.length} membre${c.members.length > 1 ? 's' : ''}${captain ? ' · tu es le capitaine' : ''}</p>
+        <div class="members">${c.members.map((u) => `<span class="${u === c.captain ? 'cap' : ''}">${u === c.captain ? '👑 ' : ''}${esc(c.memberNames?.[u] || '?')}</span>`).join('')}</div>
+      </div>
+    </div>
+    <div class="crew-grid">
+      <section class="crew-box">
+        <h3>Banque commune</h3>
+        <div class="bank-amount">${berry(c.bank)}</div>
+        <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
+          <button class="btn sm" id="bank-in">Déposer</button>${captain ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div>
+        ${captain ? '' : '<p class="note" style="margin:0">Seul le capitaine peut retirer de l’argent.</p>'}
+      </section>
+      <section class="crew-box">
+        <h3>Coffre commun</h3>
+        <div class="gauge" aria-label="Chargement du coffre"><i style="width:${Math.min(100, (load / Math.max(cap, 1)) * 100)}%"></i></div>
+        <div class="gauge-cap"><span>${ship ? `Cale : ${esc(ship.name)}` : 'Sans bateau (100 kg)'}</span><span>${G.kg(load)} / ${G.kg(cap)}</span></div>
+        <div class="chest">${Object.entries(c.chest).map(([k, q]) => `<button class="need" data-chest-out="${esc(k)}" title="Sortir 1 ${esc(itemOf(k).name)}">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</button>`).join('') || '<span class="note">Le coffre est vide.</span>'}</div>
+        <div class="mj-row prog-row"><label for="chest-item">Déposer</label><select id="chest-item">${invOpts || '<option value="">Inventaire vide</option>'}</select>
+          <input id="chest-q" type="number" min="1" value="1" style="width:70px" aria-label="Quantité"><button class="btn sm" id="chest-in" ${invOpts ? '' : 'disabled'}>Déposer</button></div>
+        <p class="note" style="margin:0">Clique sur un objet du coffre pour le sortir.</p>
+      </section>
+    </div>
+    <h3 class="ed-h">Bateau de l’équipage</h3>
+    ${ship ? shipCard(ship, { actions: captain ? `<button class="btn sm ghost" data-ship-edit="${esc(ship.id)}">Modifier</button>` : '' }) : '<p class="note">L’équipage n’a pas encore de bateau attitré.</p>'}
+    ${captain && [...mine, ...crewShips].length ? `<div class="mj-row" style="margin-top:10px"><label for="crew-ship">Bateau attitré</label>
+      <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)}, ${G.kg(x.capacity)})</option>`).join('')}</select>
+      <button class="btn sm" id="crew-ship-go">Choisir</button></div>
+      <p class="note">Un de tes bateaux choisi ici devient celui de l’équipage.</p>` : ''}
+  ` : `<div class="no-shop">${ico(1)}<h2>Pas d’équipage</h2><p class="note">Tu ne fais partie d’aucun équipage. C’est un MJ qui t’en fait rejoindre un.</p></div>`;
+  $('v-crew').innerHTML += `
+    <h3 class="ed-h">Mes bateaux</h3>
+    ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { actions: `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>` })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}`;
+  paintStatic($('v-crew'));
+}
+$('v-crew').addEventListener('click', async (e) => {
+  const amount = () => Math.round(Math.abs(+$('bank-n')?.value || 0));
+  if (e.target.id === 'bank-in') return amount() ? void run({ type: 'crew.bank.deposit', amount: amount() }) : toast('Indique un montant.');
+  if (e.target.id === 'bank-out') return amount() ? void run({ type: 'crew.bank.withdraw', amount: amount() }) : toast('Indique un montant.');
+  if (e.target.id === 'chest-in') return void run({ type: 'crew.chest.deposit', key: $('chest-item').value, qty: Math.max(1, +$('chest-q').value || 1) });
+  const out = e.target.closest('[data-chest-out]')?.dataset.chestOut;
+  if (out) return void run({ type: 'crew.chest.withdraw', key: out, qty: 1 });
+  if (e.target.id === 'crew-ship-go') return void run({ type: 'crew.ship', shipId: $('crew-ship').value || null });
+  const se = e.target.closest('[data-ship-edit]')?.dataset.shipEdit;
+  if (se) openShipEdit(SHIPS.find((x) => x.id === se), { player: true });
+});
+
+/* ═══ Bateau : édition (joueur : nom, description, photo ; staff : tout) ═══ */
+let shipDraft = null, shipDraftId = null, shipAsPlayer = false;
+function openShipEdit(ship, { player = false } = {}) {
+  shipAsPlayer = player;
+  shipDraftId = ship?.id ?? null;
+  shipDraft = structuredClone(ship || { name: '', desc: '', photo: null, icon: null, type: G.SHIP_TYPES[0], cannons: 0, capacity: 100, owner: null, model: null });
+  $('sh-title').textContent = shipDraftId ? ship.name : 'Nouveau bateau';
+  $('sh-sub').textContent = player ? 'Le type, les canons et la capacité sont fixés à la création.' : 'Bateau créé par le staff, ou modèle acheté par un joueur.';
+  $('sh-del').hidden = player || !shipDraftId;
+  $('sh-err').textContent = '';
+  renderShipEdit();
+  openDialog('d-ship');
+}
+function renderShipEdit() {
+  const d = shipDraft;
+  const models = Object.entries(G.ITEMS).filter(([, it]) => it.kind === 'bateau');
+  const ownerVal = d.owner ? `${d.owner.kind}:${d.owner.id}` : '';
+  $('sh-body').innerHTML = `
+    <div class="form">
+      <div class="wide"><label for="sh-name">Nom du bateau</label><input id="sh-name" value="${esc(d.name)}" maxlength="60"></div>
+      ${shipAsPlayer ? '' : `
+        ${!shipDraftId && models.length ? `<div class="wide"><label for="sh-model">À partir d’un modèle (facultatif)</label><select id="sh-model"><option value="">Aucun : caractéristiques libres</option>${models.map(([k, it]) => `<option value="${esc(k)}" ${d.model === k ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</select></div>` : ''}
+        <div><label for="sh-type">Type</label><input id="sh-type" list="ship-types" value="${esc(d.type)}" maxlength="40"></div>
+        <div><label for="sh-cannons">Canons</label><input id="sh-cannons" type="number" min="0" value="${d.cannons}"></div>
+        <div><label for="sh-cap">Capacité de stockage (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
+        <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
+          <optgroup label="Équipages">${Object.entries(fleet.crews || {}).map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
+          <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>`}
+      <div class="wide"><label for="sh-desc">Description</label><textarea id="sh-desc" maxlength="600" rows="3" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px">${esc(d.desc)}</textarea></div>
+    </div>
+    <div class="img-field" style="margin-top:12px">
+      <div class="prev">${d.photo ? `<img src="${esc(d.photo)}" alt="">` : ico(SHIP_ICON)}</div>
+      <div class="se-face-ctl">
+        <b>Photo du bateau</b>
+        <div class="se-row"><button type="button" class="btn sm" id="sh-pick">Choisir une image</button><input type="file" id="sh-file" accept="image/*" hidden>${d.photo ? '<button type="button" class="btn sm ghost" id="sh-nophoto">Retirer</button>' : ''}</div>
+        <div class="ph-url-row"><input type="url" id="sh-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="sh-url-go">Utiliser</button></div>
+      </div>
+    </div>`;
+}
+function readShipEdit() {
+  const d = shipDraft;
+  d.name = $('sh-name').value;
+  d.desc = $('sh-desc').value;
+  if (shipAsPlayer) return;
+  d.type = $('sh-type').value;
+  d.cannons = Math.max(0, Math.round(+$('sh-cannons').value || 0));
+  d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
+  const o = $('sh-owner').value;
+  d.owner = o ? { kind: o.split(':')[0], id: o.slice(o.indexOf(':') + 1) } : null;
+}
+$('d-ship').addEventListener('change', async (e) => {
+  if (e.target.id === 'sh-model') {
+    readShipEdit();
+    const m = G.ITEMS[e.target.value];
+    shipDraft.model = e.target.value || null;
+    if (m) Object.assign(shipDraft, { ...m.ship, name: shipDraft.name || m.name, desc: shipDraft.desc || m.desc, icon: m.img });
+    renderShipEdit();
+  }
+  if (e.target.id === 'sh-file') {
+    const f = e.target.files[0];
+    if (!f?.type.startsWith('image/')) return;
+    if (f.size > 4 * 1024 * 1024) return void ($('sh-err').textContent = 'Image trop lourde (4 Mo maximum).');
+    readShipEdit();
+    shipDraft.photo = await readAsDataUrl(f);
+    renderShipEdit();
+  }
+});
+$('d-ship').addEventListener('click', (e) => {
+  if (e.target.id === 'sh-pick') $('sh-file').click();
+  if (e.target.id === 'sh-nophoto') {
+    readShipEdit();
+    shipDraft.photo = null;
+    renderShipEdit();
+  }
+  if (e.target.id === 'sh-url-go') {
+    const v = $('sh-url').value.trim();
+    if (!/^https?:\/\//.test(v)) return void ($('sh-err').textContent = 'Le lien doit commencer par http:// ou https://');
+    readShipEdit();
+    shipDraft.photo = v;
+    renderShipEdit();
+  }
+});
+$('sh-save').addEventListener('click', async () => {
+  readShipEdit();
+  if (!shipDraft.name.trim()) return void ($('sh-err').textContent = 'Donne un nom au bateau.');
+  $('sh-save').disabled = true;
+  $('sh-err').textContent = shipDraft.photo?.startsWith('data:') ? 'Envoi de la photo…' : '';
+  try {
+    if (shipAsPlayer) {
+      const out = await run({ type: 'ship.edit', shipId: shipDraftId, name: shipDraft.name, desc: shipDraft.desc, photo: shipDraft.photo });
+      if (out) closeDialog($('d-ship'));
+    } else {
+      const out = await API.staff('ship.save', { id: shipDraftId, ship: shipDraft });
+      closeDialog($('d-ship'));
+      toast(esc(out.toast));
+      await loadFleet();
+    }
+  } catch (err) {
+    $('sh-err').textContent = err.message;
+  } finally {
+    $('sh-save').disabled = false;
+  }
+});
+$('sh-del').addEventListener('click', async () => {
+  if (!(await askConfirm('Le bateau sera supprimé. S’il était celui d’un équipage, l’équipage n’aura plus de bateau attitré.', { title: `Supprimer ${shipDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
+  try {
+    const out = await API.staff('ship.delete', { id: shipDraftId });
+    closeDialog($('d-ship'));
+    toast(esc(out.toast));
+    await loadFleet();
+  } catch (err) {
+    toast(esc(err.message));
+  }
+});
+
+/* ═══ Flotte (panneau admin) : équipages et bateaux ══════════════════════ */
+let fleet = { crews: null, ships: null }, fleetTab = 'crews';
+async function loadFleet() {
+  try {
+    const out = await API.staff('crews');
+    fleet = { crews: out.crews, ships: out.ships };
+  } catch (err) {
+    fleet = { crews: {}, ships: {} };
+    toast(esc(err.message));
+  }
+  renderFleet();
+}
+const ownerName = (o) => !o ? 'Sans propriétaire' : o.kind === 'crew' ? `Équipage : ${fleet.crews?.[o.id]?.name ?? '?'}` : `Joueur : ${G.fullName({ id: players.find((p) => p.uid === o.id)?.ident || {} })}`;
+function renderFleet() {
+  if (!tools()) return;
+  const el = $('v-fleet');
+  if (!fleet.crews) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const crews = Object.entries(fleet.crews).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const ships = Object.entries(fleet.ships).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Flotte</h2><p class="lede" style="margin:0">Les équipages et les bateaux du RP.</p></div>
+      <button class="btn" id="fleet-new">${fleetTab === 'crews' ? '+ Nouvel équipage' : '+ Nouveau bateau'}</button>
+    </div>
+    <div class="seg" role="group" aria-label="Section">
+      <button aria-pressed="${fleetTab === 'crews'}" data-ft="crews">Équipages (${crews.length})</button>
+      <button aria-pressed="${fleetTab === 'ships'}" data-ft="ships">Bateaux (${ships.length})</button>
+    </div>
+    ${fleetTab === 'crews'
+      ? crews.length ? `<div class="fleet-list">${crews.map(([id, c]) => `
+          <button class="gest-card" data-crew="${esc(id)}">
+            <span class="slot-ico flag-mini">${c.flag ? `<span class="ico item-img"><img src="${esc(c.flag)}" alt=""></span>` : ico(1)}</span>
+            <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ${berry(c.bank || 0)}${c.ship && fleet.ships[c.ship] ? ` · ${esc(fleet.ships[c.ship].name)}` : ''}</small></span>
+          </button>`).join('')}</div>` : '<p class="note">Aucun équipage.</p>'
+      : ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => `
+          <button class="gest-card" data-ship="${esc(id)}">
+            <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${esc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
+            <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · ${sh.cannons} canons · ${G.kg(sh.capacity)}<br>${esc(ownerName(sh.owner))}</small></span>
+          </button>`).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
+  paintStatic(el);
+}
+$('v-fleet').addEventListener('click', (e) => {
+  const ft = e.target.closest('[data-ft]')?.dataset.ft;
+  if (ft) {
+    fleetTab = ft;
+    return renderFleet();
+  }
+  if (e.target.closest('#fleet-new')) return fleetTab === 'crews' ? openCrewEdit(null) : openShipEdit(null);
+  const c = e.target.closest('[data-crew]')?.dataset.crew;
+  if (c) return openCrewEdit(c);
+  const sh = e.target.closest('[data-ship]')?.dataset.ship;
+  if (sh) return openShipEdit({ id: sh, ...fleet.ships[sh] });
+});
+
+/* Édition d'un équipage */
+let crewDraft = null, crewDraftId = null, crewQuery = '';
+function openCrewEdit(id) {
+  crewDraftId = id;
+  crewDraft = structuredClone(id ? fleet.crews[id] : { name: '', flag: null, captain: null, members: [], bank: 0, chest: {}, ship: null });
+  crewQuery = '';
+  $('cr-title').textContent = id ? crewDraft.name : 'Nouvel équipage';
+  $('cr-del').hidden = !id;
+  $('cr-err').textContent = '';
+  renderCrewEdit();
+  openDialog('d-crew');
+}
+function renderCrewEdit() {
+  const d = crewDraft;
+  const q = normTxt(crewQuery);
+  const list = players.filter((p) => !q || normTxt(G.fullName({ id: p.ident })).includes(q) || d.members.includes(p.uid));
+  $('cr-body').innerHTML = `
+    <div class="form">
+      <div class="wide"><label for="cr-name">Nom de l’équipage</label><input id="cr-name" value="${esc(d.name)}" maxlength="60"></div>
+      <div><label for="cr-bank">Banque (berrys)</label><input id="cr-bank" type="number" min="0" value="${d.bank || 0}"></div>
+      <div><label for="cr-ship">Bateau de l’équipage</label><select id="cr-ship"><option value="">Aucun</option>${Object.entries(fleet.ships || {}).map(([sid, sh]) => `<option value="${esc(sid)}" ${d.ship === sid ? 'selected' : ''}>${esc(sh.name)} (${esc(sh.type)}, ${G.kg(sh.capacity)})</option>`).join('')}</select></div>
+    </div>
+    <div class="img-field" style="margin-top:12px">
+      <div class="prev flag-prev">${d.flag ? `<img src="${esc(d.flag)}" alt="">` : ico(1)}</div>
+      <div class="se-face-ctl">
+        <b>Jolly Roger</b>
+        <div class="se-row"><button type="button" class="btn sm" id="cr-pick">Choisir une image</button><input type="file" id="cr-file" accept="image/*" hidden>${d.flag ? '<button type="button" class="btn sm ghost" id="cr-noflag">Retirer</button>' : ''}</div>
+      </div>
+    </div>
+    <h3 class="ed-h">Membres (${d.members.length})</h3>
+    <input class="mj-search" id="cr-q" type="search" placeholder="Chercher un joueur…" value="${esc(crewQuery)}">
+    <div class="member-pick">${list.map((p) => `<label><input type="checkbox" data-member="${esc(p.uid)}" ${d.members.includes(p.uid) ? 'checked' : ''}> ${esc(G.fullName({ id: p.ident }))}${p.crewId && p.crewId !== crewDraftId ? ` <small class="note">(dans ${esc(fleet.crews?.[p.crewId]?.name ?? 'un autre équipage')}, il le quittera)</small>` : ''}</label>`).join('') || '<p class="note">Aucun joueur.</p>'}</div>
+    <div class="field"><label for="cr-cap">Capitaine</label><select id="cr-cap">${d.members.map((u) => `<option value="${esc(u)}" ${u === d.captain ? 'selected' : ''}>${esc(G.fullName({ id: players.find((p) => p.uid === u)?.ident || {} }))}</option>`).join('') || '<option value="">Ajoute d’abord des membres</option>'}</select></div>
+    ${Object.keys(d.chest || {}).length ? `<h3 class="ed-h">Coffre (${G.kg(G.chestWeight(d))})</h3><div class="chest">${Object.entries(d.chest).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>` : ''}`;
+}
+function readCrewEdit() {
+  const d = crewDraft;
+  d.name = $('cr-name').value;
+  d.bank = Math.max(0, Math.round(+$('cr-bank').value || 0));
+  d.ship = $('cr-ship').value || null;
+  d.captain = $('cr-cap').value || d.members[0] || null;
+}
+$('d-crew').addEventListener('input', (e) => {
+  if (e.target.id !== 'cr-q') return;
+  readCrewEdit();
+  crewQuery = e.target.value;
+  renderCrewEdit();
+  const i = $('cr-q');
+  i.focus();
+  i.setSelectionRange(i.value.length, i.value.length);
+});
+$('d-crew').addEventListener('change', async (e) => {
+  const m = e.target.dataset?.member;
+  if (m) {
+    readCrewEdit();
+    crewDraft.members = e.target.checked ? [...crewDraft.members, m] : crewDraft.members.filter((x) => x !== m);
+    if (!crewDraft.members.includes(crewDraft.captain)) crewDraft.captain = crewDraft.members[0] ?? null;
+    return renderCrewEdit();
+  }
+  if (e.target.id === 'cr-file') {
+    const f = e.target.files[0];
+    if (!f?.type.startsWith('image/')) return;
+    if (f.size > 4 * 1024 * 1024) return void ($('cr-err').textContent = 'Image trop lourde (4 Mo maximum).');
+    readCrewEdit();
+    crewDraft.flag = await readAsDataUrl(f);
+    renderCrewEdit();
+  }
+});
+$('d-crew').addEventListener('click', (e) => {
+  if (e.target.id === 'cr-pick') $('cr-file').click();
+  if (e.target.id === 'cr-noflag') {
+    readCrewEdit();
+    crewDraft.flag = null;
+    renderCrewEdit();
+  }
+});
+$('cr-save').addEventListener('click', async () => {
+  readCrewEdit();
+  if (!crewDraft.name.trim()) return void ($('cr-err').textContent = 'Donne un nom à l’équipage.');
+  $('cr-save').disabled = true;
+  try {
+    const { chest, ...crew } = crewDraft; // le coffre se gère par les joueurs
+    const out = await API.staff('crew.save', { id: crewDraftId, crew });
+    closeDialog($('d-crew'));
+    toast(esc(out.toast));
+    await Promise.all([loadFleet(), loadPlayers()]);
+  } catch (err) {
+    $('cr-err').textContent = err.message;
+  } finally {
+    $('cr-save').disabled = false;
+  }
+});
+$('cr-del').addEventListener('click', async () => {
+  if (!(await askConfirm('Les membres n’auront plus d’équipage, la banque et le coffre seront perdus, et ses bateaux n’auront plus de propriétaire.', { title: `Supprimer ${crewDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
+  try {
+    const out = await API.staff('crew.delete', { id: crewDraftId });
+    closeDialog($('d-crew'));
+    toast(esc(out.toast));
+    await Promise.all([loadFleet(), loadPlayers()]);
+  } catch (err) {
+    toast(esc(err.message));
+  }
+});
 
 /* ═══ Gestion (staff) : base d'objets et recettes ════════════════════════ */
 let gestTab = 'items', gestQuery = '';
@@ -1698,7 +2055,7 @@ function renderGestion() {
       ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
           <button class="gest-card" data-item="${esc(id)}">
             <span class="slot-ico">${itemIco(id)}</span>
-            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'}</small></span>
+            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'} · ${G.kg(it.weight || 0)}${it.kind === 'bateau' ? ` · ${it.ship.cannons} canons, cale ${G.kg(it.ship.capacity)}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
           <button class="gest-card" data-recipe="${esc(id)}">
@@ -1752,6 +2109,12 @@ function openItemEdit(id = null) {
   $('it-name').value = itemDraft.name;
   $('it-kind').innerHTML = Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === itemDraft.kind ? 'selected' : ''}>${l}</option>`).join('');
   $('it-value').value = itemDraft.value;
+  $('it-weight').value = itemDraft.weight ?? 0;
+  const sh = itemDraft.ship || { type: G.SHIP_TYPES[0], cannons: 0, capacity: 100 };
+  $('it-stype').value = sh.type;
+  $('it-cannons').value = sh.cannons;
+  $('it-cap').value = sh.capacity;
+  $('it-ship').hidden = itemDraft.kind !== 'bateau';
   $('it-desc').value = itemDraft.desc;
   $('it-url').value = '';
   $('it-del').hidden = !id;
@@ -1763,7 +2126,10 @@ function showItemImg() {
   $('it-preview').innerHTML = itemDraft.img ? `<img src="${esc(itemDraft.img)}" alt="">` : ico(KIND_ICON[$('it-kind').value] ?? 237);
   $('it-noimg').hidden = !itemDraft.img;
 }
-$('it-kind').addEventListener('change', showItemImg);
+$('it-kind').addEventListener('change', () => {
+  $('it-ship').hidden = $('it-kind').value !== 'bateau';
+  showItemImg();
+});
 $('it-pick').addEventListener('click', () => $('it-file').click());
 $('it-file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -1784,7 +2150,10 @@ $('it-noimg').addEventListener('click', () => {
   showItemImg();
 });
 $('it-save').addEventListener('click', () => {
-  const item = { name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, desc: $('it-desc').value, img: itemDraft.img };
+  const item = {
+    name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
+    ship: { type: $('it-stype').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0 },
+  };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');
   gestCall('item.save', { id: itemDraftId, item }, $('d-item'));
 });
@@ -1880,7 +2249,7 @@ $('rc-del').addEventListener('click', async () => {
 });
 
 /* ═══ Onglets, écrans, rendu ═════════════════════════════════════════════ */
-const RENDER = [renderPerso, renderTech, renderInv, renderJob, renderMjTab, renderNav, renderShop, renderGestion];
+const RENDER = [renderPerso, renderTech, renderInv, renderJob, renderMjTab, renderNav, renderShop, renderGestion, renderCrew];
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(tab) {
   tabs.forEach((t) => {
@@ -1913,6 +2282,7 @@ function renderAll() {
   if (ADMIN) {
     renderGestion();
     renderAdminShops();
+    renderFleet();
     if (has) {
       renderHero();
       [renderPerso, renderTech, renderInv, renderJob, renderMjTab].forEach((f) => f());
@@ -1950,6 +2320,8 @@ function showScreen(name) {
     }
   });
   if (name === 'ashop') renderAdminShops();
+  if (name === 'fleet') renderFleet();
+  if (name === 'crew') renderCrew();
   if (name === 'shop') {
     renderShop();
     paintStatic();
@@ -1980,6 +2352,9 @@ async function refresh() {
     if (busy || VIEW) return;
     S = st.player;
     SHOP = st.shop;
+    CREW = st.crew;
+    SHIPS = st.ships || [];
+    if (screen === 'crew') renderCrew();
     if (screen === 'nav') renderNav();
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
     renderHero();
@@ -1994,6 +2369,7 @@ async function refresh() {
 /* ═══ Démarrage ══════════════════════════════════════════════════════════ */
 (async () => {
   paintStatic();
+  $('ship-types').innerHTML = G.SHIP_TYPES.map((t) => `<option value="${esc(t)}">`).join('');
   let st;
   try {
     st = await API.boot();
@@ -2001,6 +2377,8 @@ async function refresh() {
     ME = st.me;
     S = st.player;
     SHOP = st.shop;
+    CREW = st.crew;
+    SHIPS = st.ships || [];
     CHNAME = st.channelName || '';
   } catch (err) {
     console.error(err);

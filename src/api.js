@@ -21,7 +21,7 @@ async function call(method, path, body) {
 }
 
 /* ─── Mode démo : tout reste dans ce navigateur ─── */
-const KEY = 'op_rp_demo_v5';
+const KEY = 'op_rp_demo_v6';
 let store;
 function loadStore() {
   try {
@@ -29,9 +29,11 @@ function loadStore() {
   } catch {}
   if (!store?.player) {
     G.setCatalog(G.demoCatalog());
-    store = { player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog() };
+    store = { player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(), crews: { 'goeland-noir': G.demoCrew() }, ships: G.demoShips() };
   }
   if (!store.shops) store.shops = { demo: store.shop ?? null };
+  store.crews ??= {};
+  store.ships ??= {};
   delete store.shop;
   G.setCatalog(store.catalog);
   G.normalize(store.player);
@@ -45,7 +47,18 @@ export function resetDemo() {
   localStorage.removeItem(KEY);
   loadStore();
 }
+/** Équipage du joueur de démo et bateaux visibles, comme le renvoie l'API. */
+function demoCrewShips() {
+  const p = store.player;
+  const c = p.crewId ? store.crews[p.crewId] : null;
+  const crew = c ? { id: p.crewId, ...c, memberNames: Object.fromEntries(c.members.map((u) => [u, u === 'demo' ? G.fullName(p) : 'Matelot (démo)'])) } : null;
+  const ships = Object.entries(store.ships)
+    .filter(([, s]) => (s.owner?.kind === 'player' && s.owner.id === p.uid) || (s.owner?.kind === 'crew' && crew && s.owner.id === crew.id))
+    .map(([id, s]) => ({ id, ...s }));
+  return { crew: structuredClone(crew), ships: structuredClone(ships) };
+}
 const demoState = () => ({
+  ...demoCrewShips(),
   me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
   player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
   channelId: 'demo', channelName: 'port-brisant',
@@ -77,11 +90,38 @@ export async function state(playerId) {
 export async function act(action) {
   if (mode === 'demo') {
     G.setCatalog(store.catalog);
+    if (action.type.startsWith('crew.')) {
+      const { crew } = demoCrewShips();
+      if (!crew) throw new Error('Tu n’as pas d’équipage.');
+      const out = G.crewAction(store.player, action, { crew, ships: Object.fromEntries(Object.entries(store.ships).map(([id, s]) => [id, { id, ...s }])) });
+      const { id, memberNames, ...data } = out.crew;
+      store.crews[id] = data;
+      for (const [sid, sh] of Object.entries(out.ships || {})) {
+        const { id: _i, ...rest } = sh;
+        store.ships[sid] = rest;
+      }
+      store.player = out.player;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips() };
+    }
+    if (action.type === 'ship.edit') {
+      const { crew } = demoCrewShips();
+      const out = G.playerAction(store.player, action, { ship: store.ships[action.shipId], crew });
+      store.ships[action.shipId] = out.ship;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips() };
+    }
     const out = G.playerAction(store.player, action, { shop: store.shops.demo, channelId: 'demo' });
     store.player = out.player;
     if (out.shop) store.shops.demo = out.shop;
+    if (out.newShip) {
+      let id = G.slug(out.newShip.name);
+      for (let n = 2; store.ships[id]; n++) id = `${G.slug(out.newShip.name)}-${n}`;
+      store.ships[id] = out.newShip;
+      out.toast = `${out.newShip.name} est à toi ! Donne-lui un nom dans « Équipage ».`;
+    }
     saveStore();
-    return structuredClone(out);
+    return { ...structuredClone(out), ...demoCrewShips() };
   }
   return call('POST', '/api/action', { channelId, action });
 }
@@ -89,7 +129,7 @@ export async function act(action) {
 /** Outils du staff. */
 export async function staff(op, payload = {}) {
   if (mode === 'demo') {
-    if (op === 'players') return { players: [{ uid: 'demo', ident: store.player.id, level: store.player.level, photo: store.player.photo, job: store.player.job.id }] };
+    if (op === 'players') return { players: [{ uid: 'demo', ident: store.player.id, level: store.player.level, photo: store.player.photo, job: store.player.job.id, crewId: store.player.crewId }] };
     if (op === 'act') {
       const out = G.staffAction(store.player, payload.action);
       store.player = out.player;
@@ -111,6 +151,60 @@ export async function staff(op, payload = {}) {
       saveStore();
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}` };
     }
+    if (op === 'item.save' || op === 'recipe.save') {
+      const items = op === 'item.save', table = items ? store.catalog.items : store.catalog.recipes;
+      G.setCatalog(store.catalog);
+      const data = items ? G.normalizeItem(payload.item) : G.normalizeRecipe(payload.recipe);
+      let id = payload.id && table[payload.id] ? payload.id : G.slug(data.name);
+      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(data.name)}-${n}`;
+      const isNew = !table[id];
+      table[id] = data;
+      saveStore();
+      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${data.name}` };
+    }
+    if (op === 'item.delete' || op === 'recipe.delete') {
+      const items = op === 'item.delete';
+      if (items) {
+        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map((r) => r.name);
+        if (used.length) throw new Error(`Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
+      }
+      delete (items ? store.catalog.items : store.catalog.recipes)[payload.id];
+      saveStore();
+      return { catalog: structuredClone(store.catalog), toast: items ? 'Objet supprimé' : 'Recette supprimée' };
+    }
+    if (op === 'crews') return { crews: structuredClone(store.crews), ships: structuredClone(store.ships) };
+    if (op === 'crew.save') {
+      const id = payload.id && store.crews[payload.id] ? payload.id : G.slug(payload.crew.name);
+      const old = store.crews[id];
+      const crew = G.normalizeCrew({ ...(old || {}), ...payload.crew, chest: old?.chest ?? {} });
+      if (crew.members.includes('demo')) store.player.crewId = id;
+      else if (store.player.crewId === id) store.player.crewId = null;
+      if (crew.ship && store.ships[crew.ship]) store.ships[crew.ship].owner = { kind: 'crew', id };
+      store.crews[id] = crew;
+      saveStore();
+      return { id, crew, toast: `Équipage ${old ? 'modifié' : 'créé'} : ${crew.name}` };
+    }
+    if (op === 'crew.delete') {
+      if (store.player.crewId === payload.id) store.player.crewId = null;
+      for (const sh of Object.values(store.ships)) if (sh.owner?.kind === 'crew' && sh.owner.id === payload.id) sh.owner = null;
+      delete store.crews[payload.id];
+      saveStore();
+      return { toast: 'Équipage supprimé' };
+    }
+    if (op === 'ship.save') {
+      const id = payload.id && store.ships[payload.id] ? payload.id : G.slug(payload.ship.name);
+      const { id: _i, ...input } = payload.ship;
+      const ship = store.ships[id] ? G.normalizeShip({ ...store.ships[id], ...input }) : G.newShip(input);
+      store.ships[id] = ship;
+      saveStore();
+      return { id, ship, toast: `Bateau enregistré : ${ship.name}` };
+    }
+    if (op === 'ship.delete') {
+      for (const c of Object.values(store.crews)) if (c.ship === payload.id) c.ship = null;
+      delete store.ships[payload.id];
+      saveStore();
+      return { toast: 'Bateau supprimé' };
+    }
     if (op === 'shops') return { shops: structuredClone(Object.fromEntries(Object.entries(store.shops).filter(([, v]) => v))) };
     if (op === 'shop.save') {
       const id = String(payload.channelId);
@@ -127,6 +221,7 @@ export async function staff(op, payload = {}) {
       saveStore();
       return { shop: null, toast: 'Boutique fermée' };
     }
+    throw new Error(`Opération inconnue en démo : ${op}`);
   }
   return call('POST', '/api/staff', { op, channelId, ...payload });
 }

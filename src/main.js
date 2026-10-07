@@ -63,6 +63,7 @@ function applyOut(out, { quiet = false, noUps = false } = {}) {
   if (out.player) S = out.player;
   if (out.shop) SHOP = out.shop;
   if ('crew' in out) CREW = out.crew;
+  if (out.invites) INVITES = out.invites;
   if (out.ships) SHIPS = out.ships;
   renderAll();
   if (!quiet && out.toast) toast(esc(out.toast), out.item ? itemIco(out.item) : out.icon);
@@ -1682,6 +1683,9 @@ async function enterAdmin({ target = null } = {}) {
 
 /* ═══ Équipage (vue joueur) ══════════════════════════════════════════════ */
 const SHIP_ICON = 231;
+let INVITES = []; // invitations reçues
+let crewTab = 'crew', crewSearch = '', crewResults = [], searchTimer = null;
+let cx = { side: null, key: null, qty: 1 }; // objet sélectionné dans la cale ou l'inventaire
 function shipPic(sh) {
   if (sh.photo) return `<img src="${esc(sh.photo)}" alt="${esc(sh.name)}" loading="lazy">`;
   if (sh.icon) return `<img src="${esc(sh.icon)}" alt="" loading="lazy">`;
@@ -1698,63 +1702,291 @@ function shipCard(sh, { actions = '' } = {}) {
     </div>
   </article>`;
 }
-function renderCrew() {
-  if (!S || ADMIN) return;
-  const c = CREW, captain = c && c.captain === S.uid;
+const can = (perm) => !!CREW && G.crewCan(CREW, S.uid, perm);
+const nameOf = (uid) => esc(CREW?.memberNames?.[uid] || '?');
+function invitesHTML() {
+  if (!INVITES.length) return '';
+  return `<section class="crew-box invites"><h3>Invitations reçues</h3>
+    ${INVITES.map((i) => `<div class="invite">
+      <span class="flag mini-flag">${i.flag ? `<img src="${esc(i.flag)}" alt="">` : ico(1)}</span>
+      <span><b>${esc(i.name)}</b><small>${i.members} membre${i.members > 1 ? 's' : ''}${i.byName ? ` · invité par ${esc(i.byName)}` : ''}</small></span>
+      <span class="invite-acts"><button class="btn sm" data-join="${esc(i.id)}">Rejoindre</button><button class="btn sm ghost" data-decline="${esc(i.id)}">Refuser</button></span>
+    </div>`).join('')}
+    ${CREW ? '<p class="note" style="margin:0">Rejoindre un autre équipage te fera quitter le tien.</p>' : ''}
+  </section>`;
+}
+function crewTabHTML() {
+  const c = CREW, me = S.uid, isCap = c.captain === me;
+  const members = [...c.members].sort((a, b) => (a === c.captain ? -1 : b === c.captain ? 1 : 0));
+  const rankOpts = (uid) => c.ranks.map((r) => `<option value="${esc(r.id)}" ${c.memberRanks[uid] === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
+  return `
+    <section class="crew-box">
+      <h3>Membres (${c.members.length})</h3>
+      <div class="member-list">${members.map((u) => `
+        <div class="member-row">
+          <span class="m-name">${u === c.captain ? '👑 ' : ''}<b>${nameOf(u)}</b>${u === me ? ' <small class="note">(toi)</small>' : ''}</span>
+          ${u === c.captain ? '<span class="rank-badge cap">Capitaine</span>'
+            : can('ranks') && (isCap || u !== me) ? `<select data-rank-of="${esc(u)}" aria-label="Grade de ${nameOf(u)}">${rankOpts(u)}</select>`
+            : `<span class="rank-badge">${esc(G.rankName(c, u))}</span>`}
+          <span class="m-acts">
+            ${isCap && u !== me ? `<button class="btn sm ghost" data-captain="${esc(u)}" title="Céder ta place de capitaine">Nommer capitaine</button>` : ''}
+            ${can('kick') && u !== c.captain && u !== me ? `<button class="btn sm ghost danger-txt" data-kick="${esc(u)}">Exclure</button>` : ''}
+          </span>
+        </div>`).join('')}</div>
+    </section>
+    ${can('invite') ? `<section class="crew-box">
+      <h3>Inviter un joueur</h3>
+      <input class="mj-search" id="crew-search" type="search" placeholder="Nom du joueur…" value="${esc(crewSearch)}" autocomplete="off">
+      <div class="search-results" id="crew-results">${crewResults.map((x) => `<div class="member-row"><span class="m-name"><b>${esc(x.name)}</b>${x.crew ? ' <small class="note">(a déjà un équipage)</small>' : ''}</span><span></span><span class="m-acts"><button class="btn sm" data-invite="${esc(x.uid)}">Inviter</button></span></div>`).join('') || (crewSearch ? '<p class="note">Aucun joueur trouvé.</p>' : '')}</div>
+      ${c.invites.length ? `<b>Invitations en attente</b><div class="member-list">${c.invites.map((i) => `<div class="member-row"><span class="m-name">${nameOf(i.uid)}</span><span class="rank-badge">invité</span><span class="m-acts"><button class="btn sm ghost" data-uninvite="${esc(i.uid)}">Annuler</button></span></div>`).join('')}</div>` : ''}
+    </section>` : ''}
+    ${isCap ? `<section class="crew-box">
+      <h3>Grades</h3>
+      <p class="note" style="margin:0">Crée tes grades et coche ce qu’ils permettent. Le capitaine a toutes les permissions.</p>
+      ${c.ranks.map((r) => `<div class="rank-edit" data-rank="${esc(r.id)}">
+        <div class="rank-top"><input class="rank-name" value="${esc(r.name)}" maxlength="30" aria-label="Nom du grade">
+          <button class="btn sm" data-rank-save="${esc(r.id)}">Enregistrer</button>
+          ${r.id !== G.DEFAULT_RANK ? `<button class="btn sm ghost danger-txt" data-rank-del="${esc(r.id)}">Supprimer</button>` : '<small class="note">grade de base</small>'}</div>
+        <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${r.perms[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      </div>`).join('')}
+      <div class="rank-edit" data-rank="">
+        <div class="rank-top"><input class="rank-name" placeholder="Nouveau grade (ex. Second)" maxlength="30" aria-label="Nom du nouveau grade"><button class="btn sm" data-rank-save="">+ Créer</button></div>
+        <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}"> ${l}</label>`).join('')}</div>
+      </div>
+    </section>` : ''}
+    ${can('edit') ? `<section class="crew-box">
+      <h3>Nom et Jolly Roger</h3>
+      <div class="form"><div class="wide"><label for="crew-name">Nom de l’équipage</label><input id="crew-name" value="${esc(c.name)}" maxlength="60"></div></div>
+      <div class="img-field"><div class="prev flag-prev">${c.flag ? `<img src="${esc(c.flag)}" alt="">` : ico(1)}</div>
+        <div class="se-face-ctl">
+          <div class="se-row"><button type="button" class="btn sm" id="flag-pick">Choisir une image</button><input type="file" id="flag-file" accept="image/*" hidden>${c.flag ? '<button type="button" class="btn sm ghost" id="flag-none">Retirer</button>' : ''}</div>
+          <div class="ph-url-row"><input type="url" id="flag-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="flag-url-go">Utiliser le lien</button></div>
+        </div></div>
+      <div><button class="btn" id="crew-edit-save">Enregistrer le nom</button></div>
+    </section>` : ''}
+    <div><button class="btn ghost danger-txt" id="crew-leave">Quitter l’équipage</button></div>`;
+}
+function cargoHTML() {
+  const c = CREW;
+  const ship = c.ship ? SHIPS.find((x) => x.id === c.ship) : null;
+  const cap = G.crewCapacity(ship), load = G.chestWeight(c);
+  const inv = {};
+  S.inv.forEach((s) => s && (inv[s[0]] = (inv[s[0]] || 0) + s[1]));
+  const cell = (side, k, q) => `<button class="cell xcell ${cx.side === side && cx.key === k ? 'on' : ''}" data-x-side="${side}" data-x-key="${esc(k)}" title="${esc(itemOf(k).name)}" aria-label="${esc(itemOf(k).name)}, ${q}">${itemIco(k)}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+  const selQ = cx.key ? (cx.side === 'inv' ? inv[cx.key] : c.chest[cx.key]) || 0 : 0;
+  if (cx.key && !selQ) cx = { side: null, key: null, qty: 1 };
+  const it = cx.key ? itemOf(cx.key) : null;
+  const okPerm = cx.side === 'inv' ? can('chestIn') : can('chestOut');
+  return `
+    <section class="crew-box">
+      <h3>Banque commune</h3>
+      <div class="bank-amount">${berry(c.bank)}</div>
+      <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
+        ${can('bankIn') ? '<button class="btn sm" id="bank-in">Déposer</button>' : ''}${can('bankOut') ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div>
+    </section>
+    <section class="crew-box">
+      <h3>Cale ${ship ? `du navire « ${esc(ship.name)} »` : '(sans bateau)'}</h3>
+      <div class="gauge" aria-label="Chargement de la cale"><i style="width:${Math.min(100, (load / Math.max(cap, 1)) * 100)}%"></i></div>
+      <div class="gauge-cap"><span>Chargement</span><span>${G.kg(load)} / ${G.kg(cap)}</span></div>
+      <div class="cargo">
+        <div class="cargo-side" data-x-drop="inv"><b>Ton inventaire <small class="note">${G.kg(G.invWeight(S))}</small></b>
+          <div class="xgrid">${Object.entries(inv).map(([k, q]) => cell('inv', k, q)).join('') || '<p class="note">Vide</p>'}</div></div>
+        <div class="cargo-side" data-x-drop="chest"><b>Cale</b>
+          <div class="xgrid">${Object.entries(c.chest).map(([k, q]) => cell('chest', k, q)).join('') || '<p class="note">Vide</p>'}</div></div>
+      </div>
+      ${it ? `<div class="xbar">
+        ${itemIco(cx.key)}<span class="x-name"><b>${esc(it.name)}</b><small>${G.kg(it.weight || 0)} l’unité · ${selQ} disponible${selQ > 1 ? 's' : ''}</small></span>
+        <span class="x-qty"><button class="sq" data-xq="-1" aria-label="Moins">−</button><input id="x-qty" type="number" min="1" max="${selQ}" value="${Math.min(cx.qty, selQ)}" aria-label="Quantité"><button class="sq" data-xq="1" aria-label="Plus">+</button><button class="btn sm ghost" data-xq="all">Tout</button></span>
+        <button class="btn" id="x-go" ${okPerm ? '' : 'disabled title="Ton grade ne le permet pas"'}>${cx.side === 'inv' ? 'Déposer dans la cale →' : '← Prendre'}</button>
+      </div>` : '<p class="note" style="margin:0">Clique sur un objet pour choisir la quantité, ou fais glisser une pile entière d’un côté à l’autre.</p>'}
+    </section>`;
+}
+function shipsTabHTML() {
+  const c = CREW;
   const ship = c?.ship ? SHIPS.find((x) => x.id === c.ship) : null;
   const mine = SHIPS.filter((x) => x.owner?.kind === 'player' && x.owner.id === S.uid);
   const crewShips = c ? SHIPS.filter((x) => x.owner?.kind === 'crew' && x.owner.id === c.id) : [];
-  const cap = G.crewCapacity(ship), load = c ? G.chestWeight(c) : 0;
-  const invOpts = S.inv.filter(Boolean).filter(([k]) => G.ITEMS[k]).map(([k, q]) => `<option value="${esc(k)}">${esc(itemOf(k).name)} (${q})</option>`).join('');
-  $('v-crew').innerHTML = c ? `
-    <div class="crew-hero">
-      <div class="flag">${c.flag ? `<img src="${esc(c.flag)}" alt="Jolly Roger">` : ico(1)}</div>
-      <div>
-        <h2>${esc(c.name)}</h2>
-        <p class="lede" style="margin:4px 0 0">${c.members.length} membre${c.members.length > 1 ? 's' : ''}${captain ? ' · tu es le capitaine' : ''}</p>
-        <div class="members">${c.members.map((u) => `<span class="${u === c.captain ? 'cap' : ''}">${u === c.captain ? '👑 ' : ''}${esc(c.memberNames?.[u] || '?')}</span>`).join('')}</div>
-      </div>
-    </div>
-    <div class="crew-grid">
-      <section class="crew-box">
-        <h3>Banque commune</h3>
-        <div class="bank-amount">${berry(c.bank)}</div>
-        <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
-          <button class="btn sm" id="bank-in">Déposer</button>${captain ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div>
-        ${captain ? '' : '<p class="note" style="margin:0">Seul le capitaine peut retirer de l’argent.</p>'}
-      </section>
-      <section class="crew-box">
-        <h3>Coffre commun</h3>
-        <div class="gauge" aria-label="Chargement du coffre"><i style="width:${Math.min(100, (load / Math.max(cap, 1)) * 100)}%"></i></div>
-        <div class="gauge-cap"><span>${ship ? `Cale : ${esc(ship.name)}` : 'Sans bateau (100 kg)'}</span><span>${G.kg(load)} / ${G.kg(cap)}</span></div>
-        <div class="chest">${Object.entries(c.chest).map(([k, q]) => `<button class="need" data-chest-out="${esc(k)}" title="Sortir 1 ${esc(itemOf(k).name)}">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</button>`).join('') || '<span class="note">Le coffre est vide.</span>'}</div>
-        <div class="mj-row prog-row"><label for="chest-item">Déposer</label><select id="chest-item">${invOpts || '<option value="">Inventaire vide</option>'}</select>
-          <input id="chest-q" type="number" min="1" value="1" style="width:70px" aria-label="Quantité"><button class="btn sm" id="chest-in" ${invOpts ? '' : 'disabled'}>Déposer</button></div>
-        <p class="note" style="margin:0">Clique sur un objet du coffre pour le sortir.</p>
-      </section>
-    </div>
-    <h3 class="ed-h">Bateau de l’équipage</h3>
-    ${ship ? shipCard(ship, { actions: captain ? `<button class="btn sm ghost" data-ship-edit="${esc(ship.id)}">Modifier</button>` : '' }) : '<p class="note">L’équipage n’a pas encore de bateau attitré.</p>'}
-    ${captain && [...mine, ...crewShips].length ? `<div class="mj-row" style="margin-top:10px"><label for="crew-ship">Bateau attitré</label>
-      <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)}, ${G.kg(x.capacity)})</option>`).join('')}</select>
-      <button class="btn sm" id="crew-ship-go">Choisir</button></div>
-      <p class="note">Un de tes bateaux choisi ici devient celui de l’équipage.</p>` : ''}
-  ` : `<div class="no-shop">${ico(1)}<h2>Pas d’équipage</h2><p class="note">Tu ne fais partie d’aucun équipage. C’est un MJ qui t’en fait rejoindre un.</p></div>`;
-  $('v-crew').innerHTML += `
+  return `
+    ${c ? `<h3 class="ed-h" style="margin-top:0;border:none;padding-top:0">Bateau de l’équipage</h3>
+      ${ship ? shipCard(ship, { actions: can('ship') ? `<button class="btn sm ghost" data-ship-edit="${esc(ship.id)}">Modifier</button>` : '' }) : '<p class="note">L’équipage n’a pas encore de bateau attitré.</p>'}
+      ${can('ship') && [...mine, ...crewShips].length ? `<div class="mj-row" style="margin-top:10px"><label for="crew-ship">Bateau attitré</label>
+        <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)}, ${G.kg(x.capacity)})</option>`).join('')}</select>
+        <button class="btn sm" id="crew-ship-go">Choisir</button></div>
+        <p class="note">Un de tes bateaux choisi ici devient celui de l’équipage.</p>` : ''}` : ''}
     <h3 class="ed-h">Mes bateaux</h3>
     ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { actions: `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>` })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}`;
+}
+function renderCrew() {
+  if (!S || ADMIN) return;
+  const c = CREW;
+  if (!c && crewTab !== 'ships') crewTab = 'crew';
+  const head = c ? `
+    <div class="crew-hero">
+      <div class="flag">${c.flag ? `<img src="${esc(c.flag)}" alt="Jolly Roger" onerror="this.replaceWith(document.createTextNode('☠'))">` : ico(1)}</div>
+      <div>
+        <h2>${esc(c.name)}</h2>
+        <p class="lede" style="margin:4px 0 0">${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ton grade : <b>${esc(G.rankName(c, S.uid))}</b></p>
+      </div>
+    </div>` : `<div class="no-shop">${ico(1)}<h2>Pas d’équipage</h2><p class="note">Tu ne fais partie d’aucun équipage. Un capitaine peut t’inviter.</p></div>`;
+  const tabs = `<div class="seg crew-seg" role="group" aria-label="Section">
+    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">Équipage</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">Cale et banque</button>` : ''}
+    <button aria-pressed="${crewTab === 'ships'}" data-ct="ships">Bateaux</button></div>`;
+  $('v-crew').innerHTML = `${head}${invitesHTML()}${tabs}
+    <div class="crew-body">${crewTab === 'ships' ? shipsTabHTML() : !c ? '' : crewTab === 'cargo' ? cargoHTML() : crewTabHTML()}</div>`;
   paintStatic($('v-crew'));
 }
+async function crewSearchNow() {
+  try {
+    crewResults = (await API.act({ type: 'crew.search', q: crewSearch })).results || [];
+  } catch (err) {
+    crewResults = [];
+    toast(esc(err.message));
+  }
+  if (crewTab === 'crew') {
+    const box = $('crew-results');
+    if (box) {
+      renderCrew();
+      const i = $('crew-search');
+      i?.focus();
+      i?.setSelectionRange(i.value.length, i.value.length);
+    }
+  }
+}
+$('v-crew').addEventListener('input', (e) => {
+  if (e.target.id === 'crew-search') {
+    crewSearch = e.target.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(crewSearchNow, 300);
+  }
+  if (e.target.id === 'x-qty') cx.qty = Math.max(1, Math.round(+e.target.value || 1));
+});
+$('v-crew').addEventListener('change', async (e) => {
+  const u = e.target.dataset?.rankOf;
+  if (u) return void run({ type: 'crew.member.rank', uid: u, rankId: e.target.value });
+  if (e.target.id === 'flag-file') {
+    const f = e.target.files[0];
+    if (!f?.type.startsWith('image/')) return;
+    if (f.size > 4 * 1024 * 1024) return toast('Image trop lourde (4 Mo maximum).');
+    run({ type: 'crew.edit', flag: await readAsDataUrl(f) });
+  }
+});
 $('v-crew').addEventListener('click', async (e) => {
+  const ct = e.target.closest('[data-ct]')?.dataset.ct;
+  if (ct) {
+    crewTab = ct;
+    return renderCrew();
+  }
+  const join = e.target.closest('[data-join]')?.dataset.join;
+  if (join) {
+    const out = await run({ type: 'crew.join', crewId: join });
+    if (out) {
+      INVITES = out.invites || [];
+      crewTab = 'crew';
+      renderCrew();
+    }
+    return;
+  }
+  const dec = e.target.closest('[data-decline]')?.dataset.decline;
+  if (dec) {
+    const out = await run({ type: 'crew.decline', crewId: dec });
+    if (out) {
+      INVITES = out.invites || INVITES.filter((i) => i.id !== dec);
+      renderCrew();
+    }
+    return;
+  }
+  // Équipage
+  const inv = e.target.closest('[data-invite]')?.dataset.invite;
+  if (inv) {
+    if (await run({ type: 'crew.invite', uid: inv })) {
+      crewResults = crewResults.filter((x) => x.uid !== inv);
+      renderCrew();
+    }
+    return;
+  }
+  const un = e.target.closest('[data-uninvite]')?.dataset.uninvite;
+  if (un) return void run({ type: 'crew.invite.cancel', uid: un });
+  const kick = e.target.closest('[data-kick]')?.dataset.kick;
+  if (kick && (await askConfirm(`${CREW.memberNames?.[kick] || 'Ce membre'} ne fera plus partie de l’équipage.`, { title: 'Exclure ce membre ?', ok: 'Exclure', danger: true }))) return void run({ type: 'crew.kick', uid: kick });
+  const cap = e.target.closest('[data-captain]')?.dataset.captain;
+  if (cap && (await askConfirm(`${CREW.memberNames?.[cap] || 'Ce membre'} deviendra capitaine, et tu passeras au grade de base.`, { title: 'Céder ta place de capitaine ?', ok: 'Céder ma place', danger: true }))) return void run({ type: 'crew.transfer', uid: cap });
+  const rs = e.target.closest('[data-rank-save]');
+  if (rs) {
+    const box = rs.closest('.rank-edit');
+    const perms = Object.fromEntries([...box.querySelectorAll('[data-perm]')].map((c) => [c.dataset.perm, c.checked]));
+    const name = box.querySelector('.rank-name').value.trim();
+    if (!name) return toast('Donne un nom au grade.');
+    return void run({ type: 'crew.rank.save', id: rs.dataset.rankSave || undefined, name, perms });
+  }
+  const rd = e.target.closest('[data-rank-del]')?.dataset.rankDel;
+  if (rd && (await askConfirm('Les membres qui l’ont repasseront au grade de base.', { title: 'Supprimer ce grade ?', ok: 'Supprimer', danger: true }))) return void run({ type: 'crew.rank.delete', id: rd });
+  if (e.target.id === 'crew-edit-save') return void run({ type: 'crew.edit', name: $('crew-name').value });
+  if (e.target.id === 'flag-pick') return $('flag-file').click();
+  if (e.target.id === 'flag-none') return void run({ type: 'crew.edit', flag: null });
+  if (e.target.id === 'flag-url-go') {
+    const v = $('flag-url').value.trim();
+    if (!/^https?:\/\//.test(v)) return toast('Le lien doit commencer par http:// ou https://');
+    return void run({ type: 'crew.edit', flag: v });
+  }
+  if (e.target.id === 'crew-leave' && (await askConfirm('Tu ne pourras revenir que sur invitation.', { title: `Quitter ${CREW.name} ?`, ok: 'Quitter', danger: true }))) {
+    const out = await run({ type: 'crew.leave' });
+    if (out) {
+      INVITES = out.invites || INVITES;
+      renderCrew();
+    }
+    return;
+  }
+  // Cale et banque
   const amount = () => Math.round(Math.abs(+$('bank-n')?.value || 0));
   if (e.target.id === 'bank-in') return amount() ? void run({ type: 'crew.bank.deposit', amount: amount() }) : toast('Indique un montant.');
   if (e.target.id === 'bank-out') return amount() ? void run({ type: 'crew.bank.withdraw', amount: amount() }) : toast('Indique un montant.');
-  if (e.target.id === 'chest-in') return void run({ type: 'crew.chest.deposit', key: $('chest-item').value, qty: Math.max(1, +$('chest-q').value || 1) });
-  const out = e.target.closest('[data-chest-out]')?.dataset.chestOut;
-  if (out) return void run({ type: 'crew.chest.withdraw', key: out, qty: 1 });
+  if (xJust) return;
+  const xc = e.target.closest('[data-x-key]');
+  if (xc) {
+    const same = cx.side === xc.dataset.xSide && cx.key === xc.dataset.xKey;
+    cx = same ? { side: null, key: null, qty: 1 } : { side: xc.dataset.xSide, key: xc.dataset.xKey, qty: 1 };
+    return renderCrew();
+  }
+  const xq = e.target.closest('[data-xq]')?.dataset.xq;
+  if (xq) {
+    const max = +$('x-qty').max || 1;
+    cx.qty = xq === 'all' ? max : Math.min(max, Math.max(1, (+$('x-qty').value || 1) + Number(xq)));
+    $('x-qty').value = cx.qty;
+    return;
+  }
+  if (e.target.closest('#x-go')) return void cargoMove(cx.side, cx.key, Math.max(1, +$('x-qty').value || 1));
+  // Bateaux
   if (e.target.id === 'crew-ship-go') return void run({ type: 'crew.ship', shipId: $('crew-ship').value || null });
   const se = e.target.closest('[data-ship-edit]')?.dataset.shipEdit;
   if (se) openShipEdit(SHIPS.find((x) => x.id === se), { player: true });
+});
+async function cargoMove(side, key, qty) {
+  const out = await run({ type: side === 'inv' ? 'crew.chest.deposit' : 'crew.chest.withdraw', key, qty });
+  if (out) {
+    cx.qty = 1;
+    renderCrew();
+  }
+}
+/* Glisser une pile entière entre l'inventaire et la cale */
+let xdrag = null, xJust = false;
+$('v-crew').addEventListener('pointerdown', (e) => {
+  const c = e.target.closest('[data-x-key]');
+  if (!c || e.button > 0) return;
+  xdrag = { side: c.dataset.xSide, k: c.dataset.xKey, x: e.clientX, y: e.clientY, cell: c, on: false };
+});
+window.addEventListener('pointermove', (e) => xdrag && ghostMove(xdrag, e, itemIco(xdrag.k), '[data-x-drop]'), { passive: false });
+window.addEventListener('pointerup', () => {
+  if (!xdrag) return;
+  const d = xdrag;
+  xdrag = null;
+  if (!d.on) return;
+  xJust = true;
+  setTimeout(() => (xJust = false), 0);
+  ghostEnd(d);
+  const to = d.over?.dataset.xDrop;
+  if (!to || to === d.side) return;
+  const inv = S.inv.reduce((a, s) => a + (s && s[0] === d.k ? s[1] : 0), 0);
+  cargoMove(d.side, d.k, d.side === 'inv' ? inv : CREW.chest[d.k] || 0);
 });
 
 /* ═══ Bateau : édition (joueur : nom, description, photo ; staff : tout) ═══ */
@@ -1953,6 +2185,7 @@ function renderCrewEdit() {
       <div class="se-face-ctl">
         <b>Jolly Roger</b>
         <div class="se-row"><button type="button" class="btn sm" id="cr-pick">Choisir une image</button><input type="file" id="cr-file" accept="image/*" hidden>${d.flag ? '<button type="button" class="btn sm ghost" id="cr-noflag">Retirer</button>' : ''}</div>
+        <div class="ph-url-row"><input type="url" id="cr-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="cr-url-go">Utiliser</button></div>
       </div>
     </div>
     <h3 class="ed-h">Membres (${d.members.length})</h3>
@@ -1996,6 +2229,13 @@ $('d-crew').addEventListener('change', async (e) => {
 });
 $('d-crew').addEventListener('click', (e) => {
   if (e.target.id === 'cr-pick') $('cr-file').click();
+  if (e.target.id === 'cr-url-go') {
+    const v = $('cr-url').value.trim();
+    if (!/^https?:\/\//.test(v)) return void ($('cr-err').textContent = 'Le lien doit commencer par http:// ou https://');
+    readCrewEdit();
+    crewDraft.flag = v;
+    renderCrewEdit();
+  }
   if (e.target.id === 'cr-noflag') {
     readCrewEdit();
     crewDraft.flag = null;
@@ -2354,7 +2594,8 @@ async function refresh() {
     SHOP = st.shop;
     CREW = st.crew;
     SHIPS = st.ships || [];
-    if (screen === 'crew') renderCrew();
+    INVITES = st.invites || [];
+    if (screen === 'crew' && !document.activeElement?.closest('#v-crew')) renderCrew();
     if (screen === 'nav') renderNav();
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
     renderHero();
@@ -2379,6 +2620,7 @@ async function refresh() {
     SHOP = st.shop;
     CREW = st.crew;
     SHIPS = st.ships || [];
+    INVITES = st.invites || [];
     CHNAME = st.channelName || '';
   } catch (err) {
     console.error(err);

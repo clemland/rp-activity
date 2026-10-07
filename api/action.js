@@ -6,9 +6,10 @@
 import { handler, need } from './_lib/http.js';
 import { userFromRequest } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
-import { read, write, retry } from './_lib/db.js';
+import { read, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
-import { playerAction, crewAction, slug } from '../shared/game.js';
+import { invitesFor } from './_lib/context.js';
+import { playerAction, crewAction, inviteAction, normalizeCrew, crewCan, slug, fullName } from '../shared/game.js';
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
@@ -24,6 +25,7 @@ export default handler(['POST'], async (req, body) => {
   }
   if (action.type === 'tech.save' && action.media !== undefined) action.media = await ingest(action.media, 'techniques', me.uid);
   if (action.type === 'ship.edit' && action.photo) action.photo = await ingest(action.photo, 'bateaux', me.uid);
+  if (action.type === 'crew.edit' && action.flag) action.flag = await ingest(action.flag, 'pavillons', me.uid);
 
   await loadCatalog();
   return retry(async () => {
@@ -36,15 +38,66 @@ export default handler(['POST'], async (req, body) => {
       ships: shipList({ ...cs.ships, ...(extra.ships || {}) }),
     });
 
-    // Équipage : banque, coffre, bateau attitré
+    // Recherche de joueurs à inviter (lecture seule)
+    if (action.type === 'crew.search') {
+      need(cs.crew && crewCan(cs.crew, me.uid, 'invite'), 403, 'Ton grade ne permet pas d’inviter.');
+      const q = String(action.q || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+      const all = await listPlayers();
+      const results = all
+        .filter((x) => !cs.crew.members.includes(x.uid))
+        .map((x) => ({ uid: x.uid, name: fullName({ id: x.ident }), crew: x.crewId }))
+        .filter((x) => !q || x.name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().includes(q))
+        .slice(0, 20);
+      return { results };
+    }
+
+    // Réponse à une invitation (l'équipage qui invite n'est pas forcément le sien)
+    if (action.type === 'crew.join' || action.type === 'crew.decline') {
+      const row = await read('crews', action.crewId);
+      need(row, 404, 'Cet équipage n’existe plus.');
+      const out = inviteAction(player, action, { crew: { id: action.crewId, ...row.data } });
+      if (out.previous) {
+        // Il quitte son ancien équipage (sauf s'il en est le capitaine avec d'autres membres)
+        const old = await read('crews', out.previous);
+        if (old) {
+          const o = normalizeCrew(old.data);
+          need(!(o.captain === me.uid && o.members.length > 1), 400, `Tu es capitaine de ${o.name} : cède d’abord ta place.`);
+          o.members = o.members.filter((u) => u !== me.uid);
+          delete o.memberRanks[me.uid];
+          if (o.captain === me.uid) o.captain = null;
+          await write('crews', out.previous, normalizeCrew(o), old.version);
+        }
+      }
+      const { id, ...crewData } = out.crew;
+      await write('crews', action.crewId, crewData, row.version);
+      await write('players', me.uid, out.player, version);
+      const fresh = await loadCrewAndShips(out.player);
+      return { ...out, crew: publicCrew(fresh.crew, fresh.memberNames), ships: shipList(fresh.ships), invites: await invitesFor(me.uid) };
+    }
+
+    // Équipage : banque, cale, bateau, grades, invitations, membres
     if (action.type.startsWith('crew.')) {
       need(cs.crew, 400, 'Tu n’as pas d’équipage.');
-      const out = crewAction(player, action, { crew: cs.crew, ships: cs.ships });
-      const { id, ...crewData } = out.crew;
+      if (action.type === 'crew.invite') {
+        need(action.uid !== me.uid, 400, 'Tu fais déjà partie de l’équipage.');
+        const target = await read('players', String(action.uid || ''));
+        need(target, 404, 'Ce joueur n’a pas de fiche.');
+        action.name = fullName(target.data);
+      }
+      const out = crewAction(player, action, { crew: cs.crew, ships: cs.ships, now: Date.now() });
+      const { id, memberNames, ...crewData } = out.crew;
       await write('crews', id, crewData, cs.crewVersion);
       for (const [sid, ship] of Object.entries(out.ships || {})) await write('ships', sid, ship, cs.shipVersions[sid] ?? null);
+      if (out.kicked) {
+        await retry(async () => {
+          const k = await read('players', out.kicked);
+          if (k && k.data.crewId === id) await write('players', out.kicked, { ...k.data, crewId: null }, k.version);
+        });
+      }
       await write('players', me.uid, out.player, version);
-      return reply(out, { crew: out.crew, ships: out.ships });
+      if (out.left) return { ...out, crew: null, ships: shipList(Object.fromEntries(Object.entries(cs.ships).filter(([, sh]) => sh.owner?.kind === 'player'))), invites: await invitesFor(me.uid) };
+      const names = { ...cs.memberNames };
+      return reply(out, { crew: { ...out.crew, memberNames: names }, ships: out.ships });
     }
 
     // Bateau : nom, description, photo

@@ -581,14 +581,29 @@ export function normalizeShip(s) {
   s.owner = s.owner && ['player', 'crew'].includes(s.owner.kind) && s.owner.id ? { kind: s.owner.kind, id: String(s.owner.id) } : null;
   return s;
 }
-const isCaptain = (p, crew) => !!crew && crew.captain === p.uid;
 export function canEditShip(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
-  if (ship.owner?.kind === 'crew') return isCaptain(p, crew) && crew.id === ship.owner.id;
+  if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'ship');
   return false;
 }
 
 /* ═══ Équipages ══════════════════════════════════════════════════════════ */
+/** Permissions qu'un capitaine peut donner à un grade. Le capitaine les a toutes. */
+export const CREW_PERMS = {
+  bankIn: 'Déposer à la banque',
+  bankOut: 'Retirer de la banque',
+  chestIn: 'Déposer dans la cale',
+  chestOut: 'Prendre dans la cale',
+  invite: 'Inviter des joueurs',
+  kick: 'Exclure des membres',
+  ranks: 'Attribuer les grades',
+  ship: 'Choisir le bateau',
+  edit: 'Modifier le nom et le Jolly Roger',
+};
+export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas supprimable
+const INVITE_TTL = 7 * 24 * 3600 * 1000;
+const defaultRank = () => ({ id: DEFAULT_RANK, name: 'Matelot', perms: { bankIn: true, chestIn: true, chestOut: true } });
+
 export function normalizeCrew(c) {
   c.name = str(c.name, 60) || 'Équipage sans nom';
   c.flag ??= null; // Jolly Roger (image)
@@ -597,8 +612,28 @@ export function normalizeCrew(c) {
   c.bank = int(c.bank, 0, 1e13);
   c.chest = Object.fromEntries(Object.entries(c.chest || {}).map(([k, q]) => [k, int(q, 0, 1e7)]).filter(([, q]) => q > 0));
   c.ship ??= null;
+  // Grades
+  c.ranks = (Array.isArray(c.ranks) ? c.ranks : [])
+    .filter((r) => r && r.id)
+    .map((r) => ({ id: String(r.id), name: str(r.name, 30) || 'Grade', perms: Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!r.perms?.[k]])) }))
+    .slice(0, 20);
+  if (!c.ranks.some((r) => r.id === DEFAULT_RANK)) c.ranks.unshift({ ...defaultRank(), perms: Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!defaultRank().perms[k]])) });
+  const ids = new Set(c.ranks.map((r) => r.id));
+  const mr = c.memberRanks || {};
+  c.memberRanks = Object.fromEntries(c.members.map((u) => [u, ids.has(mr[u]) ? mr[u] : DEFAULT_RANK]));
+  // Invitations (7 jours), jamais pour un membre
+  const now = Date.now();
+  c.invites = (c.invites || []).filter((i) => i && i.uid && !c.members.includes(String(i.uid)) && now - (i.at || 0) < INVITE_TTL).slice(-50);
   return c;
 }
+/** Le membre a-t-il cette permission ? Le capitaine a tout. */
+export function crewCan(crew, uid, perm) {
+  if (!crew || !crew.members.includes(uid)) return false;
+  if (crew.captain === uid) return true;
+  const r = crew.ranks.find((x) => x.id === crew.memberRanks[uid]);
+  return !!r?.perms?.[perm];
+}
+export const rankName = (crew, uid) => (crew.captain === uid ? 'Capitaine' : crew.ranks.find((r) => r.id === crew.memberRanks[uid])?.name ?? 'Matelot');
 export const chestWeight = (c) => Object.entries(c.chest || {}).reduce((a, [k, q]) => a + itemWeight(k) * q, 0);
 export const crewCapacity = (ship) => (ship ? ship.capacity : CHEST_BASE);
 
@@ -607,13 +642,18 @@ export const crewCapacity = (ship) => (ship ? ship.capacity : CHEST_BASE);
  * ctx : { crew, ships: { id: ship } } ; renvoie { player, crew, ships?, toast, item? }.
  */
 export function crewAction(player, action, ctx = {}) {
-  const p = clone(player), crew = clone(ctx.crew);
+  const p = clone(player), crew = ctx.crew ? normalizeCrew(clone(ctx.crew)) : null;
   const a = action || {};
   if (!crew || !crew.members.includes(p.uid)) fail('Tu ne fais pas partie de cet équipage.');
+  const need = (perm) => {
+    if (!crewCan(crew, p.uid, perm)) fail(`Ton grade ne permet pas de : ${CREW_PERMS[perm].toLowerCase()}.`);
+  };
+  const isCap = crew.captain === p.uid;
   const ship = crew.ship ? ctx.ships?.[crew.ship] ?? null : null;
   const out = { player: p, crew, toast: null };
   switch (a.type) {
     case 'crew.bank.deposit': {
+      need('bankIn');
       const n = int(a.amount, 0, 1e13);
       if (!n) fail('Indique un montant.');
       if (p.berry < n) fail('Pas assez de berrys.');
@@ -622,7 +662,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.bank.withdraw': {
-      if (!isCaptain(p, crew)) fail('Seul le capitaine peut retirer de l’argent.');
+      need('bankOut');
       const n = int(a.amount, 0, 1e13);
       if (!n) fail('Indique un montant.');
       if (crew.bank < n) fail('La banque n’a pas assez de berrys.');
@@ -631,6 +671,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.chest.deposit': {
+      need('chestIn');
       const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
       if (count(p, k) < q) fail('Tu n’as pas assez de cet objet.');
       if (isEquipped(p, k) && count(p, k) - q < equippedCount(p, k)) fail('Retire-le d’abord de ton équipement.');
@@ -642,6 +683,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.chest.withdraw': {
+      need('chestOut');
       const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
       if ((crew.chest[k] || 0) < q) fail('Le coffre n’en contient pas assez.');
       if (!ITEMS[k]) fail('Objet supprimé : il ne peut plus être sorti.');
@@ -652,7 +694,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.ship': {
-      if (!isCaptain(p, crew)) fail('Seul le capitaine choisit le bateau de l’équipage.');
+      need('ship');
       if (!a.shipId) { crew.ship = null; out.toast = 'L’équipage n’a plus de bateau attitré'; break; }
       const s = clone(ctx.ships?.[a.shipId]);
       if (!s) fail('Bateau introuvable.');
@@ -666,9 +708,120 @@ export function crewAction(player, action, ctx = {}) {
       out.toast = `${s.name} est maintenant le bateau de l’équipage`;
       break;
     }
+    case 'crew.edit': {
+      need('edit');
+      if ('name' in a) {
+        const n = str(a.name, 60);
+        if (!n) fail('Donne un nom à l’équipage.');
+        crew.name = n;
+      }
+      if ('flag' in a) crew.flag = a.flag ? str(a.flag, 3_000_000) : null;
+      out.toast = 'Équipage mis à jour';
+      break;
+    }
+    case 'crew.rank.save': {
+      if (!isCap) fail('Seul le capitaine crée et modifie les grades.');
+      const name = str(a.name, 30);
+      if (!name) fail('Donne un nom au grade.');
+      const perms = Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!a.perms?.[k]]));
+      let r = a.id && crew.ranks.find((x) => x.id === a.id);
+      if (r) Object.assign(r, { name, perms });
+      else {
+        if (crew.ranks.length >= 20) fail('20 grades maximum.');
+        let id = slug(name), n = 2;
+        while (crew.ranks.some((x) => x.id === id)) id = `${slug(name)}-${n++}`;
+        r = { id, name, perms };
+        crew.ranks.push(r);
+      }
+      out.toast = `Grade enregistré : ${name}`;
+      break;
+    }
+    case 'crew.rank.delete': {
+      if (!isCap) fail('Seul le capitaine supprime les grades.');
+      if (a.id === DEFAULT_RANK) fail('Le grade de base ne peut pas être supprimé (tu peux le renommer).');
+      const r = crew.ranks.find((x) => x.id === a.id);
+      if (!r) fail('Grade introuvable.');
+      crew.ranks = crew.ranks.filter((x) => x !== r);
+      for (const u of crew.members) if (crew.memberRanks[u] === r.id) crew.memberRanks[u] = DEFAULT_RANK;
+      out.toast = `Grade supprimé : ${r.name}`;
+      break;
+    }
+    case 'crew.member.rank': {
+      need('ranks');
+      if (!crew.members.includes(a.uid)) fail('Ce joueur n’est pas dans l’équipage.');
+      if (a.uid === crew.captain) fail('Le capitaine n’a pas de grade à changer.');
+      if (!crew.ranks.some((x) => x.id === a.rankId)) fail('Grade introuvable.');
+      if (!isCap && a.uid === p.uid) fail('Tu ne peux pas changer ton propre grade.');
+      crew.memberRanks[a.uid] = a.rankId;
+      out.toast = `Grade attribué : ${crew.ranks.find((x) => x.id === a.rankId).name}`;
+      break;
+    }
+    case 'crew.invite': {
+      need('invite');
+      const u = String(a.uid || '');
+      if (!u) fail('Choisis un joueur.');
+      if (crew.members.includes(u)) fail('Ce joueur est déjà dans l’équipage.');
+      if (crew.invites.some((i) => i.uid === u)) fail('Ce joueur est déjà invité.');
+      crew.invites.push({ uid: u, by: p.uid, at: ctx.now || Date.now() });
+      out.toast = `Invitation envoyée${a.name ? ` à ${str(a.name, 60)}` : ''}`;
+      break;
+    }
+    case 'crew.invite.cancel': {
+      need('invite');
+      crew.invites = crew.invites.filter((i) => i.uid !== a.uid);
+      out.toast = 'Invitation annulée';
+      break;
+    }
+    case 'crew.kick': {
+      need('kick');
+      if (!crew.members.includes(a.uid)) fail('Ce joueur n’est pas dans l’équipage.');
+      if (a.uid === crew.captain) fail('On ne peut pas exclure le capitaine.');
+      if (a.uid === p.uid) fail('Pour partir, utilise « Quitter l’équipage ».');
+      crew.members = crew.members.filter((u) => u !== a.uid);
+      delete crew.memberRanks[a.uid];
+      out.kicked = a.uid;
+      out.toast = 'Membre exclu';
+      break;
+    }
+    case 'crew.transfer': {
+      if (!isCap) fail('Seul le capitaine peut céder sa place.');
+      if (!crew.members.includes(a.uid) || a.uid === p.uid) fail('Choisis un autre membre de l’équipage.');
+      crew.captain = a.uid;
+      crew.memberRanks[p.uid] = DEFAULT_RANK;
+      out.toast = 'Tu as cédé ta place de capitaine';
+      break;
+    }
+    case 'crew.leave': {
+      if (isCap && crew.members.length > 1) fail('Cède d’abord ta place de capitaine à un autre membre.');
+      crew.members = crew.members.filter((u) => u !== p.uid);
+      delete crew.memberRanks[p.uid];
+      if (isCap) crew.captain = null;
+      p.crewId = null;
+      out.left = true;
+      out.toast = `Tu as quitté ${crew.name}`;
+      break;
+    }
     default: fail('Action inconnue.');
   }
   return out;
+}
+
+/**
+ * Réponse d'un joueur à une invitation : rejoindre ou refuser.
+ * ctx : { crew } (l'équipage qui invite). Renvoie { player, crew, toast }.
+ */
+export function inviteAction(player, action, ctx = {}) {
+  const p = clone(player), crew = ctx.crew ? normalizeCrew(clone(ctx.crew)) : null;
+  if (!crew || !crew.invites.some((i) => i.uid === p.uid)) fail('Cette invitation n’existe plus.');
+  crew.invites = crew.invites.filter((i) => i.uid !== p.uid);
+  if (action.type === 'crew.decline') return { player: p, crew, toast: `Invitation de ${crew.name} refusée` };
+  if (action.type !== 'crew.join') fail('Action inconnue.');
+  crew.members.push(p.uid);
+  crew.memberRanks[p.uid] = DEFAULT_RANK;
+  if (!crew.captain) crew.captain = p.uid;
+  const previous = p.crewId && p.crewId !== crew.id ? p.crewId : null;
+  p.crewId = crew.id;
+  return { player: p, crew, previous, toast: `Bienvenue dans ${crew.name} !` };
 }
 
 /* ═══ Mode démo (hors Discord) ═══════════════════════════════════════════ */

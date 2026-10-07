@@ -21,7 +21,7 @@ async function call(method, path, body) {
 }
 
 /* ─── Mode démo : tout reste dans ce navigateur ─── */
-const KEY = 'op_rp_demo_v6';
+const KEY = 'op_rp_demo_v7';
 let store;
 function loadStore() {
   try {
@@ -29,7 +29,14 @@ function loadStore() {
   } catch {}
   if (!store?.player) {
     G.setCatalog(G.demoCatalog());
-    store = { player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(), crews: { 'goeland-noir': G.demoCrew() }, ships: G.demoShips() };
+    store = {
+      player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(), ships: G.demoShips(),
+      crews: {
+        'goeland-noir': G.demoCrew(),
+        // un autre équipage qui invite le joueur de démo, pour tester les invitations
+        'les-albatros': G.normalizeCrew({ name: 'Les Albatros', members: ['pnj-3'], captain: 'pnj-3', invites: [{ uid: 'demo', by: 'pnj-3', at: Date.now() }] }),
+      },
+    };
   }
   if (!store.shops) store.shops = { demo: store.shop ?? null };
   store.crews ??= {};
@@ -48,14 +55,18 @@ export function resetDemo() {
   loadStore();
 }
 /** Équipage du joueur de démo et bateaux visibles, comme le renvoie l'API. */
+const DEMO_NAMES = { demo: null, 'pnj-1': 'Matelot (démo)', 'pnj-2': 'Recrue (démo)', 'pnj-3': 'Capitaine Albatros (démo)' };
+const demoName = (u) => (u === 'demo' ? G.fullName(store.player) : DEMO_NAMES[u] || 'Joueur (démo)');
 function demoCrewShips() {
   const p = store.player;
-  const c = p.crewId ? store.crews[p.crewId] : null;
-  const crew = c ? { id: p.crewId, ...c, memberNames: Object.fromEntries(c.members.map((u) => [u, u === 'demo' ? G.fullName(p) : 'Matelot (démo)'])) } : null;
+  const c = p.crewId ? G.normalizeCrew(store.crews[p.crewId]) : null;
+  const crew = c ? { id: p.crewId, ...c, memberNames: Object.fromEntries([...c.members, ...c.invites.map((i) => i.uid)].map((u) => [u, demoName(u)])) } : null;
   const ships = Object.entries(store.ships)
     .filter(([, s]) => (s.owner?.kind === 'player' && s.owner.id === p.uid) || (s.owner?.kind === 'crew' && crew && s.owner.id === crew.id))
     .map(([id, s]) => ({ id, ...s }));
-  return { crew: structuredClone(crew), ships: structuredClone(ships) };
+  const invites = Object.entries(store.crews).map(([id, raw]) => [id, G.normalizeCrew(raw)]).filter(([, cc]) => cc.invites.some((i) => i.uid === 'demo'))
+    .map(([id, cc]) => ({ id, name: cc.name, flag: cc.flag, members: cc.members.length, by: cc.invites.find((i) => i.uid === 'demo').by, byName: demoName(cc.invites.find((i) => i.uid === 'demo').by) }));
+  return { crew: structuredClone(crew), ships: structuredClone(ships), invites };
 }
 const demoState = () => ({
   ...demoCrewShips(),
@@ -90,6 +101,24 @@ export async function state(playerId) {
 export async function act(action) {
   if (mode === 'demo') {
     G.setCatalog(store.catalog);
+    if (action.type === 'crew.search') {
+      const q = (action.q || '').toLowerCase();
+      return { results: [{ uid: 'pnj-2', name: demoName('pnj-2'), crew: null }].filter((x) => x.name.toLowerCase().includes(q)) };
+    }
+    if (action.type === 'crew.join' || action.type === 'crew.decline') {
+      const out = G.inviteAction(store.player, action, { crew: { id: action.crewId, ...store.crews[action.crewId] } });
+      const { id, ...data } = out.crew;
+      store.crews[action.crewId] = data;
+      if (out.previous && store.crews[out.previous]) {
+        const o = G.normalizeCrew(store.crews[out.previous]);
+        if (o.captain === 'demo' && o.members.length > 1) throw new Error(`Tu es capitaine de ${o.name} : cède d’abord ta place.`);
+        o.members = o.members.filter((u) => u !== 'demo');
+        store.crews[out.previous] = G.normalizeCrew(o);
+      }
+      store.player = out.player;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips() };
+    }
     if (action.type.startsWith('crew.')) {
       const { crew } = demoCrewShips();
       if (!crew) throw new Error('Tu n’as pas d’équipage.');

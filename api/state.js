@@ -7,7 +7,7 @@
  */
 import { handler, need } from './_lib/http.js';
 import { userFromRequest, isStaff } from './_lib/discord.js';
-import { findPlayer, loadShop, loadCatalog, channelInfo, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
+import { findPlayer, loadShop, loadCatalog, channelInfo, loadCrewAndShips, publicCrew, shipList, invitesFor } from './_lib/context.js';
 import { read, remove } from './_lib/db.js';
 
 export default handler(['GET'], async (req) => {
@@ -36,6 +36,7 @@ export default handler(['GET'], async (req) => {
   const cs = found ? await loadCrewAndShips(found.player) : null;
   return {
     me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied,
-    crew: cs ? publicCrew(cs.crew, cs.memberNames) : null, ships: cs ? shipList(cs.ships) : [], ...info,
+    crew: cs ? publicCrew(cs.crew, cs.memberNames) : null, ships: cs ? shipList(cs.ships) : [],
+    invites: found ? await invitesFor(target) : [], ...info,
   };
 });

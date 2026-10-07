@@ -53,7 +53,7 @@ process.env.DISCORD_BOT_TOKEN = 'bot';
 process.env.GUILD_ID = 'g1';
 process.env.STAFF_ROLE_IDS = 'role-mj';
 process.env.BOT_API_SECRET = 'secret';
-const USERS = { 'tok-joueur': { id: 'u1', username: 'joueur' }, 'tok-mj': { id: 'u2', username: 'mj' } };
+let USERS = { 'tok-joueur': { id: 'u1', username: 'joueur' }, 'tok-mj': { id: 'u2', username: 'mj' } };
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const json = (b, status = 200) => ({ ok: status < 400, status, json: async () => b, headers: new Map() });
@@ -298,4 +298,35 @@ test('bateaux : création par le staff, achat en boutique, renommage, assignatio
   // Le staff retire le bateau à l'équipage : l'équipage n'a plus de bateau attitré
   await call('staff', { body: { op: 'ship.save', id: 'le-vaillant', ship: { owner: null } }, headers: MJ });
   assert.equal(tables.crews.get('les-mouettes').data.ship, null);
+});
+
+test('équipage : grades, invitation et arrivée d’un joueur, exclusion', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  await call('bot', { body: { op: 'register', userId: 'u9', name: 'Nami Bis', race: 'Humain', classe: 'Tireur' }, headers: H });
+  const U9 = { authorization: 'Bearer tok-u9' };
+  USERS['tok-u9'] = { id: 'u9', username: 'nami' };
+  // u1 est capitaine des Mouettes : il crée un grade et cherche u9
+  let r = await call('action', { body: { action: { type: 'crew.rank.save', name: 'Navigatrice', perms: { chestOut: true } } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('action', { body: { action: { type: 'crew.search', q: 'nami' } }, headers: J });
+  assert.deepEqual(r.out.results.map((x) => x.uid), ['u9']);
+  r = await call('action', { body: { action: { type: 'crew.invite', uid: 'u9' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.match(r.out.toast, /Nami Bis/);
+  // u9 voit l'invitation et l'accepte
+  r = await call('state', { method: 'GET', query: {}, headers: U9 });
+  assert.equal(r.out.invites[0].name, 'Les Mouettes');
+  r = await call('action', { body: { action: { type: 'crew.join', crewId: 'les-mouettes' } }, headers: U9 });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.crew.name, 'Les Mouettes');
+  assert.equal(tables.players.get('u9').data.crewId, 'les-mouettes');
+  // grade attribué, puis exclusion
+  const rank = tables.crews.get('les-mouettes').data.ranks.find((x) => x.name === 'Navigatrice');
+  r = await call('action', { body: { action: { type: 'crew.member.rank', uid: 'u9', rankId: rank.id } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('action', { body: { action: { type: 'crew.bank.withdraw', amount: 1 } }, headers: U9 });
+  assert.equal(r.status, 400, 'pas la permission de retirer');
+  r = await call('action', { body: { action: { type: 'crew.kick', uid: 'u9' } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(tables.players.get('u9').data.crewId, null);
 });

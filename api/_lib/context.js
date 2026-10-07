@@ -47,8 +47,9 @@ export async function loadCrewAndShips(player) {
     if (row) {
       out.crew = { id: player.crewId, ...normalizeCrew(row.data) };
       out.crewVersion = row.version;
-      const members = await readMany('players', out.crew.members);
-      for (const uid of out.crew.members) out.memberNames[uid] = members[uid] ? fullName(members[uid].data) : 'Fiche supprimée';
+      const uids = [...out.crew.members, ...out.crew.invites.map((i) => i.uid)];
+      const members = await readMany('players', uids);
+      for (const uid of uids) out.memberNames[uid] = members[uid] ? fullName(members[uid].data) : 'Fiche supprimée';
     }
   }
   const { data, error } = await db().from('ships').select('id, data, version');
@@ -61,6 +62,20 @@ export async function loadCrewAndShips(player) {
     }
   }
   return out;
+}
+
+/** Invitations reçues par un joueur : [{ id, name, flag, members, by }]. */
+export async function invitesFor(uid) {
+  const crews = await readAll('crews');
+  const out = [];
+  for (const [id, raw] of Object.entries(crews)) {
+    const c = normalizeCrew(structuredClone(raw));
+    const inv = c.invites.find((i) => i.uid === uid);
+    if (inv) out.push({ id, name: c.name, flag: c.flag, members: c.members.length, by: inv.by });
+  }
+  if (!out.length) return out;
+  const names = await readMany('players', [...new Set(out.map((i) => i.by))]);
+  return out.map((i) => ({ ...i, byName: names[i.by] ? fullName(names[i.by].data) : '' }));
 }
 
 /** Ce que voit le site d'un équipage et de ses bateaux. */

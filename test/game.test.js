@@ -174,7 +174,7 @@ test('équipage : banque, coffre avec capacité du bateau, droits du capitaine',
   const membre = { ...G.demoPlayer(), uid: 'pnj-1' };
   let r = G.crewAction(membre, { type: 'crew.bank.deposit', amount: 1000 }, { crew, ships });
   assert.equal(r.crew.bank, 26000);
-  assert.throws(() => G.crewAction(membre, { type: 'crew.bank.withdraw', amount: 10 }, { crew, ships }), /capitaine/);
+  assert.throws(() => G.crewAction(membre, { type: 'crew.bank.withdraw', amount: 10 }, { crew, ships }), /grade ne permet pas/);
   r = G.crewAction(capitaine, { type: 'crew.bank.withdraw', amount: 5000 }, { crew, ships });
   assert.equal(r.player.berry, capitaine.berry + 5000);
   r = G.crewAction(membre, { type: 'crew.chest.deposit', key: 'bois-ex', qty: 4 }, { crew, ships });
@@ -199,5 +199,57 @@ test('équipage : le capitaine assigne son bateau, qui devient celui de l’équ
   assert.equal(r.crew.ship, 'perso');
   assert.deepEqual(r.ships.perso.owner, { kind: 'crew', id: 'goeland-noir' });
   const membre = { ...p, uid: 'pnj-1' };
-  assert.throws(() => G.crewAction(membre, { type: 'crew.ship', shipId: null }, { crew, ships }), /capitaine/);
+  assert.throws(() => G.crewAction(membre, { type: 'crew.ship', shipId: null }, { crew, ships }), /grade ne permet pas/);
+});
+
+test('grades : le capitaine crée un grade avec des permissions et l’attribue', () => {
+  cat();
+  const cap = G.demoPlayer(), membre = { ...G.demoPlayer(), uid: 'pnj-1' };
+  let crew = G.demoCrew();
+  assert.equal(G.rankName(crew, 'pnj-1'), 'Matelot');
+  assert.throws(() => G.crewAction(membre, { type: 'crew.rank.save', name: 'Second', perms: {} }, { crew }), /capitaine/);
+  crew = G.crewAction(cap, { type: 'crew.rank.save', name: 'Second', perms: { bankOut: true, invite: true, faux: true } }, { crew }).crew;
+  const second = crew.ranks.find((r) => r.name === 'Second');
+  assert.deepEqual(Object.keys(second.perms).filter((k) => second.perms[k]), ['bankOut', 'invite']);
+  assert.throws(() => G.crewAction(membre, { type: 'crew.bank.withdraw', amount: 10 }, { crew }), /grade/);
+  crew = G.crewAction(cap, { type: 'crew.member.rank', uid: 'pnj-1', rankId: second.id }, { crew }).crew;
+  assert.equal(G.rankName(crew, 'pnj-1'), 'Second');
+  assert.equal(G.crewAction(membre, { type: 'crew.bank.withdraw', amount: 10 }, { crew }).player.berry, membre.berry + 10);
+  // supprimer le grade : retour au grade de base
+  crew = G.crewAction(cap, { type: 'crew.rank.delete', id: second.id }, { crew }).crew;
+  assert.equal(G.rankName(crew, 'pnj-1'), 'Matelot');
+  assert.throws(() => G.crewAction(cap, { type: 'crew.rank.delete', id: G.DEFAULT_RANK }, { crew }), /base/);
+});
+
+test('invitations : inviter, accepter (en quittant l’ancien équipage), refuser, quitter', () => {
+  cat();
+  const cap = G.demoPlayer();
+  let crew = G.demoCrew();
+  const nouveau = G.normalize({ uid: 'n1', id: { name: 'Nami' }, crewId: 'ancien' });
+  assert.throws(() => G.inviteAction(nouveau, { type: 'crew.join' }, { crew }), /n’existe plus/);
+  crew = G.crewAction(cap, { type: 'crew.invite', uid: 'n1', name: 'Nami' }, { crew }).crew;
+  assert.throws(() => G.crewAction(cap, { type: 'crew.invite', uid: 'n1' }, { crew }), /déjà invité/);
+  const j = G.inviteAction(nouveau, { type: 'crew.join' }, { crew });
+  assert.ok(j.crew.members.includes('n1'));
+  assert.equal(j.player.crewId, 'goeland-noir');
+  assert.equal(j.previous, 'ancien', 'à retirer de son ancien équipage');
+  assert.equal(j.crew.invites.length, 0);
+  // quitter
+  const l = G.crewAction(j.player, { type: 'crew.leave' }, { crew: j.crew });
+  assert.equal(l.player.crewId, null);
+  assert.ok(!l.crew.members.includes('n1'));
+  // le capitaine ne part pas sans céder sa place
+  assert.throws(() => G.crewAction(cap, { type: 'crew.leave' }, { crew }), /Cède/);
+  const t = G.crewAction(cap, { type: 'crew.transfer', uid: 'pnj-1' }, { crew });
+  assert.equal(t.crew.captain, 'pnj-1');
+});
+
+test('exclure : réservé à la permission, jamais le capitaine', () => {
+  cat();
+  const cap = G.demoPlayer(), membre = { ...G.demoPlayer(), uid: 'pnj-1' };
+  const crew = G.demoCrew();
+  assert.throws(() => G.crewAction(membre, { type: 'crew.kick', uid: 'demo' }, { crew }), /grade/);
+  const k = G.crewAction(cap, { type: 'crew.kick', uid: 'pnj-1' }, { crew });
+  assert.equal(k.kicked, 'pnj-1');
+  assert.ok(!k.crew.members.includes('pnj-1'));
 });

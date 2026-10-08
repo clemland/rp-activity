@@ -236,6 +236,24 @@
   </div>
 </dialog>
 
+<dialog id="d-prompt" aria-labelledby="pr-title" class="confirm">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="pr-title">Saisie</h2></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <form class="panel-body" id="pr-form">
+      <p id="pr-text"></p>
+      <input id="pr-input" class="mj-search" autocomplete="off">
+      <p class="err" id="pr-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="submit" class="btn" id="pr-ok">Valider</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
 <dialog id="d-confirm" aria-labelledby="cf-title" class="confirm">
   <div class="panel">
     <div class="panel-head">

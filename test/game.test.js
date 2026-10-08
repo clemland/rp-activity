@@ -155,7 +155,9 @@ test('poids des objets et de l’inventaire', () => {
 test('bateau : achat en boutique, nom/photo par le propriétaire', () => {
   cat();
   const p = G.demoPlayer(), shop = G.demoShop();
-  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop, now: 5 });
+  assert.throws(() => G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop }), /nom/);
+  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex', shipName: 'La Belle' }, { shop, now: 5 });
+  assert.equal(r.newShip.name, 'La Belle');
   assert.equal(r.newShip.type, 'Caravelle');
   assert.equal(r.newShip.cannons, 4);
   assert.equal(r.newShip.capacity, 300);
@@ -252,4 +254,36 @@ test('exclure : réservé à la permission, jamais le capitaine', () => {
   const k = G.crewAction(cap, { type: 'crew.kick', uid: 'pnj-1' }, { crew });
   assert.equal(k.kicked, 'pnj-1');
   assert.ok(!k.crew.members.includes('pnj-1'));
+});
+
+test('armes : jamais empilées, une case par arme', () => {
+  cat();
+  const p = G.demoPlayer();
+  G.addItem(p, 'sabre-ex', 2);
+  assert.equal(p.inv.filter((x) => x && x[0] === 'sabre-ex').length, 3);
+  assert.ok(p.inv.every((x) => !x || x[0] !== 'sabre-ex' || x[1] === 1));
+  const i = p.inv.findIndex((x) => x && x[0] === 'sabre-ex'), j = p.inv.findIndex((x, n) => n > i && x && x[0] === 'sabre-ex');
+  const m = G.playerAction(p, { type: 'inv.move', from: i, to: j }).player;
+  assert.deepEqual([m.inv[i], m.inv[j]], [['sabre-ex', 1], ['sabre-ex', 1]], 'échange, pas d’empilement');
+  const vieux = G.normalize({ id: { name: 'X' }, inv: [['sabre-ex', 3]] });
+  assert.equal(vieux.inv.filter((x) => x && x[0] === 'sabre-ex').length, 3, 'anciennes piles séparées');
+  const plein = G.normalize({ id: { name: 'X' }, inv: Array.from({ length: 32 }, () => ['bois-ex', 1]) });
+  assert.equal(G.addItem(plein, 'sabre-ex', 1), false);
+});
+
+test('recettes : désignées par ce qu’elles produisent', () => {
+  cat();
+  const r = G.normalizeRecipe({ gives: { 'tonneau-ex': 2, 'clous-ex': 1 }, needs: { 'bois-ex': 1 } });
+  assert.equal(r.name, undefined);
+  assert.equal(G.recipeLabel(r), '2 × Tonneau (exemple), 1 × Clous (exemple)');
+});
+
+test('grades : classement par importance', () => {
+  cat();
+  const cap = G.demoPlayer();
+  let crew = G.crewAction(cap, { type: 'crew.rank.save', name: 'Second', perms: {} }, { crew: G.demoCrew() }).crew;
+  assert.deepEqual(crew.ranks.map((r) => r.name), ['Matelot', 'Second']);
+  const id = crew.ranks[1].id;
+  crew = G.crewAction(cap, { type: 'crew.rank.move', id, dir: -1 }, { crew }).crew;
+  assert.deepEqual(crew.ranks.map((r) => r.name), ['Second', 'Matelot']);
 });

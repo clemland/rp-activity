@@ -1,11 +1,12 @@
 /**
- * Images (photo de profil, GIF de technique, portrait de vendeur) : on les
- * stocke dans le bucket Supabase « media », jamais dans la base.
- * Accepte une image envoyée (data URL) ou un lien http(s), qu'on recopie chez
- * nous pour qu'elle reste disponible et passe le filtre de Discord.
- * Renvoie un chemin relatif « /media/... » (voir l'URL Mapping /media).
+ * Images (photos, GIF de techniques, Jolly Roger, bateaux, objets, vendeurs).
+ * Avec IMGBB_API_KEY : envoyées sur ImgBB, on garde le lien https://i.ibb.co/...
+ * Sinon : stockées dans le bucket Supabase « media » (chemin /media/...).
+ * Accepte une image envoyée (data URL) ou un lien http(s), recopié chez nous
+ * pour qu'il reste disponible même si le site d'origine l'efface.
  */
 import { db } from './db.js';
+import { env } from './env.js';
 import { HttpError } from './http.js';
 
 const MAX = 4 * 1024 * 1024;
@@ -37,11 +38,40 @@ function fromDataUrl(s) {
   return { buf, type: m[1].toLowerCase() };
 }
 
-/** Rien, un chemin déjà chez nous, une data URL ou un lien → chemin /media/... */
+const IBB = /^https:\/\/i\.ibb\.co\//;
+
+/** Envoi sur ImgBB : data URL (base64) ou lien, qu'ImgBB va chercher lui-même. */
+async function toImgbb(input, name) {
+  let image;
+  if (input.startsWith('data:')) image = fromDataUrl(input).buf.toString('base64');
+  else {
+    let u;
+    try {
+      u = new URL(input);
+    } catch {
+      throw new HttpError(400, 'Lien invalide.');
+    }
+    if (!/^https?:$/.test(u.protocol)) throw new HttpError(400, 'Le lien doit commencer par http:// ou https://');
+    image = u.href;
+  }
+  const r = await fetch('https://api.imgbb.com/1/upload', {
+    method: 'POST',
+    body: new URLSearchParams({ key: env.imgbbKey, image, name: name.slice(0, 80) }),
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null);
+  const j = await r?.json().catch(() => null);
+  if (!r?.ok || !j?.success || !j.data?.url) {
+    throw new HttpError(400, `ImgBB n’a pas accepté l’image${j?.error?.message ? ` : ${j.error.message}` : ''}.`);
+  }
+  return j.data.url;
+}
+
+/** Rien, une image déjà chez nous, une data URL ou un lien → lien ImgBB (ou chemin /media/...). */
 export async function ingest(input, folder, owner) {
   if (!input) return null;
   if (typeof input !== 'string') throw new HttpError(400, 'Image invalide.');
-  if (input.startsWith('/media/')) return input;
+  if (input.startsWith('/media/') || IBB.test(input)) return input;
+  if (env.imgbbKey) return toImgbb(input, `${folder}-${owner}-${Date.now().toString(36)}`);
   const { buf, type } = input.startsWith('data:') ? fromDataUrl(input) : await fromUrl(input);
   const path = `${folder}/${owner}-${Date.now().toString(36)}.${TYPES[type]}`;
   const { error } = await db().storage.from('media').upload(path, buf, { contentType: type, upsert: false });

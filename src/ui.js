@@ -136,3 +136,38 @@ export function askConfirm(message, { title = 'Confirmer', ok = 'Confirmer', dan
     btn.focus();
   });
 }
+
+/** Petite saisie de texte dans l'app (prompt est bloqué dans Discord). Renvoie le texte, ou null si annulé. */
+export function askText(message, { title = 'Saisie', ok = 'Valider', placeholder = '', value = '', max = 60 } = {}) {
+  const d = $('d-prompt');
+  $('pr-title').textContent = title;
+  $('pr-text').textContent = message;
+  const input = $('pr-input');
+  input.value = value;
+  input.placeholder = placeholder;
+  input.maxLength = max;
+  $('pr-ok').textContent = ok;
+  $('pr-err').textContent = '';
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      $('pr-form').removeEventListener('submit', submit);
+      d.removeEventListener('close', cancel);
+      resolve(v);
+    };
+    const submit = (e) => {
+      e.preventDefault();
+      const v = input.value.trim();
+      if (!v) return void ($('pr-err').textContent = 'Ce champ est obligatoire.');
+      finish(v);
+      closeDialog(d);
+    };
+    const cancel = () => finish(null);
+    $('pr-form').addEventListener('submit', submit);
+    d.addEventListener('close', cancel);
+    openDialog('d-prompt');
+    input.focus();
+  });
+}

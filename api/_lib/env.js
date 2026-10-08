@@ -11,4 +11,5 @@ export const env = {
   botSecret: process.env.BOT_API_SECRET, // secret partagé avec le bot
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  imgbbKey: process.env.IMGBB_API_KEY, // images hébergées sur ImgBB (sinon : stockage Supabase)
 };

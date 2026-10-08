@@ -1166,3 +1166,18 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .x-qty input{width:64px;font:inherit;font-size:15px;text-align:center;color:var(--brown);background:#fff;border:2px solid var(--ink);border-radius:5px;padding:3px}
 @media (max-width:620px){.cargo{grid-template-columns:1fr}.xbar{grid-template-columns:auto 1fr}.x-qty,#x-go{grid-column:1/-1}.member-row{grid-template-columns:1fr auto}.m-acts{grid-column:1/-1;justify-content:flex-start}}
 .flag{font-size:56px;color:#fff}
+
+/* ═══ v28 : grades repliables, recettes, saisie ══════ */
+.rank-list{display:grid;gap:6px}
+.rank-edit{padding:0}
+.rank-edit summary{display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;padding:6px 10px;cursor:pointer;list-style:none}
+.rank-edit summary::-webkit-details-marker{display:none}
+.rank-new summary{grid-template-columns:1fr auto}
+.rank-edit[open] summary .chev{transform:rotate(180deg)}
+.rank-edit summary .chev{transition:transform .2s;font-weight:800}
+.rank-order{display:flex;gap:3px}
+.rank-order .sq{width:28px;height:28px;font-size:14px}
+.rank-body{display:grid;gap:8px;padding:4px 10px 10px;border-top:2px dashed rgba(61,38,20,.25)}
+.rc-title{display:flex;align-items:center;gap:8px}
+.rc-title .ico{--s:32px}
+#pr-input{margin-top:4px}

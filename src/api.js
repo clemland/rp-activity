@@ -184,17 +184,18 @@ export async function staff(op, payload = {}) {
       const items = op === 'item.save', table = items ? store.catalog.items : store.catalog.recipes;
       G.setCatalog(store.catalog);
       const data = items ? G.normalizeItem(payload.item) : G.normalizeRecipe(payload.recipe);
-      let id = payload.id && table[payload.id] ? payload.id : G.slug(data.name);
-      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(data.name)}-${n}`;
+      const label = items ? data.name : G.recipeLabel(data);
+      let id = payload.id && table[payload.id] ? payload.id : G.slug(label);
+      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(label)}-${n}`;
       const isNew = !table[id];
       table[id] = data;
       saveStore();
-      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${data.name}` };
+      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${label}` };
     }
     if (op === 'item.delete' || op === 'recipe.delete') {
       const items = op === 'item.delete';
       if (items) {
-        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map((r) => r.name);
+        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map(G.recipeLabel);
         if (used.length) throw new Error(`Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
       }
       delete (items ? store.catalog.items : store.catalog.recipes)[payload.id];

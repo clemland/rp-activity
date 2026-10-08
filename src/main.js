@@ -14,9 +14,10 @@ import '@fontsource/alegreya/700-italic.css';
 import './style.css';
 import * as G from '../shared/game.js';
 import * as API from './api.js';
+import { mediaSrc } from './discord.js';
 import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
-  openDialog, closeDialog, readAsDataUrl, askConfirm,
+  openDialog, closeDialog, readAsDataUrl, askConfirm, askText,
 } from './ui.js';
 
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
@@ -273,7 +274,7 @@ function loadCrop(src, url = null) {
     crop.base = Math.max(W / crop.w, H / crop.h);
     crop.ox = (W - crop.w * crop.base) / 2;
     crop.oy = (H - crop.h * crop.base) / 2;
-    $('ph-img').src = src;
+    $('ph-img').src = mediaSrc(src);
     $('ph-zoom').value = 1;
     $('ph-err').textContent = '';
     drawCrop();
@@ -287,7 +288,7 @@ function loadCrop(src, url = null) {
       $('ph-save').disabled = false;
     }
   };
-  img.src = src;
+  img.src = mediaSrc(src);
 }
 async function readFile(file) {
   if (!file) return;
@@ -810,13 +811,12 @@ function renderJob() {
     ${shownRecs.length ? `<div class="recipes">${shownRecs.map(([id, r]) => {
       const why = G.craftBlock(S, r);
       return `<article class="recipe ${why ? 'locked' : ''}">
-        <h3>${esc(r.name)}</h3>
+        <h3 class="rc-title">${Object.keys(r.gives).slice(0, 1).map((k) => itemIco(k)).join('')}${esc(G.recipeLabel(r))}</h3>
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
         <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
-        <b>Donne</b>
-        <div class="needs">${Object.entries(r.gives).map((x) => needChip(x, false)).join('')}</div>
+
         <div class="recipe-foot">
           ${why ? `<span class="req">${esc(why)}</span>` : '<span></span>'}
           <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
@@ -1063,7 +1063,13 @@ $('v-shop').addEventListener('click', async (e) => {
   const bk = e.target.closest('[data-buy]')?.dataset.buy;
   if (bk) {
     const before = S.berry;
-    const out = await run({ type: 'shop.buy', key: bk });
+    let shipName;
+    if (G.ITEMS[bk]?.kind === 'bateau') {
+      const m = G.ITEMS[bk];
+      shipName = await askText(`${m.name} : ${m.ship.type}, ${m.ship.cannons} canons, cale de ${G.kg(m.ship.capacity)}. Comment s’appellera-t-il ?`, { title: 'Nomme ton bateau', ok: 'Acheter', placeholder: 'ex. La Vogue Merry' });
+      if (!shipName) return;
+    }
+    const out = await run({ type: 'shop.buy', key: bk, shipName });
     if (!out) return;
     walletFx(before, S.berry - before);
     const btn = document.querySelector(`[data-buy="${bk}"]`);
@@ -1685,6 +1691,7 @@ async function enterAdmin({ target = null } = {}) {
 const SHIP_ICON = 231;
 let INVITES = []; // invitations reçues
 let crewTab = 'crew', crewSearch = '', crewResults = [], searchTimer = null;
+const openRanks = new Set(); // grades dépliés, gardés entre deux affichages
 let cx = { side: null, key: null, qty: 1 }; // objet sélectionné dans la cale ou l'inventaire
 function shipPic(sh) {
   if (sh.photo) return `<img src="${esc(sh.photo)}" alt="${esc(sh.name)}" loading="lazy">`;
@@ -1717,7 +1724,8 @@ function invitesHTML() {
 }
 function crewTabHTML() {
   const c = CREW, me = S.uid, isCap = c.captain === me;
-  const members = [...c.members].sort((a, b) => (a === c.captain ? -1 : b === c.captain ? 1 : 0));
+  const order = (u) => (u === c.captain ? -1 : c.ranks.findIndex((r) => r.id === c.memberRanks[u]));
+  const members = [...c.members].sort((a, b) => order(a) - order(b));
   const rankOpts = (uid) => c.ranks.map((r) => `<option value="${esc(r.id)}" ${c.memberRanks[uid] === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
   return `
     <section class="crew-box">
@@ -1742,17 +1750,27 @@ function crewTabHTML() {
     </section>` : ''}
     ${isCap ? `<section class="crew-box">
       <h3>Grades</h3>
-      <p class="note" style="margin:0">Crée tes grades et coche ce qu’ils permettent. Le capitaine a toutes les permissions.</p>
-      ${c.ranks.map((r) => `<div class="rank-edit" data-rank="${esc(r.id)}">
-        <div class="rank-top"><input class="rank-name" value="${esc(r.name)}" maxlength="30" aria-label="Nom du grade">
-          <button class="btn sm" data-rank-save="${esc(r.id)}">Enregistrer</button>
-          ${r.id !== G.DEFAULT_RANK ? `<button class="btn sm ghost danger-txt" data-rank-del="${esc(r.id)}">Supprimer</button>` : '<small class="note">grade de base</small>'}</div>
-        <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${r.perms[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
-      </div>`).join('')}
-      <div class="rank-edit" data-rank="">
-        <div class="rank-top"><input class="rank-name" placeholder="Nouveau grade (ex. Second)" maxlength="30" aria-label="Nom du nouveau grade"><button class="btn sm" data-rank-save="">+ Créer</button></div>
-        <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}"> ${l}</label>`).join('')}</div>
-      </div>
+      <p class="note" style="margin:0">Du plus important au moins important. Clique sur un grade pour régler ses permissions.</p>
+      <div class="rank-list">${c.ranks.map((r, i) => {
+        const nb = Object.values(r.perms).filter(Boolean).length, who = c.members.filter((u) => u !== c.captain && c.memberRanks[u] === r.id).length;
+        return `<details class="rank-edit" data-rank="${esc(r.id)}" ${openRanks.has(r.id) ? 'open' : ''}>
+          <summary><span class="rank-order"><button class="sq" data-rank-move="${esc(r.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Monter">↑</button><button class="sq" data-rank-move="${esc(r.id)}" data-dir="1" ${i === c.ranks.length - 1 ? 'disabled' : ''} aria-label="Descendre">↓</button></span>
+            <b>${esc(r.name)}</b><small class="note">${nb} permission${nb > 1 ? 's' : ''} · ${who} membre${who > 1 ? 's' : ''}${r.id === G.DEFAULT_RANK ? ' · grade de base' : ''}</small><span class="chev" aria-hidden="true">▾</span></summary>
+          <div class="rank-body">
+            <div class="rank-top"><input class="rank-name" value="${esc(r.name)}" maxlength="30" aria-label="Nom du grade"></div>
+            <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${r.perms[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+            <div class="rank-top"><button class="btn sm" data-rank-save="${esc(r.id)}">Enregistrer</button>${r.id !== G.DEFAULT_RANK ? `<button class="btn sm ghost danger-txt" data-rank-del="${esc(r.id)}">Supprimer</button>` : ''}</div>
+          </div>
+        </details>`;
+      }).join('')}</div>
+      <details class="rank-edit rank-new" data-rank="" ${openRanks.has('') ? 'open' : ''}>
+        <summary><b>+ Nouveau grade</b><span class="chev" aria-hidden="true">▾</span></summary>
+        <div class="rank-body">
+          <div class="rank-top"><input class="rank-name" placeholder="Nom (ex. Second)" maxlength="30" aria-label="Nom du nouveau grade"></div>
+          <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}"> ${l}</label>`).join('')}</div>
+          <div class="rank-top"><button class="btn sm" data-rank-save="">Créer le grade</button></div>
+        </div>
+      </details>
     </section>` : ''}
     ${can('edit') ? `<section class="crew-box">
       <h3>Nom et Jolly Roger</h3>
@@ -1860,6 +1878,10 @@ $('v-crew').addEventListener('input', (e) => {
   }
   if (e.target.id === 'x-qty') cx.qty = Math.max(1, Math.round(+e.target.value || 1));
 });
+$('v-crew').addEventListener('toggle', (e) => {
+  const d = e.target.closest?.('details.rank-edit');
+  if (d) d.open ? openRanks.add(d.dataset.rank) : openRanks.delete(d.dataset.rank);
+}, true);
 $('v-crew').addEventListener('change', async (e) => {
   const u = e.target.dataset?.rankOf;
   if (u) return void run({ type: 'crew.member.rank', uid: u, rankId: e.target.value });
@@ -1910,12 +1932,18 @@ $('v-crew').addEventListener('click', async (e) => {
   if (kick && (await askConfirm(`${CREW.memberNames?.[kick] || 'Ce membre'} ne fera plus partie de l’équipage.`, { title: 'Exclure ce membre ?', ok: 'Exclure', danger: true }))) return void run({ type: 'crew.kick', uid: kick });
   const cap = e.target.closest('[data-captain]')?.dataset.captain;
   if (cap && (await askConfirm(`${CREW.memberNames?.[cap] || 'Ce membre'} deviendra capitaine, et tu passeras au grade de base.`, { title: 'Céder ta place de capitaine ?', ok: 'Céder ma place', danger: true }))) return void run({ type: 'crew.transfer', uid: cap });
+  const mv = e.target.closest('[data-rank-move]');
+  if (mv) {
+    e.preventDefault(); // ne pas replier/déplier le grade
+    return void run({ type: 'crew.rank.move', id: mv.dataset.rankMove, dir: +mv.dataset.dir });
+  }
   const rs = e.target.closest('[data-rank-save]');
   if (rs) {
     const box = rs.closest('.rank-edit');
     const perms = Object.fromEntries([...box.querySelectorAll('[data-perm]')].map((c) => [c.dataset.perm, c.checked]));
     const name = box.querySelector('.rank-name').value.trim();
     if (!name) return toast('Donne un nom au grade.');
+    if (!rs.dataset.rankSave) openRanks.delete(''); // on replie le formulaire de création
     return void run({ type: 'crew.rank.save', id: rs.dataset.rankSave || undefined, name, perms });
   }
   const rd = e.target.closest('[data-rank-del]')?.dataset.rankDel;
@@ -2278,7 +2306,7 @@ function renderGestion() {
   const q = gestQuery.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   const match = (s) => !q || s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().includes(q);
   const items = Object.entries(G.ITEMS).filter(([, it]) => match(it.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
-  const recs = Object.entries(G.RECIPES).filter(([, r]) => match(r.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const recs = Object.entries(G.RECIPES).filter(([, r]) => match(G.recipeLabel(r))).sort((a, b) => G.recipeLabel(a[1]).localeCompare(G.recipeLabel(b[1])));
   $('v-gest').innerHTML = `
     <div class="sec-head">
       <div><h2>Gestion</h2><p class="lede" style="margin:0">Les objets et les recettes du RP. La boutique de ce salon se gère dans l’écran Boutique.</p></div>
@@ -2300,7 +2328,7 @@ function renderGestion() {
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
           <button class="gest-card" data-recipe="${esc(id)}">
             <span class="slot-ico">${itemIco(Object.keys(r.gives)[0])}</span>
-            <span><b>${esc(r.name)}</b><small>${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'}</small></span>
+            <span><b>${esc(G.recipeLabel(r))}</b><small>${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans ingrédient'}</small></span>
           </button>`).join('')}</div>` : `<p class="note">${Object.keys(G.ITEMS).length ? 'Aucune recette. Crée la première avec « + Nouvelle recette ».' : 'Crée d’abord des objets : une recette transforme des objets en d’autres objets.'}</p>`}`;
 }
 $('v-gest').addEventListener('input', (e) => {
@@ -2407,8 +2435,8 @@ function openRecipeEdit(id = null) {
   if (!Object.keys(G.ITEMS).length) return toast('Crée d’abord des objets.');
   recipeDraftId = id;
   const first = Object.keys(G.ITEMS)[0];
-  recipeDraft = structuredClone(id ? G.RECIPES[id] : { name: '', job: null, lvl: 1, seconds: 3600, needs: {}, gives: { [first]: 1 }, desc: '' });
-  $('rc-title').textContent = id ? 'Modifier la recette' : 'Nouvelle recette';
+  recipeDraft = structuredClone(id ? G.RECIPES[id] : { job: null, lvl: 1, seconds: 3600, needs: {}, gives: { [first]: 1 }, desc: '' });
+  $('rc-title').textContent = id ? G.recipeLabel(recipeDraft) : 'Nouvelle recette';
   $('rc-del').hidden = !id;
   $('rc-err').textContent = '';
   renderRecipeEdit();
@@ -2427,22 +2455,20 @@ function renderRecipeEdit() {
     </div>`).join('');
   $('rc-body').innerHTML = `
     <div class="form">
-      <div class="wide"><label for="rc-name">Nom de la recette</label><input id="rc-name" value="${esc(r.name)}" maxlength="60"></div>
       <div><label for="rc-job">Métier</label><select id="rc-job"><option value="">Tous les métiers</option>${Object.entries(JOBS).map(([k, j]) => `<option value="${k}" ${r.job === k ? 'selected' : ''}>${j.name}</option>`).join('')}</select></div>
       <div><label for="rc-lvl">Maîtrise requise</label><select id="rc-lvl" ${r.job ? '' : 'disabled'}>${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div><label for="rc-time">Temps de fabrication</label><div class="rc-time"><input id="rc-time" type="number" min="0" value="${r.seconds / unit}"><select id="rc-unit">${Object.entries(UNITS).map(([u, l]) => `<option value="${u}" ${+u === unit ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div class="wide"><label for="rc-desc">Description (facultative)</label><input id="rc-desc" value="${esc(r.desc)}" maxlength="400"></div>
     </div>
-    <h3 class="ed-h">Ingrédients</h3>
-    <div class="se-items">${rows(r.needs, 'needs') || '<p class="note">Aucun ingrédient.</p>'}</div>
-    <button type="button" class="btn sm ghost" data-rc-add="needs">+ Ajouter un ingrédient</button>
     <h3 class="ed-h">Résultat</h3>
     <div class="se-items">${rows(r.gives, 'gives')}</div>
-    <button type="button" class="btn sm ghost" data-rc-add="gives">+ Ajouter un objet produit</button>`;
+    <button type="button" class="btn sm ghost" data-rc-add="gives">+ Ajouter un objet produit</button>
+    <h3 class="ed-h">Ingrédients</h3>
+    <div class="se-items">${rows(r.needs, 'needs') || '<p class="note">Aucun ingrédient.</p>'}</div>
+    <button type="button" class="btn sm ghost" data-rc-add="needs">+ Ajouter un ingrédient</button>`;
 }
 function readRecipeEdit() {
   const r = recipeDraft;
-  r.name = $('rc-name').value;
   r.job = $('rc-job').value || null;
   r.lvl = +$('rc-lvl').value || 1;
   r.seconds = Math.round((+$('rc-time').value || 0) * +$('rc-unit').value);
@@ -2480,12 +2506,11 @@ $('d-recipe').addEventListener('click', (e) => {
 });
 $('rc-save').addEventListener('click', () => {
   readRecipeEdit();
-  if (!recipeDraft.name.trim()) return void ($('rc-err').textContent = 'Donne un nom à la recette.');
   if (!Object.keys(recipeDraft.gives).length) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet.');
   gestCall('recipe.save', { id: recipeDraftId, recipe: recipeDraft }, $('d-recipe'));
 });
 $('rc-del').addEventListener('click', async () => {
-  if (await askConfirm('Les fabrications déjà lancées avec cette recette restent récupérables.', { title: `Supprimer la recette « ${G.RECIPES[recipeDraftId].name} » ?`, ok: 'Supprimer', danger: true })) gestCall('recipe.delete', { id: recipeDraftId }, $('d-recipe'));
+  if (await askConfirm('Les fabrications déjà lancées avec cette recette restent récupérables.', { title: `Supprimer la recette « ${G.recipeLabel(G.RECIPES[recipeDraftId])} » ?`, ok: 'Supprimer', danger: true })) gestCall('recipe.delete', { id: recipeDraftId }, $('d-recipe'));
 });
 
 /* ═══ Onglets, écrans, rendu ═════════════════════════════════════════════ */

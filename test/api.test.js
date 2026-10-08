@@ -119,17 +119,17 @@ test('le staff crée des objets et une recette ; identifiants uniques', async ()
   r = await call('staff', { body: { op: 'item.save', item: { name: 'Planche de chêne', kind: 'mat', value: 500 } }, headers: MJ });
   assert.equal(r.out.id, 'planche-de-chene-2');
   await call('staff', { body: { op: 'item.save', item: { name: 'Coffre', kind: 'objet', value: 2000 } }, headers: MJ });
-  r = await call('staff', { body: { op: 'recipe.save', recipe: { name: 'Fabriquer un coffre', job: 'medecin', lvl: 1, seconds: 3600, needs: { 'planche-de-chene': 2 }, gives: { coffre: 1 } } }, headers: MJ });
+  r = await call('staff', { body: { op: 'recipe.save', recipe: { job: 'medecin', lvl: 1, seconds: 3600, needs: { 'planche-de-chene': 2 }, gives: { coffre: 1 } } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
-  assert.equal(r.out.catalog.recipes['fabriquer-un-coffre'].seconds, 3600);
+  assert.equal(r.out.catalog.recipes['1-coffre'].seconds, 3600);
   r = await call('staff', { body: { op: 'item.delete', id: 'coffre' }, headers: MJ });
   assert.equal(r.status, 400, 'objet utilisé par une recette');
-  assert.match(r.out.error, /Fabriquer un coffre/);
+  assert.match(r.out.error, /1 × Coffre/);
 });
 
 test('fabrication : lancée, pas encore prête, puis terminée par le staff et récupérée', async () => {
   await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'give', key: 'planche-de-chene', qty: 3 } }, headers: MJ });
-  let r = await call('action', { body: { action: { type: 'craft.start', id: 'fabriquer-un-coffre' } }, headers: J });
+  let r = await call('action', { body: { action: { type: 'craft.start', id: '1-coffre' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.ok(r.out.player.craft);
   r = await call('action', { body: { action: { type: 'craft.collect' } }, headers: J });
@@ -281,7 +281,7 @@ test('bateaux : création par le staff, achat en boutique, renommage, assignatio
   await call('staff', { body: { op: 'item.save', item: { name: 'Caravelle', kind: 'bateau', value: 1000, ship: { type: 'Caravelle', cannons: 4, capacity: 300 } } }, headers: MJ });
   await call('staff', { body: { op: 'shop.save', channelId: '111111111111111111', shop: { name: 'Chantier', seller: 'Franky', items: [['caravelle', 100, 1]] } }, headers: MJ });
   await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'berry', amount: 1000 } }, headers: MJ });
-  r = await call('action', { body: { channelId: '111111111111111111', action: { type: 'shop.buy', key: 'caravelle' } }, headers: J });
+  r = await call('action', { body: { channelId: '111111111111111111', action: { type: 'shop.buy', key: 'caravelle', shipName: 'La Mouette' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   const achat = r.out.ships.find((s) => s.type === 'Caravelle');
   assert.ok(achat, 'le bateau acheté apparaît');
@@ -329,4 +329,30 @@ test('équipage : grades, invitation et arrivée d’un joueur, exclusion', asyn
   r = await call('action', { body: { action: { type: 'crew.kick', uid: 'u9' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(tables.players.get('u9').data.crewId, null);
+});
+
+test('images sur ImgBB quand la clé est configurée', async () => {
+  const { env } = await import('../api/_lib/env.js');
+  env.imgbbKey = 'cle-test';
+  const appels = [];
+  const ancien = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).startsWith('https://api.imgbb.com/')) {
+      appels.push(Object.fromEntries(new URLSearchParams(opts.body)));
+      return { ok: true, json: async () => ({ success: true, data: { url: 'https://i.ibb.co/abc/photo.png' } }) };
+    }
+    return ancien(url, opts);
+  };
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  let r = await call('action', { body: { action: { type: 'photo.set', photo: png } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.player.photo, 'https://i.ibb.co/abc/photo.png');
+  assert.equal(appels[0].key, 'cle-test');
+  assert.ok(!appels[0].image.startsWith('data:'), 'base64 seul');
+  r = await call('action', { body: { action: { type: 'photo.set', photo: 'https://exemple.com/a.gif' } }, headers: J });
+  assert.equal(appels[1].image, 'https://exemple.com/a.gif', 'ImgBB récupère le lien');
+  r = await call('action', { body: { action: { type: 'photo.set', photo: 'https://i.ibb.co/deja/la.png' } }, headers: J });
+  assert.equal(appels.length, 2, 'déjà sur ImgBB : pas de nouvel envoi');
+  globalThis.fetch = ancien;
+  env.imgbbKey = undefined;
 });

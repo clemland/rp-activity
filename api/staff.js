@@ -17,7 +17,7 @@ import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog } from './_lib/context.js';
-import { normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import { recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -222,7 +222,7 @@ export default handler(['POST'], async (req, body) => {
 
     case 'item.delete': {
       need(catalog.items[body.id], 404, 'Objet introuvable.');
-      const used = Object.values(catalog.recipes).filter((r) => r.needs[body.id] || r.gives[body.id]).map((r) => r.name);
+      const used = Object.values(catalog.recipes).filter((r) => r.needs[body.id] || r.gives[body.id]).map(recipeLabel);
       need(!used.length, 400, `Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
       await remove('items', body.id);
       delete catalog.items[body.id];
@@ -231,12 +231,12 @@ export default handler(['POST'], async (req, body) => {
 
     case 'recipe.save': {
       const recipe = normalizeRecipe(body.recipe || {});
-      const id = body.id && catalog.recipes[body.id] ? body.id : freeId(recipe.name, catalog.recipes);
+      const id = body.id && catalog.recipes[body.id] ? body.id : freeId(recipeLabel(recipe), catalog.recipes);
       return retry(async () => {
         const row = await read('recipes', id);
         await write('recipes', id, recipe, row?.version ?? null);
         catalog.recipes[id] = recipe;
-        return { id, catalog, toast: row ? `Recette modifiée : ${recipe.name}` : `Recette créée : ${recipe.name}` };
+        return { id, catalog, toast: row ? `Recette modifiée : ${recipeLabel(recipe)}` : `Recette créée : ${recipeLabel(recipe)}` };
       });
     }
 

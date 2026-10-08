@@ -131,6 +131,16 @@ export function normalize(p) {
   p.inv ??= [];
   p.inv = p.inv.slice(0, BAG).map((s) => (s && s[0] && s[1] > 0 ? s : null));
   while (p.inv.length < BAG) p.inv.push(null);
+  // Anciennes piles d'armes : une arme par case quand il y a de la place.
+  for (let i = 0; i < p.inv.length; i++) {
+    const s = p.inv[i];
+    while (s && ITEMS[s[0]]?.kind === 'arme' && s[1] > 1) {
+      const j = p.inv.findIndex((x) => !x);
+      if (j < 0) break;
+      p.inv[j] = [s[0], 1];
+      s[1]--;
+    }
+  }
   p.equip ??= { arme1: null, arme2: null };
   p.sellLock ??= {};
   p.craft ??= null;
@@ -149,6 +159,13 @@ export const invWeight = (p) => p.inv.reduce((a, s) => a + (s ? itemWeight(s[0])
 
 export function addItem(p, k, q = 1) {
   if (!ITEMS[k]) fail('Objet inconnu.');
+  if (ITEMS[k].kind === 'arme') {
+    // Les armes ne s'empilent pas : une arme = une case.
+    const free = p.inv.reduce((a, x) => a + (x ? 0 : 1), 0);
+    if (free < q) return false;
+    for (let n = 0; n < q; n++) p.inv[p.inv.findIndex((x) => !x)] = [k, 1];
+    return true;
+  }
   const s = p.inv.find((x) => x && x[0] === k);
   if (s) { s[1] += q; return true; }
   const i = p.inv.findIndex((x) => !x);
@@ -203,9 +220,9 @@ export function normalizeItem(x) {
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
   };
 }
+/** Une recette se désigne par ce qu'elle produit : « 2 × Planche, 1 × Clou ». */
+export const recipeLabel = (r) => Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
 export function normalizeRecipe(x) {
-  const name = str(x.name, 60);
-  if (!name) fail('Donne un nom à la recette.');
   const items = (o) =>
     Object.fromEntries(
       Object.entries(o || {})
@@ -215,7 +232,6 @@ export function normalizeRecipe(x) {
   const gives = items(x.gives);
   if (!Object.keys(gives).length) fail('La recette doit produire au moins un objet.');
   return {
-    name,
     job: x.job && JOBS[x.job] ? x.job : null,
     lvl: int(x.lvl, 1, 3),
     seconds: int(x.seconds, 0, CRAFT_MAX_SECONDS),
@@ -286,7 +302,7 @@ export function playerAction(player, action, ctx = {}) {
       if (!slotOk(from) || !slotOk(to) || from === to) fail('Déplacement invalide.');
       const x = p.inv[from], y = p.inv[to];
       if (!x) fail('Emplacement vide.');
-      if (y && y[0] === x[0]) { y[1] += x[1]; p.inv[from] = null; } else { p.inv[to] = x; p.inv[from] = y; }
+      if (y && y[0] === x[0] && !isWeapon(x[0])) { y[1] += x[1]; p.inv[from] = null; } else { p.inv[to] = x; p.inv[from] = y; }
       break;
     }
     case 'inv.drop': {
@@ -337,8 +353,8 @@ export function playerAction(player, action, ctx = {}) {
       const why = craftBlock(p, r);
       if (why) fail(why);
       for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
-      p.craft = { recipe: a.id, name: r.name, gives: r.gives, start: now, end: now + r.seconds * 1000 };
-      out.toast = r.seconds ? `Fabrication lancée : ${r.name} (${duree(r.seconds)})` : `Fabrication lancée : ${r.name}`;
+      p.craft = { recipe: a.id, name: recipeLabel(r), gives: r.gives, start: now, end: now + r.seconds * 1000 };
+      out.toast = r.seconds ? `Fabrication lancée : ${recipeLabel(r)} (${duree(r.seconds)})` : `Fabrication lancée : ${recipeLabel(r)}`;
       break;
     }
     case 'craft.collect': {
@@ -420,11 +436,15 @@ export function playerAction(player, action, ctx = {}) {
       const [k, price, stock] = row;
       if (stock === 0) fail('Épuisé.');
       if (p.berry < price) fail('Pas assez de berrys.');
-      if (ITEMS[k].kind === 'bateau') out.newShip = newShip({ model: k, owner: { kind: 'player', id: p.uid } }, now);
+      if (ITEMS[k].kind === 'bateau') {
+        const shipName = str(a.shipName, 60);
+        if (!shipName) fail('Donne un nom à ton bateau.');
+        out.newShip = newShip({ model: k, name: shipName, owner: { kind: 'player', id: p.uid } }, now);
+      }
       else if (!addItem(p, k, 1)) fail('Inventaire plein.');
       p.berry -= price;
       if (stock > 0) row[2]--;
-      out.shop = shop; out.toast = `Acheté : ${ITEMS[k].name}`; out.item = k; out.delta = -price;
+      out.shop = shop; out.toast = out.newShip ? `Bateau acheté : ${out.newShip.name}` : `Acheté : ${ITEMS[k].name}`; out.item = k; out.delta = -price;
       break;
     }
     case 'shop.sell': {
@@ -617,7 +637,7 @@ export function normalizeCrew(c) {
     .filter((r) => r && r.id)
     .map((r) => ({ id: String(r.id), name: str(r.name, 30) || 'Grade', perms: Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!r.perms?.[k]])) }))
     .slice(0, 20);
-  if (!c.ranks.some((r) => r.id === DEFAULT_RANK)) c.ranks.unshift({ ...defaultRank(), perms: Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!defaultRank().perms[k]])) });
+  if (!c.ranks.some((r) => r.id === DEFAULT_RANK)) c.ranks.push({ ...defaultRank(), perms: Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!defaultRank().perms[k]])) });
   const ids = new Set(c.ranks.map((r) => r.id));
   const mr = c.memberRanks || {};
   c.memberRanks = Object.fromEntries(c.members.map((u) => [u, ids.has(mr[u]) ? mr[u] : DEFAULT_RANK]));
@@ -746,6 +766,14 @@ export function crewAction(player, action, ctx = {}) {
       out.toast = `Grade supprimé : ${r.name}`;
       break;
     }
+    case 'crew.rank.move': {
+      if (!isCap) fail('Seul le capitaine organise les grades.');
+      const i = crew.ranks.findIndex((x) => x.id === a.id), j = i + (a.dir < 0 ? -1 : 1);
+      if (i < 0) fail('Grade introuvable.');
+      if (j < 0 || j >= crew.ranks.length) break;
+      [crew.ranks[i], crew.ranks[j]] = [crew.ranks[j], crew.ranks[i]];
+      break;
+    }
     case 'crew.member.rank': {
       need('ranks');
       if (!crew.members.includes(a.uid)) fail('Ce joueur n’est pas dans l’équipage.');
@@ -836,7 +864,7 @@ export function demoCatalog() {
       'caravelle-ex': { name: 'Caravelle (exemple)', kind: 'bateau', value: 150000, weight: 0, ship: { type: 'Caravelle', cannons: 4, capacity: 300 }, desc: 'Petit navire rapide, idéal pour débuter.', img: null },
     },
     recipes: {
-      'tonneau-ex': { name: 'Assembler un tonneau', job: 'charpentier', lvl: 1, seconds: 20, needs: { 'bois-ex': 2, 'clous-ex': 1 }, gives: { 'tonneau-ex': 1 }, desc: 'Recette d’exemple : 20 secondes.' },
+      'tonneau-ex': { job: 'charpentier', lvl: 1, seconds: 20, needs: { 'bois-ex': 2, 'clous-ex': 1 }, gives: { 'tonneau-ex': 1 }, desc: 'Recette d’exemple : 20 secondes.' },
     },
   };
 }

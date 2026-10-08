@@ -268,6 +268,12 @@ export async function staff(op, payload = {}) {
       saveStore();
       return { id, ship, toast: `Bateau enregistré : ${ship.name}` };
     }
+    if (op === 'ship.upgrade') {
+      const ship = G.upgradeShip(G.normalizeShip(store.ships[payload.id]), payload.type, payload.amount, { by: 'mj-demo' });
+      store.ships[payload.id] = ship;
+      saveStore();
+      return { id: payload.id, ship: structuredClone(ship), toast: `${ship.name} amélioré` };
+    }
     if (op === 'ship.delete') {
       for (const c of Object.values(store.crews)) if (c.ship === payload.id) c.ship = null;
       delete store.ships[payload.id];

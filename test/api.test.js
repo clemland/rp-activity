@@ -442,3 +442,16 @@ test('bateau donné à une flotte sans bateau attitré : il le devient', async (
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(tables.crews.get('flotte-du-nord').data.ship, r.out.id);
 });
+
+test('staff : améliorer un bateau existant (et corriger), historique noté', async () => {
+  let r = await call('staff', { body: { op: 'ship.upgrade', id: 'le-garde-cote', type: 'canons', amount: 6 }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.ship.cannons, 8);
+  r = await call('staff', { body: { op: 'ship.upgrade', id: 'le-garde-cote', type: 'cale', amount: -1000 }, headers: MJ });
+  assert.equal(r.out.ship.capacity, 0, 'jamais négatif');
+  r = await call('staff', { body: { op: 'ship.upgrade', id: 'le-garde-cote', type: 'voile', amount: 2 }, headers: MJ });
+  assert.equal(r.out.ship.sail, 3);
+  assert.equal(r.out.ship.upgrades.length, 3);
+  r = await call('staff', { body: { op: 'ship.upgrade', id: 'le-garde-cote', type: 'canons', amount: 2 }, headers: J });
+  assert.equal(r.status, 403);
+});

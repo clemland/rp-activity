@@ -8,6 +8,7 @@
  *  - shop.delete { channelId }
  *  - crews / crew.save { id?, crew } / crew.delete { id }  : équipages (membres, capitaine, banque, coffre, bateau)
  *  - ships / ship.save { id?, ship } / ship.delete { id }  : bateaux (créés par le staff ou achetés)
+ *  - ship.upgrade { id, type, amount }                     : améliorer un bateau (cale, canons, voile)
  *  - item.save { id?, item } / item.delete { id }        : base d'objets
  *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
  */
@@ -17,7 +18,7 @@ import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog } from './_lib/context.js';
-import { recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import { upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -186,6 +187,17 @@ export default handler(['POST'], async (req, body) => {
         });
       }
       return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}` };
+    }
+
+    case 'ship.upgrade': {
+      return retry(async () => {
+        const row = await read('ships', body.id);
+        need(row, 404, 'Bateau introuvable.');
+        const ship = upgradeShip(normalizeShip(row.data), body.type, body.amount, { by: me.uid });
+        await write('ships', body.id, ship, row.version);
+        const n = Number(body.amount);
+        return { id: body.id, ship, toast: `${ship.name} : ${n > 0 ? '+' : ''}${n} ${body.type === 'cale' ? 'kg de cale' : body.type === 'canons' ? 'canon(s)' : 'niveau(x) de voile'}` };
+      });
     }
 
     case 'ship.delete': {

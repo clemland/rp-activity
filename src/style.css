@@ -1200,3 +1200,6 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .grade-scale small{color:var(--muted);font-size:12px}
 .marine-row .sq{width:30px;height:30px}
 .plaque.blue .pl-foot{color:#d7e3ff}
+.upg-box{display:grid;gap:4px;border:2px dashed rgba(23,37,94,.35);border-radius:8px;padding:8px 10px;background:#fffaea}
+.upg-hist summary{cursor:pointer;font-weight:700;font-size:14px}
+.upg-hist ul{margin:4px 0 0;padding-left:18px;font-size:14px}

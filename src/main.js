@@ -2154,6 +2154,11 @@ function renderShipEdit() {
           <optgroup label="Équipages">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind !== 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>
         <div><label for="sh-pos">À quai dans le salon (ID)</label><input id="sh-pos" inputmode="numeric" value="${esc(d.positionId ?? d.position?.channelId ?? '')}" placeholder="ID du salon, vide = nulle part"><small class="note">${d.position ? `Actuellement : #${esc(d.position.name || d.position.channelId)}` : 'Pas à quai'}</small></div>`}
+      ${!shipAsPlayer && !isNew ? `<div class="wide upg-box">
+        <b>Améliorer</b>
+        ${Object.entries(G.UPGRADES).map(([k, u]) => `<div class="mj-row prog-row"><label for="shu-${k}">${u.name}</label><input id="shu-${k}" type="number" min="1" placeholder="${k === 'cale' ? 'kg' : k === 'canons' ? 'nombre' : 'niveaux'}"><button type="button" class="btn sm" data-shu="${k}" data-sign="1">Ajouter</button><button type="button" class="btn sm ghost" data-shu="${k}" data-sign="-1">Retirer</button></div>`).join('')}
+        ${(d.upgrades || []).length ? `<details class="upg-hist"><summary>Historique (${d.upgrades.length})</summary><ul>${[...d.upgrades].reverse().slice(0, 15).map((u) => `<li>${u.amount > 0 ? '+' : ''}${fmt(u.amount)} ${esc(G.UPGRADES[u.type]?.unit ?? '')} (${esc(G.UPGRADES[u.type]?.name ?? u.type)})${u.item ? ` · ${esc(itemOf(u.item).name)}` : ' · staff'}${(() => { const who = players.find((p) => p.uid === u.by); return who ? ` · ${esc(G.fullName({ id: who.ident }))}` : ''; })()}</li>`).join('')}</ul></details>` : ''}
+      </div>` : ''}
       <div class="wide"><label for="sh-desc">Description</label><textarea id="sh-desc" maxlength="600" rows="3" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px">${esc(d.desc)}</textarea></div>
     </div>
     <div class="img-field" style="margin-top:12px">
@@ -2197,7 +2202,24 @@ $('d-ship').addEventListener('change', async (e) => {
     renderShipEdit();
   }
 });
-$('d-ship').addEventListener('click', (e) => {
+$('d-ship').addEventListener('click', async (e) => {
+  const up = e.target.closest('[data-shu]');
+  if (up) {
+    const type = up.dataset.shu, n = Math.round(Math.abs(+$(`shu-${type}`).value || 0)) * Number(up.dataset.sign);
+    if (!n) return toast('Indique une valeur.');
+    readShipEdit();
+    try {
+      const out = await API.staff('ship.upgrade', { id: shipDraftId, type, amount: n });
+      // on garde les champs déjà modifiés, on reprend les chiffres du serveur
+      Object.assign(shipDraft, { capacity: out.ship.capacity, cannons: out.ship.cannons, sail: out.ship.sail, upgrades: out.ship.upgrades });
+      renderShipEdit();
+      toast(esc(out.toast));
+      loadFleet();
+    } catch (err) {
+      $('sh-err').textContent = err.message;
+    }
+    return;
+  }
   if (e.target.id === 'sh-pick') $('sh-file').click();
   if (e.target.id === 'sh-nophoto') {
     readShipEdit();

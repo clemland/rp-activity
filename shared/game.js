@@ -684,6 +684,21 @@ export function canEditShip(p, ship, crew) {
   return false;
 }
 
+/**
+ * Applique une amélioration à un bateau et la note dans son historique.
+ * amount peut être négatif (correction du staff) ; les valeurs restent valides.
+ */
+export function upgradeShip(ship, type, amount, { by = null, item = null, now = Date.now() } = {}) {
+  if (!UPGRADES[type]) fail('Amélioration inconnue.');
+  const n = int(amount, -1e6, 1e6);
+  if (!n) fail('Indique une valeur.');
+  if (type === 'cale') ship.capacity = Math.max(0, ship.capacity + n);
+  if (type === 'canons') ship.cannons = Math.max(0, ship.cannons + n);
+  if (type === 'voile') ship.sail = Math.max(1, ship.sail + n);
+  ship.upgrades = [...(ship.upgrades || []), { type, amount: n, item, by, at: now }].slice(-100);
+  return ship;
+}
+
 /** Monte-t-on directement (propriétaire ou équipage propriétaire), sans demander ? */
 export function isShipFamily(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
@@ -760,11 +775,8 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const it = s && ITEMS[s[0]];
       if (!it || it.kind !== 'amelioration') fail('Choisis une amélioration dans ton inventaire.');
       const { type, amount } = it.upgrade;
-      if (type === 'cale') ship.capacity += amount;
-      if (type === 'canons') ship.cannons += amount;
-      if (type === 'voile') ship.sail += amount;
+      upgradeShip(ship, type, amount, { by: p.uid, item: s[0], now: ctx.now || Date.now() });
       removeItem(p, s[0], 1);
-      ship.upgrades.push({ item: s[0], type, amount, at: ctx.now || Date.now(), by: p.uid });
       out.toast = `${it.name} installée sur ${ship.name} : +${fmt(amount)} ${UPGRADES[type].unit}`;
       out.item = s[0];
       break;

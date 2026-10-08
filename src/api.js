@@ -21,7 +21,7 @@ async function call(method, path, body) {
 }
 
 /* ─── Mode démo : tout reste dans ce navigateur ─── */
-const KEY = 'op_rp_demo_v7';
+const KEY = 'op_rp_demo_v8';
 let store;
 function loadStore() {
   try {
@@ -30,7 +30,13 @@ function loadStore() {
   if (!store?.player) {
     G.setCatalog(G.demoCatalog());
     store = {
-      player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(), ships: G.demoShips(),
+      player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(),
+      // une demande d'embarquement sur le bateau de l'équipage, pour tester
+      ships: (() => {
+        const sh = G.demoShips();
+        sh['brise-lames'].requests = [{ uid: 'pnj-2', at: Date.now() }];
+        return sh;
+      })(),
       crews: {
         'goeland-noir': G.demoCrew(),
         // un autre équipage qui invite le joueur de démo, pour tester les invitations
@@ -68,7 +74,20 @@ function demoCrewShips() {
     .map(([id, cc]) => ({ id, name: cc.name, flag: cc.flag, members: cc.members.length, by: cc.invites.find((i) => i.uid === 'demo').by, byName: demoName(cc.invites.find((i) => i.uid === 'demo').by) }));
   return { crew: structuredClone(crew), ships: structuredClone(ships), invites };
 }
+/** Port du salon de démo, comme le renvoie l'API. */
+function demoHarbor() {
+  const p = store.player;
+  const crew = demoCrewShips().crew;
+  const all = Object.entries(store.ships).map(([id, sh]) => ({ id, ...G.normalizeShip(structuredClone(sh)) }));
+  const harbor = all.filter((sh) => sh.position?.channelId === 'demo');
+  const aboard = all.find((sh) => sh.passengers.includes(p.uid)) || null;
+  const requests = all.filter((sh) => G.canManageShip(p, sh, crew)).flatMap((sh) => sh.requests.map((r) => ({ shipId: sh.id, shipName: sh.name, uid: r.uid, at: r.at })));
+  const names = Object.fromEntries(['demo', 'pnj-1', 'pnj-2', 'pnj-3'].map((u) => [u, demoName(u)]));
+  const crewNames = Object.fromEntries(Object.entries(store.crews).map(([id, c]) => [id, c.name]));
+  return { harbor, aboard, requests, names, crewNames };
+}
 const demoState = () => ({
+  nav: demoHarbor(),
   ...demoCrewShips(),
   me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
   player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
@@ -117,7 +136,7 @@ export async function act(action) {
       }
       store.player = out.player;
       saveStore();
-      return { ...structuredClone(out), ...demoCrewShips() };
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
     }
     if (action.type.startsWith('crew.')) {
       const { crew } = demoCrewShips();
@@ -131,14 +150,25 @@ export async function act(action) {
       }
       store.player = out.player;
       saveStore();
-      return { ...structuredClone(out), ...demoCrewShips() };
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
+    }
+    if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
+      const { crew } = demoCrewShips();
+      const out = G.shipAction(store.player, store.ships[action.shipId], action, { crew, channelId: 'demo' });
+      const { id: _i, ...data } = out.ship;
+      store.ships[action.shipId] = data;
+      const boarder = out.boarded ? 'demo' : out.accepted;
+      if (boarder) for (const [sid, sh] of Object.entries(store.ships)) if (sid !== action.shipId) sh.passengers = (sh.passengers || []).filter((u) => u !== boarder);
+      store.player = out.player;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
     }
     if (action.type === 'ship.edit') {
       const { crew } = demoCrewShips();
       const out = G.playerAction(store.player, action, { ship: store.ships[action.shipId], crew });
       store.ships[action.shipId] = out.ship;
       saveStore();
-      return { ...structuredClone(out), ...demoCrewShips() };
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
     }
     const out = G.playerAction(store.player, action, { shop: store.shops.demo, channelId: 'demo' });
     store.player = out.player;
@@ -150,7 +180,7 @@ export async function act(action) {
       out.toast = `${out.newShip.name} est à toi ! Donne-lui un nom dans « Équipage ».`;
     }
     saveStore();
-    return { ...structuredClone(out), ...demoCrewShips() };
+    return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
   }
   return call('POST', '/api/action', { channelId, action });
 }

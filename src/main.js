@@ -25,7 +25,7 @@ import {
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
 const itemOf = (k) => G.itemOf(k);
 /** Icône d'un objet : son image si le staff en a mis une, sinon une icône selon sa catégorie. */
-const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231 };
+const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231, amelioration: 266 };
 const itemIco = (k) => {
   const it = itemOf(k);
   return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy" draggable="false"></span>` : ico(KIND_ICON[it.kind] ?? 237);
@@ -38,6 +38,7 @@ let SHOP = null; // boutique du salon (ou null)
 let CHNAME = ''; // nom du salon
 let CREW = null; // équipage du joueur affiché
 let SHIPS = []; // ses bateaux et ceux de son équipage
+let NAVD = null; // port du salon : bateaux à quai, bateau à bord, demandes d'embarquement
 let ADMIN = false; // panneau admin (/panel admin, /edit profil) ; /profil = vue joueur pure, même pour le staff
 const tools = () => ADMIN && !!ME?.staff;
 let VIEW = null; // uid d'un autre joueur ouvert par le staff (lecture seule pour lui)
@@ -67,6 +68,7 @@ function applyOut(out, { quiet = false, noUps = false } = {}) {
   if (out.player) S = out.player;
   if (out.shop) SHOP = out.shop;
   if ('crew' in out) CREW = out.crew;
+  if (out.nav) NAVD = out.nav;
   if (out.invites) INVITES = out.invites;
   if (out.ships) SHIPS = out.ships;
   renderAll();
@@ -137,6 +139,7 @@ async function resync() {
     CREW = st.crew;
     SHIPS = st.ships || [];
     INVITES = st.invites || [];
+    NAVD = st.nav;
     renderAll();
   } catch {}
 }
@@ -883,14 +886,53 @@ setInterval(() => {
   if (bar) bar.style.width = `${Math.min(100, ((Date.now() - c.start) / (c.end - c.start)) * 100)}%`;
 }, 1000);
 
-/* ═══ Navigation (à venir) ═══════════════════════════════════════════════ */
-function renderNav() {
-  $('v-nav').innerHTML = `<section class="logbook nav-soon">
-    <h2>Navigation</h2>
-    <p class="lede">La navigation arrive bientôt.</p>
-  </section>`;
+/* ═══ Navigation : le port du salon ═════════════════════════════════════ */
+function ownerLabel(sh) {
+  if (!sh.owner) return 'Sans propriétaire';
+  if (sh.owner.kind === 'crew') return `Équipage : ${esc(NAVD?.crewNames?.[sh.owner.id] ?? '?')}`;
+  return sh.owner.id === S.uid ? 'À toi' : `À ${esc(NAVD?.names?.[sh.owner.id] ?? '?')}`;
 }
-
+const navName = (u) => (u === S.uid ? 'toi' : esc(NAVD?.names?.[u] ?? '?'));
+function renderNav() {
+  if (!S || ADMIN) return;
+  const n = NAVD || { harbor: [], aboard: null, requests: [] };
+  const manage = (sh) => G.canManageShip(S, sh, CREW);
+  const family = (sh) => G.isShipFamily(S, sh, CREW);
+  const passengers = (sh) => sh.passengers.length
+    ? `<div class="pax">${sh.passengers.map((u) => `<span>${navName(u)}${manage(sh) && u !== S.uid ? ` <button class="linklike" data-ship-kick="${esc(sh.id)}" data-uid="${esc(u)}" title="Débarquer">✕</button>` : ''}</span>`).join('')}</div>`
+    : '';
+  const harbor = n.harbor.map((sh) => {
+    const onThis = sh.passengers.includes(S.uid);
+    const mineReq = sh.requests?.some((r) => r.uid === S.uid);
+    const full = sh.passengers.length >= sh.berths;
+    const act = onThis ? `<button class="btn sm ghost" data-ship-leave="${esc(sh.id)}">Descendre</button>`
+      : mineReq ? `<span class="note">Demande envoyée</span> <button class="btn sm ghost" data-ship-unreq="${esc(sh.id)}">Annuler</button>`
+      : family(sh) ? `<button class="btn sm" data-ship-board="${esc(sh.id)}" ${full ? 'disabled' : ''}>${full ? 'Complet' : 'Monter à bord'}</button>`
+      : `<button class="btn sm" data-ship-board="${esc(sh.id)}">Demander à monter</button>`;
+    return shipCard(sh, { extra: `<p class="note owner">${ownerLabel(sh)}</p>${passengers(sh)}`, actions: `<div class="mj-row">${act}</div>`, upgrade: manage(sh) });
+  }).join('');
+  $('v-nav').innerHTML = `
+    <section class="logbook nav-port">
+      <h2>Navigation</h2>
+      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ''} <button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button></div>` : ''}
+      ${n.requests.length ? `<div class="crew-box"><h3>Demandes d’embarquement</h3>${n.requests.map((r) => `<div class="member-row"><span class="m-name"><b>${navName(r.uid)}</b> veut monter sur <b>${esc(r.shipName)}</b></span><span></span><span class="m-acts"><button class="btn sm" data-req-yes="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Accepter</button><button class="btn sm ghost" data-req-no="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Refuser</button></span></div>`).join('')}</div>` : ''}
+      <h3 class="ed-h">À quai${CHNAME ? ` dans #${esc(CHNAME)}` : ' ici'}</h3>
+      ${harbor ? `<div class="ships">${harbor}</div>` : '<p class="note">Aucun bateau à quai dans ce salon.</p>'}
+      <p class="note">La navigation en mer arrive bientôt : le niveau de voile servira de vitesse.</p>
+    </section>`;
+  paintStatic($('v-nav'));
+}
+$('v-nav').addEventListener('click', async (e) => {
+  const d = (k) => e.target.closest(`[data-${k}]`);
+  const id = (k) => d(k)?.getAttribute(`data-${k}`);
+  if (id('ship-board')) return void run({ type: 'ship.board', shipId: id('ship-board') });
+  if (id('ship-leave')) return void run({ type: 'ship.leave', shipId: id('ship-leave') });
+  if (id('ship-unreq')) return void run({ type: 'ship.request.cancel', shipId: id('ship-unreq') });
+  if (id('req-yes')) return void run({ type: 'ship.request', shipId: id('req-yes'), uid: d('req-yes').dataset.uid, accept: true });
+  if (id('req-no')) return void run({ type: 'ship.request', shipId: id('req-no'), uid: d('req-no').dataset.uid, accept: false });
+  if (id('ship-kick')) return void run({ type: 'ship.kick', shipId: id('ship-kick'), uid: d('ship-kick').dataset.uid });
+  if (id('upg')) return void installUpgrade(id('upg'), e.currentTarget);
+});
 
 /* ═══ Boutique ═══════════════════════════════════════════════════════════ */
 let shopMode = 'buy';
@@ -1102,7 +1144,7 @@ $('v-shop').addEventListener('click', async (e) => {
     let shipName;
     if (G.ITEMS[bk]?.kind === 'bateau') {
       const m = G.ITEMS[bk];
-      shipName = await askText(`${m.name} : ${m.ship.type}, ${m.ship.cannons} canons, cale de ${G.kg(m.ship.capacity)}. Comment s’appellera-t-il ?`, { title: 'Nomme ton bateau', ok: 'Acheter', placeholder: 'ex. La Vogue Merry' });
+      shipName = await askText(`${m.name} : ${m.ship.type}, ${m.ship.berths} places, ${m.ship.cannons} canons, cale de ${G.kg(m.ship.capacity)}. Il sera à quai dans ce salon. Comment s’appellera-t-il ?`, { title: 'Nomme ton bateau', ok: 'Acheter', placeholder: 'ex. La Vogue Merry' });
       if (!shipName) return;
     }
     const out = await run({ type: 'shop.buy', key: bk, shipName });
@@ -1734,14 +1776,27 @@ function shipPic(sh) {
   if (sh.icon) return `<img src="${imgSrc(sh.icon)}" alt="" loading="lazy">`;
   return ico(SHIP_ICON);
 }
-function shipCard(sh, { actions = '' } = {}) {
+/** Améliorations de bateau dans l'inventaire : [case, objet]. */
+const upgradeSlots = () => (S ? S.inv.map((x, i) => [i, x]).filter(([, x]) => x && G.ITEMS[x[0]]?.kind === 'amelioration') : []);
+function upgradeControl(sh) {
+  const ups = upgradeSlots();
+  if (!ups.length) return '';
+  return `<div class="mj-row upg-row"><select data-upg-sel="${esc(sh.id)}" aria-label="Amélioration à installer">${ups.map(([i, x]) => {
+    const u = G.ITEMS[x[0]].upgrade;
+    return `<option value="${i}">${esc(G.ITEMS[x[0]].name)} (+${fmt(u.amount)} ${G.UPGRADES[u.type].unit})</option>`;
+  }).join('')}</select><button class="btn sm" data-upg="${esc(sh.id)}">Installer</button></div>`;
+}
+function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
+  const aboard = sh.passengers?.length ?? 0;
   return `<article class="ship-card">
     <div class="ship-pic">${shipPic(sh)}</div>
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
-      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span></div>
+      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
+      ${extra}
       ${actions}
+      ${upgrade ? upgradeControl(sh) : ''}
     </div>
   </article>`;
 }
@@ -1864,13 +1919,13 @@ function shipsTabHTML() {
   const crewShips = c ? SHIPS.filter((x) => x.owner?.kind === 'crew' && x.owner.id === c.id) : [];
   return `
     ${c ? `<h3 class="ed-h" style="margin-top:0;border:none;padding-top:0">Bateau de l’équipage</h3>
-      ${ship ? shipCard(ship, { actions: can('ship') ? `<button class="btn sm ghost" data-ship-edit="${esc(ship.id)}">Modifier</button>` : '' }) : '<p class="note">L’équipage n’a pas encore de bateau attitré.</p>'}
+      ${ship ? shipCard(ship, { actions: can('ship') ? `<button class="btn sm ghost" data-ship-edit="${esc(ship.id)}">Modifier</button>` : '', upgrade: can('ship') }) : '<p class="note">L’équipage n’a pas encore de bateau attitré.</p>'}
       ${can('ship') && [...mine, ...crewShips].length ? `<div class="mj-row" style="margin-top:10px"><label for="crew-ship">Bateau attitré</label>
         <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)}, ${G.kg(x.capacity)})</option>`).join('')}</select>
         <button class="btn sm" id="crew-ship-go">Choisir</button></div>
         <p class="note">Un de tes bateaux choisi ici devient celui de l’équipage.</p>` : ''}` : ''}
     <h3 class="ed-h">Mes bateaux</h3>
-    ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { actions: `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>` })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}`;
+    ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { actions: `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>`, upgrade: true })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}`;
 }
 function renderCrew() {
   if (!S || ADMIN) return;
@@ -2024,8 +2079,18 @@ $('v-crew').addEventListener('click', async (e) => {
   // Bateaux
   if (e.target.id === 'crew-ship-go') return void run({ type: 'crew.ship', shipId: $('crew-ship').value || null });
   const se = e.target.closest('[data-ship-edit]')?.dataset.shipEdit;
-  if (se) openShipEdit(SHIPS.find((x) => x.id === se), { player: true });
+  if (se) return openShipEdit(SHIPS.find((x) => x.id === se), { player: true });
+  const up = e.target.closest('[data-upg]')?.dataset.upg;
+  if (up) return void installUpgrade(up, e.currentTarget);
 });
+/** Installe l'amélioration choisie sur un bateau (l'objet est consommé). */
+async function installUpgrade(shipId, root) {
+  const sel = root.querySelector(`[data-upg-sel="${CSS.escape(shipId)}"]`);
+  if (!sel) return;
+  const it = G.ITEMS[S.inv[+sel.value]?.[0]];
+  if (!(await askConfirm(`${it?.name ?? 'Cette amélioration'} sera installée et retirée de ton inventaire.`, { title: 'Installer l’amélioration ?', ok: 'Installer' }))) return;
+  await run({ type: 'ship.upgrade', shipId, slot: +sel.value });
+}
 async function cargoMove(side, key, qty) {
   const out = await run({ type: side === 'inv' ? 'crew.chest.deposit' : 'crew.chest.withdraw', key, qty });
   if (out) {
@@ -2059,7 +2124,7 @@ let shipDraft = null, shipDraftId = null, shipAsPlayer = false;
 function openShipEdit(ship, { player = false } = {}) {
   shipAsPlayer = player;
   shipDraftId = ship?.id ?? null;
-  shipDraft = structuredClone(ship || { name: '', desc: '', photo: null, icon: null, type: G.SHIP_TYPES[0], cannons: 0, capacity: 100, owner: null, model: null });
+  shipDraft = structuredClone(ship || { name: '', desc: '', photo: null, icon: null, type: G.SHIP_TYPES[0], cannons: 0, capacity: 100, berths: 4, sail: 1, owner: null, model: null });
   $('sh-title').textContent = shipDraftId ? ship.name : 'Nouveau bateau';
   $('sh-sub').textContent = player ? 'Le type, les canons et la capacité sont fixés à la création.' : 'Bateau créé par le staff, ou modèle acheté par un joueur.';
   $('sh-del').hidden = player || !shipDraftId;
@@ -2079,6 +2144,9 @@ function renderShipEdit() {
         <div><label for="sh-type">Type</label><input id="sh-type" list="ship-types" value="${esc(d.type)}" maxlength="40"></div>
         <div><label for="sh-cannons">Canons</label><input id="sh-cannons" type="number" min="0" value="${d.cannons}"></div>
         <div><label for="sh-cap">Capacité de stockage (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
+        <div><label for="sh-berths">Places (personnes)</label><input id="sh-berths" type="number" min="1" value="${d.berths ?? 4}"></div>
+        <div><label for="sh-sail">Niveau de voile (vitesse)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
+        <div><label for="sh-pos">À quai dans le salon (ID)</label><input id="sh-pos" inputmode="numeric" value="${esc(d.positionId ?? d.position?.channelId ?? '')}" placeholder="ID du salon, vide = nulle part"><small class="note">${d.position ? `Actuellement : #${esc(d.position.name || d.position.channelId)}` : 'Pas à quai'}</small></div>
         <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
           <optgroup label="Équipages">${Object.entries(fleet.crews || {}).map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>`}
@@ -2101,6 +2169,9 @@ function readShipEdit() {
   d.type = $('sh-type').value;
   d.cannons = Math.max(0, Math.round(+$('sh-cannons').value || 0));
   d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
+  d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
+  d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
+  d.positionId = $('sh-pos').value.trim();
   const o = $('sh-owner').value;
   d.owner = o ? { kind: o.split(':')[0], id: o.slice(o.indexOf(':') + 1) } : null;
 }
@@ -2206,7 +2277,7 @@ function renderFleet() {
       : ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => `
           <button class="gest-card" data-ship="${esc(id)}">
             <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${imgSrc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
-            <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · ${sh.cannons} canons · ${G.kg(sh.capacity)}<br>${esc(ownerName(sh.owner))}</small></span>
+            <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · ${sh.berths ?? 4} places · voile ${sh.sail ?? 1} · ${sh.cannons} canons · ${G.kg(sh.capacity)}<br>${esc(ownerName(sh.owner))}${sh.position ? ` · ⚓ #${esc(sh.position.name || sh.position.channelId)}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
   paintStatic(el);
 }
@@ -2360,7 +2431,7 @@ function renderGestion() {
       ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
           <button class="gest-card" data-item="${esc(id)}">
             <span class="slot-ico">${itemIco(id)}</span>
-            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'} · ${G.kg(it.weight || 0)}${it.kind === 'bateau' ? ` · ${it.ship.cannons} canons, cale ${G.kg(it.ship.capacity)}` : ''}</small></span>
+            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'} · ${G.kg(it.weight || 0)}${it.kind === 'bateau' ? ` · ${it.ship.berths} places, ${it.ship.cannons} canons, cale ${G.kg(it.ship.capacity)}` : ''}${it.kind === 'amelioration' ? ` · +${fmt(it.upgrade.amount)} ${G.UPGRADES[it.upgrade.type].unit}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
           <button class="gest-card" data-recipe="${esc(id)}">
@@ -2419,7 +2490,13 @@ function openItemEdit(id = null) {
   $('it-stype').value = sh.type;
   $('it-cannons').value = sh.cannons;
   $('it-cap').value = sh.capacity;
+  $('it-berths').value = sh.berths ?? 4;
+  $('it-sail').value = sh.sail ?? 1;
   $('it-ship').hidden = itemDraft.kind !== 'bateau';
+  const up = itemDraft.upgrade || { type: 'cale', amount: 100 };
+  $('it-utype').innerHTML = Object.entries(G.UPGRADES).map(([k, u]) => `<option value="${k}" ${k === up.type ? 'selected' : ''}>${u.name} (+ ${u.unit})</option>`).join('');
+  $('it-uamount').value = up.amount;
+  $('it-upg').hidden = itemDraft.kind !== 'amelioration';
   $('it-desc').value = itemDraft.desc;
   $('it-url').value = '';
   $('it-del').hidden = !id;
@@ -2433,6 +2510,7 @@ function showItemImg() {
 }
 $('it-kind').addEventListener('change', () => {
   $('it-ship').hidden = $('it-kind').value !== 'bateau';
+  $('it-upg').hidden = $('it-kind').value !== 'amelioration';
   showItemImg();
 });
 $('it-pick').addEventListener('click', () => $('it-file').click());
@@ -2457,7 +2535,8 @@ $('it-noimg').addEventListener('click', () => {
 $('it-save').addEventListener('click', () => {
   const item = {
     name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
-    ship: { type: $('it-stype').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0 },
+    ship: { type: $('it-stype').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
+    upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');
   gestCall('item.save', { id: itemDraftId, item }, $('d-item'));
@@ -2657,6 +2736,7 @@ async function refresh() {
     CREW = st.crew;
     SHIPS = st.ships || [];
     INVITES = st.invites || [];
+    NAVD = st.nav;
     if (screen === 'crew' && !document.activeElement?.closest('#v-crew')) renderCrew();
     if (screen === 'nav') renderNav();
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
@@ -2688,6 +2768,7 @@ document.addEventListener('dragstart', (e) => {
     CREW = st.crew;
     SHIPS = st.ships || [];
     INVITES = st.invites || [];
+    NAVD = st.nav;
     CHNAME = st.channelName || '';
   } catch (err) {
     console.error(err);

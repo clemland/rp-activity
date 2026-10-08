@@ -46,7 +46,9 @@ export const JOBS = {
 };
 
 /** Catégories d'objets. Seules les armes s'équipent. */
-export const KIND = { arme: 'Arme', conso: 'Consommable', mat: 'Matériau', tresor: 'Trésor', objet: 'Objet', bateau: 'Bateau' };
+export const KIND = { arme: 'Arme', conso: 'Consommable', mat: 'Matériau', tresor: 'Trésor', objet: 'Objet', bateau: 'Bateau', amelioration: 'Amélioration de bateau' };
+/** Améliorations de bateau : ce qu'elles ajoutent quand on les installe. */
+export const UPGRADES = { cale: { name: 'Cale', unit: 'kg' }, canons: { name: 'Canons', unit: 'canons' }, voile: { name: 'Voile', unit: 'niveaux de vitesse' } };
 export const CHEST_BASE = 100; // capacité (kg) du coffre d'un équipage sans bateau
 export const SHIP_TYPES = ['Caravelle', 'Brick', 'Goélette', 'Frégate', 'Galion', 'Navire de guerre', 'Chaloupe'];
 
@@ -240,6 +242,7 @@ export function normalizeItem(x) {
     value: int(x.value, 0, 1e12),
     weight: Math.round(Math.min(1e5, Math.max(0, Number(String(x.weight ?? 0).replace(',', '.')) || 0)) * 10) / 10,
     ...(kind === 'bateau' && { ship: normalizeShipStats(x.ship || {}) }),
+    ...(kind === 'amelioration' && { upgrade: { type: UPGRADES[x.upgrade?.type] ? x.upgrade.type : 'cale', amount: int(x.upgrade?.amount ?? 1, 1, 1e6) } }),
     desc: str(x.desc, 400),
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
   };
@@ -460,7 +463,7 @@ export function playerAction(player, action, ctx = {}) {
       if (ITEMS[k].kind === 'bateau') {
         const shipName = str(a.shipName, 60);
         if (!shipName) fail('Donne un nom à ton bateau.');
-        out.newShip = newShip({ model: k, name: shipName, owner: { kind: 'player', id: p.uid } }, now);
+        out.newShip = newShip({ model: k, name: shipName, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: (shop.channel || '').replace(/^#/, '') } : null }, now);
       }
       else if (!addItem(p, k, 1)) fail('Inventaire plein.');
       p.berry -= price;
@@ -604,14 +607,18 @@ export function normalizeShipStats(x) {
     type: str(x.type, 40) || 'Navire',
     cannons: int(x.cannons, 0, 500),
     capacity: Math.round(Math.min(1e7, Math.max(0, Number(x.capacity) || 0))),
+    berths: int(x.berths ?? 4, 1, 1000), // places (personnes à bord)
+    sail: int(x.sail ?? 1, 1, 100), // niveau de voile = vitesse (pour la navigation)
   };
 }
 /** Nouveau bateau, à partir d'un modèle (objet « Bateau ») ou de caractéristiques libres. */
-export function newShip({ model = null, name, desc, photo, type, cannons, capacity, owner = null } = {}, now = Date.now()) {
+export function newShip({ model = null, name, desc, photo, type, cannons, capacity, berths, sail, owner = null, position = null } = {}, now = Date.now()) {
   const m = model ? ITEMS[model] : null;
   if (model && m?.kind !== 'bateau') fail('Ce modèle de bateau n’existe pas.');
-  const stats = normalizeShipStats(m ? { ...m.ship, ...(type != null && { type }), ...(cannons != null && { cannons }), ...(capacity != null && { capacity }) } : { type, cannons, capacity });
-  return normalizeShip({ name: str(name, 60) || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, owner, created: now });
+  const given = { type, cannons, capacity, berths, sail };
+  for (const k of Object.keys(given)) if (given[k] == null) delete given[k];
+  const stats = normalizeShipStats(m ? { ...m.ship, ...given } : given);
+  return normalizeShip({ name: str(name, 60) || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, owner, position, created: now });
 }
 export function normalizeShip(s) {
   Object.assign(s, normalizeShipStats(s));
@@ -620,12 +627,106 @@ export function normalizeShip(s) {
   s.photo ??= null;
   s.icon ??= null;
   s.owner = s.owner && ['player', 'crew'].includes(s.owner.kind) && s.owner.id ? { kind: s.owner.kind, id: String(s.owner.id) } : null;
+  s.position = s.position?.channelId ? { channelId: String(s.position.channelId), name: str(s.position.name, 60) } : null; // salon où il est à quai
+  s.passengers = [...new Set((s.passengers || []).map(String))].slice(0, s.berths);
+  s.requests = (s.requests || []).filter((r) => r?.uid && !s.passengers.includes(String(r.uid))).slice(-50);
+  s.upgrades ??= [];
   return s;
 }
 export function canEditShip(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
   if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'ship');
   return false;
+}
+
+/** Monte-t-on directement (propriétaire ou équipage propriétaire), sans demander ? */
+export function isShipFamily(p, ship, crew) {
+  if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
+  if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crew.members.includes(p.uid);
+  return false;
+}
+/** Qui gère le bateau (embarquements, améliorations) : propriétaire, ou membre autorisé de l'équipage. */
+export const canManageShip = (p, ship, crew) => canEditShip(p, ship, crew);
+
+/**
+ * Embarquement, débarquement, demandes et améliorations.
+ * ctx : { crew (équipage du joueur), channelId (salon où l'Activity est ouverte), now }.
+ * Renvoie { player, ship, toast, boarded?, left?, requested?, accepted? }.
+ */
+export function shipAction(player, ship0, action, ctx = {}) {
+  const p = clone(player), ship = normalizeShip(clone(ship0));
+  const a = action || {};
+  const out = { player: p, ship, toast: null };
+  const full = () => ship.passengers.length >= ship.berths;
+  switch (a.type) {
+    case 'ship.board': {
+      if (ship.passengers.includes(p.uid)) fail('Tu es déjà à bord.');
+      if (!ship.position || ship.position.channelId !== ctx.channelId) fail('Ce bateau n’est pas à quai ici.');
+      if (isShipFamily(p, ship, ctx.crew)) {
+        if (full()) fail('Il n’y a plus de place à bord.');
+        ship.passengers.push(p.uid);
+        out.boarded = true;
+        out.toast = `Tu montes à bord de ${ship.name}`;
+      } else {
+        if (ship.requests.some((r) => r.uid === p.uid)) fail('Ta demande est déjà envoyée.');
+        ship.requests.push({ uid: p.uid, at: ctx.now || Date.now() });
+        out.requested = true;
+        out.toast = `Demande envoyée pour monter à bord de ${ship.name}`;
+      }
+      break;
+    }
+    case 'ship.leave': {
+      if (!ship.passengers.includes(p.uid)) fail('Tu n’es pas à bord.');
+      ship.passengers = ship.passengers.filter((u) => u !== p.uid);
+      out.left = true;
+      out.toast = `Tu descends de ${ship.name}`;
+      break;
+    }
+    case 'ship.request.cancel': {
+      ship.requests = ship.requests.filter((r) => r.uid !== p.uid);
+      out.toast = 'Demande annulée';
+      break;
+    }
+    case 'ship.request': {
+      // Le propriétaire (ou un membre autorisé) accepte ou refuse une demande.
+      if (!canManageShip(p, ship, ctx.crew)) fail('Ce n’est pas ton bateau.');
+      const r = ship.requests.find((x) => x.uid === a.uid);
+      if (!r) fail('Cette demande n’existe plus.');
+      ship.requests = ship.requests.filter((x) => x !== r);
+      if (a.accept) {
+        if (full()) fail('Il n’y a plus de place à bord.');
+        ship.passengers.push(a.uid);
+        out.accepted = a.uid;
+        out.toast = 'Demande acceptée : le joueur est à bord';
+      } else out.toast = 'Demande refusée';
+      break;
+    }
+    case 'ship.kick': {
+      if (!canManageShip(p, ship, ctx.crew)) fail('Ce n’est pas ton bateau.');
+      if (!ship.passengers.includes(a.uid)) fail('Ce joueur n’est pas à bord.');
+      ship.passengers = ship.passengers.filter((u) => u !== a.uid);
+      out.toast = 'Le joueur est débarqué';
+      break;
+    }
+    case 'ship.upgrade': {
+      // Installer une amélioration (fabriquée par un charpentier) : l'objet est consommé.
+      if (!canManageShip(p, ship, ctx.crew)) fail('Ce n’est pas ton bateau.');
+      const s = p.inv[a.slot];
+      const it = s && ITEMS[s[0]];
+      if (!it || it.kind !== 'amelioration') fail('Choisis une amélioration dans ton inventaire.');
+      const { type, amount } = it.upgrade;
+      if (type === 'cale') ship.capacity += amount;
+      if (type === 'canons') ship.cannons += amount;
+      if (type === 'voile') ship.sail += amount;
+      removeItem(p, s[0], 1);
+      ship.upgrades.push({ item: s[0], type, amount, at: ctx.now || Date.now(), by: p.uid });
+      out.toast = `${it.name} installée sur ${ship.name} : +${fmt(amount)} ${UPGRADES[type].unit}`;
+      out.item = s[0];
+      break;
+    }
+    default: fail('Action inconnue.');
+  }
+  return out;
 }
 
 /* ═══ Équipages ══════════════════════════════════════════════════════════ */
@@ -882,9 +983,11 @@ export function demoCatalog() {
       'clous-ex': { name: 'Clous (exemple)', kind: 'mat', value: 200, weight: 0.5, desc: 'Objet d’exemple de la démo.', img: null },
       'tonneau-ex': { name: 'Tonneau (exemple)', kind: 'objet', value: 2000, weight: 15, desc: 'Objet d’exemple de la démo.', img: null },
       'sabre-ex': { name: 'Sabre (exemple)', kind: 'arme', value: 8000, weight: 3, desc: 'Une arme d’exemple.', img: null },
-      'caravelle-ex': { name: 'Caravelle (exemple)', kind: 'bateau', value: 150000, weight: 0, ship: { type: 'Caravelle', cannons: 4, capacity: 300 }, desc: 'Petit navire rapide, idéal pour débuter.', img: null },
+      'caravelle-ex': { name: 'Caravelle (exemple)', kind: 'bateau', value: 150000, weight: 0, ship: { type: 'Caravelle', cannons: 4, capacity: 300, berths: 6, sail: 2 }, desc: 'Petit navire rapide, idéal pour débuter.', img: null },
+      'cale-ex': { name: 'Extension de cale (exemple)', kind: 'amelioration', value: 20000, weight: 20, upgrade: { type: 'cale', amount: 200 }, desc: 'Fabriquée par un charpentier.', img: null },
     },
     recipes: {
+      'cale-ex': { job: 'charpentier', lvl: 1, seconds: 30, needs: { 'bois-ex': 3, 'clous-ex': 2 }, gives: { 'cale-ex': 1 }, desc: 'Recette d’exemple : amélioration de bateau.' },
       'tonneau-ex': { job: 'charpentier', lvl: 1, seconds: 20, needs: { 'bois-ex': 2, 'clous-ex': 1 }, gives: { 'tonneau-ex': 1 }, desc: 'Recette d’exemple : 20 secondes.' },
     },
   };
@@ -913,6 +1016,7 @@ export function demoCrew() {
 }
 export function demoShips() {
   return {
-    'brise-lames': normalizeShip({ name: 'Le Brise-Lames', desc: 'Le navire de l’équipage.', type: 'Brick', cannons: 8, capacity: 500, owner: { kind: 'crew', id: 'goeland-noir' }, created: 0 }),
+    'brise-lames': normalizeShip({ name: 'Le Brise-Lames', desc: 'Le navire de l’équipage.', type: 'Brick', cannons: 8, capacity: 500, berths: 10, sail: 3, owner: { kind: 'crew', id: 'goeland-noir' }, position: { channelId: 'demo', name: 'port-brisant' }, created: 0 }),
+    'mouette-pnj': normalizeShip({ name: 'La Mouette Rieuse', desc: 'Le bateau d’un autre joueur (démo).', type: 'Goélette', cannons: 2, capacity: 150, berths: 3, sail: 2, owner: { kind: 'player', id: 'pnj-3' }, position: { channelId: 'demo', name: 'port-brisant' }, created: 0 }),
   };
 }

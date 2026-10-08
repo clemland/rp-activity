@@ -377,3 +377,34 @@ test('relais d’images : seulement ImgBB, réponse mise en cache', async () => 
   assert.equal(r.status, 400);
   globalThis.fetch = ancien;
 });
+
+test('navigation : bateaux à quai, demande d’embarquement acceptée par le propriétaire, amélioration', async () => {
+  const C1 = '111111111111111111';
+  // u2 (MJ) possède un bateau à quai dans C1
+  await call('bot', { body: { op: 'register', userId: 'u2', name: 'Le MJ', race: 'Humain', classe: 'Fighter' }, headers: { 'x-bot-secret': 'secret' } }).catch(() => {});
+  let r = await call('staff', { body: { op: 'ship.save', ship: { name: 'Le Marchand', type: 'Brick', cannons: 2, capacity: 100, berths: 2, owner: { kind: 'player', id: 'u2' }, positionId: C1 } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.deepEqual(r.out.ship.position, { channelId: C1, name: 'port-brisant' });
+  // u1 voit le bateau à quai et demande à monter
+  r = await call('state', { method: 'GET', query: { channel: C1 }, headers: J });
+  const sh = r.out.nav.harbor.find((x) => x.name === 'Le Marchand');
+  assert.ok(sh, 'à quai dans ce salon');
+  r = await call('action', { body: { channelId: C1, action: { type: 'ship.board', shipId: sh.id } }, headers: J });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.ok(r.out.requested);
+  // le propriétaire voit la demande et accepte
+  r = await call('state', { method: 'GET', query: { channel: C1 }, headers: MJ });
+  assert.equal(r.out.nav.requests[0].uid, 'u1');
+  r = await call('action', { body: { channelId: C1, action: { type: 'ship.request', shipId: sh.id, uid: 'u1', accept: true } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('state', { method: 'GET', query: { channel: C1 }, headers: J });
+  assert.equal(r.out.nav.aboard.name, 'Le Marchand');
+  // amélioration installée par le propriétaire
+  await call('staff', { body: { op: 'item.save', item: { name: 'Voile renforcée', kind: 'amelioration', upgrade: { type: 'voile', amount: 2 } } }, headers: MJ });
+  await call('staff', { body: { op: 'act', target: 'u2', action: { type: 'give', key: 'voile-renforcee', qty: 1 } }, headers: MJ });
+  const slot = tables.players.get('u2').data.inv.findIndex((x) => x && x[0] === 'voile-renforcee');
+  r = await call('action', { body: { channelId: C1, action: { type: 'ship.upgrade', shipId: sh.id, slot } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(tables.ships.get(sh.id).data.sail, 3);
+  assert.equal(tables.players.get('u2').data.inv.some((x) => x && x[0] === 'voile-renforcee'), false);
+});

@@ -1,5 +1,5 @@
 /** Chargement commun : fiche, boutique du salon, catalogue d'objets et de recettes. */
-import { normalize, normalizeShop, normalizeCrew, normalizeShip, setCatalog, fullName } from '../../shared/game.js';
+import { normalize, normalizeShop, normalizeCrew, normalizeShip, setCatalog, fullName, canManageShip } from '../../shared/game.js';
 import { read, readAll, readMany, db } from './db.js';
 import { channelName } from './discord.js';
 import { HttpError } from './http.js';
@@ -93,3 +93,31 @@ export async function invitesFor(uid) {
 /** Ce que voit le site d'un équipage et de ses bateaux. */
 export const publicCrew = (c, names) => (c ? { ...c, memberNames: names } : null);
 export const shipList = (ships) => Object.entries(ships).map(([id, s]) => ({ id, ...s }));
+
+/**
+ * Écran Navigation : bateaux à quai dans ce salon, bateau où le joueur est à
+ * bord, et demandes d'embarquement sur les bateaux qu'il gère.
+ * Renvoie { harbor, aboard, requests, names, crewNames }.
+ */
+export async function loadHarbor(player, crew, channelId) {
+  const all = Object.entries(await readAll('ships')).map(([id, sh]) => ({ id, ...normalizeShip(sh) }));
+  const harbor = channelId ? all.filter((sh) => sh.position?.channelId === channelId) : [];
+  const aboard = all.find((sh) => sh.passengers.includes(player.uid)) || null;
+  const managed = all.filter((sh) => canManageShip(player, sh, crew) && sh.requests.length);
+  const requests = managed.flatMap((sh) => sh.requests.map((r) => ({ shipId: sh.id, shipName: sh.name, uid: r.uid, at: r.at })));
+  // Noms à afficher : propriétaires, passagers, demandeurs, équipages propriétaires
+  const shown = [...harbor, ...(aboard ? [aboard] : [])];
+  const uids = new Set(), crewIds = new Set();
+  for (const sh of shown) {
+    if (sh.owner?.kind === 'player') uids.add(sh.owner.id);
+    if (sh.owner?.kind === 'crew') crewIds.add(sh.owner.id);
+    sh.passengers.forEach((u) => uids.add(u));
+  }
+  requests.forEach((r) => uids.add(r.uid));
+  const [players, crews] = await Promise.all([readMany('players', [...uids]), readMany('crews', [...crewIds])]);
+  const names = Object.fromEntries([...uids].map((u) => [u, players[u] ? fullName(players[u].data) : '?']));
+  const crewNames = Object.fromEntries([...crewIds].map((c) => [c, crews[c]?.data.name ?? '?']));
+  // Les demandes des autres ne regardent que le propriétaire : on ne garde que la sienne.
+  const hide = (sh) => ({ ...sh, requests: canManageShip(player, sh, crew) ? sh.requests : sh.requests.filter((r) => r.uid === player.uid) });
+  return { harbor: harbor.map(hide), aboard: aboard ? hide(aboard) : null, requests, names, crewNames };
+}

@@ -308,3 +308,51 @@ test('grades : classement par importance', () => {
   crew = G.crewAction(cap, { type: 'crew.rank.move', id, dir: -1 }, { crew }).crew;
   assert.deepEqual(crew.ranks.map((r) => r.name), ['Second', 'Matelot']);
 });
+
+test('bateaux : places, voile, position, achat à quai dans le salon de la boutique', () => {
+  cat();
+  const p = G.demoPlayer();
+  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex', shipName: 'La Belle' }, { shop: G.demoShop(), channelId: 'demo' });
+  assert.equal(r.newShip.berths, 6);
+  assert.equal(r.newShip.sail, 2);
+  assert.deepEqual(r.newShip.position, { channelId: 'demo', name: 'port-brisant' });
+});
+
+test('embarquement : direct pour son bateau ou son équipage, sinon demande à accepter', () => {
+  cat();
+  const ships = G.demoShips(), crew = G.demoCrew();
+  const moi = G.demoPlayer(); // membre du Goéland Noir
+  let r = G.shipAction(moi, ships['brise-lames'], { type: 'ship.board' }, { crew, channelId: 'demo' });
+  assert.ok(r.boarded);
+  assert.throws(() => G.shipAction(moi, ships['brise-lames'], { type: 'ship.board' }, { crew, channelId: 'ailleurs' }), /pas à quai/);
+  // bateau d'un autre joueur : demande
+  r = G.shipAction(moi, ships['mouette-pnj'], { type: 'ship.board' }, { crew, channelId: 'demo' });
+  assert.ok(r.requested);
+  const proprio = G.normalize({ uid: 'pnj-3', id: { name: 'Proprio' } });
+  const autre = G.normalize({ uid: 'x', id: { name: 'X' } });
+  assert.throws(() => G.shipAction(autre, r.ship, { type: 'ship.request', uid: 'demo', accept: true }, {}), /pas ton bateau/);
+  const ok = G.shipAction(proprio, r.ship, { type: 'ship.request', uid: 'demo', accept: true }, {});
+  assert.deepEqual(ok.ship.passengers, ['demo']);
+  // places limitées
+  const plein = { ...ships['mouette-pnj'], passengers: ['a', 'b', 'c'], requests: [{ uid: 'demo', at: 1 }] };
+  assert.throws(() => G.shipAction(proprio, plein, { type: 'ship.request', uid: 'demo', accept: true }, {}), /plus de place/);
+  // descendre
+  const d = G.shipAction(moi, ok.ship, { type: 'ship.leave' }, {});
+  assert.deepEqual(d.ship.passengers, []);
+});
+
+test('améliorations : installées par le propriétaire, l’objet est consommé', () => {
+  cat();
+  const ships = G.demoShips(), crew = G.demoCrew();
+  const cap = G.demoPlayer();
+  G.addItem(cap, 'cale-ex', 1);
+  const slot = cap.inv.findIndex((x) => x && x[0] === 'cale-ex');
+  const r = G.shipAction(cap, ships['brise-lames'], { type: 'ship.upgrade', slot }, { crew });
+  assert.equal(r.ship.capacity, 700);
+  assert.equal(G.count(r.player, 'cale-ex'), 0);
+  assert.equal(r.ship.upgrades.length, 1);
+  const membre = { ...G.demoPlayer(), uid: 'pnj-1' };
+  G.addItem(membre, 'cale-ex', 1);
+  assert.throws(() => G.shipAction(membre, ships['brise-lames'], { type: 'ship.upgrade', slot: membre.inv.findIndex((x) => x && x[0] === 'cale-ex') }, { crew }), /pas ton bateau/);
+  assert.deepEqual(G.normalizeItem({ name: 'Voile renforcée', kind: 'amelioration', upgrade: { type: 'voile', amount: 2 } }).upgrade, { type: 'voile', amount: 2 });
+});

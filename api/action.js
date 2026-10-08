@@ -6,10 +6,10 @@
 import { handler, need } from './_lib/http.js';
 import { userFromRequest } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
-import { read, write, retry, listPlayers } from './_lib/db.js';
+import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
-import { invitesFor } from './_lib/context.js';
-import { playerAction, crewAction, inviteAction, normalizeCrew, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
+import { invitesFor, loadHarbor } from './_lib/context.js';
+import { playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
@@ -34,7 +34,7 @@ export default handler(['POST'], async (req, body) => {
     const { player, version } = firstTry ? first : await loadPlayer(me.uid);
     firstTry = false;
     const ctx = { channelId, now: Date.now() };
-    const needsCrew = action.type.startsWith('crew.') || action.type === 'ship.edit' || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau');
+    const needsCrew = action.type.startsWith('crew.') || action.type.startsWith('ship.') || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau');
     const cs = needsCrew ? await loadCrewAndShips(player) : null;
     const reply = (out, extra = {}) =>
       cs
@@ -101,6 +101,28 @@ export default handler(['POST'], async (req, body) => {
       if (out.left) return { ...out, crew: null, ships: shipList(Object.fromEntries(Object.entries(cs.ships).filter(([, sh]) => sh.owner?.kind === 'player'))), invites: await invitesFor(me.uid) };
       const names = { ...cs.memberNames };
       return reply(out, { crew: { ...out.crew, memberNames: names }, ships: out.ships });
+    }
+
+    // Bateau : embarquer, débarquer, demandes, améliorations
+    if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
+      const row = await read('ships', String(action.shipId || ''));
+      need(row, 404, 'Bateau introuvable.');
+      const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now() });
+      await write('ships', action.shipId, out.ship, row.version);
+      // On n'est à bord que d'un bateau à la fois : on descend des autres.
+      const boarder = out.boarded ? me.uid : out.accepted;
+      if (boarder) {
+        for (const [sid, sh] of Object.entries(await readAll('ships'))) {
+          if (sid === action.shipId || !(sh.passengers || []).includes(boarder)) continue;
+          await retry(async () => {
+            const r = await read('ships', sid);
+            await write('ships', sid, { ...r.data, passengers: r.data.passengers.filter((u) => u !== boarder) }, r.version);
+          });
+        }
+      }
+      if (out.item) await write('players', me.uid, out.player, version); // amélioration consommée
+      const nav = await loadHarbor(out.player, cs.crew, channelId);
+      return { ...reply(out, { ships: { [action.shipId]: normalizeShip(out.ship) } }), nav };
     }
 
     // Bateau : nom, description, photo

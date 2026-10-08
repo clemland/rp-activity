@@ -1182,3 +1182,14 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .rc-title .ico{--s:32px}
 #pr-input{margin-top:4px}
 .ico img,.cell img,.xcell img{-webkit-user-drag:none;user-select:none;pointer-events:none}
+
+/* ═══ v29 : port et améliorations ════════════════════ */
+.voyage:has(.nav-port){display:block;max-width:none}
+.nav-port{display:grid;gap:14px}
+.nav-port h2{margin:0}
+.aboard{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:3px solid var(--ink);border-radius:8px;background:#e9f7ea;padding:8px 12px}
+.pax{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 8px}
+.pax span{border:2px solid var(--ink);border-radius:20px;padding:0 9px;font-size:13px;font-weight:700;background:#fff7e0}
+.owner{margin:0 0 4px}
+.upg-row{margin-top:6px}
+.upg-row select{font:inherit;font-size:14px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:3px 6px;max-width:100%}

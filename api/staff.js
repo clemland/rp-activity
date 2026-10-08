@@ -146,7 +146,17 @@ export default handler(['POST'], async (req, body) => {
       return { ships: await readAll('ships') };
 
     case 'ship.save': {
-      const input = body.ship || {};
+      const input = { ...(body.ship || {}) };
+      // Position : le salon où le bateau est à quai, donné par son ID.
+      if ('positionId' in input) {
+        const pid = String(input.positionId || '').trim();
+        if (pid) {
+          const ch = await channelById(pid);
+          need(ch, 400, 'Salon introuvable pour la position : vérifie l’ID du salon.');
+          input.position = { channelId: pid, name: ch.name };
+        } else input.position = null;
+        delete input.positionId;
+      }
       const ships = await readAll('ships');
       const id = body.id && ships[body.id] ? body.id : freeId(input.name || 'bateau', ships);
       const old = ships[id] || null;

@@ -96,6 +96,7 @@ export default handler(['POST'], async (req, body) => {
         await retry(async () => {
           const row = await read('players', uid);
           need(row, 404, `Le joueur ${uid} n’a pas de fiche.`);
+          need(crew.kind !== 'flotte' || row.data.id?.faction === 'Marine', 400, `${row.data.id?.name || uid} n’est pas Marine : il ne peut pas rejoindre une flotte.`);
           const prev = row.data.crewId;
           if (prev && prev !== id && crews[prev]) {
             const other = await read('crews', prev);
@@ -119,7 +120,7 @@ export default handler(['POST'], async (req, body) => {
         const row = await read('crews', id);
         await write('crews', id, crew, row?.version ?? null);
       });
-      return { id, crew, toast: old ? `Équipage modifié : ${crew.name}` : `Équipage créé : ${crew.name}` };
+      return { id, crew, toast: `${crew.kind === 'flotte' ? 'Flotte' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
     }
 
     case 'crew.delete': {

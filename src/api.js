@@ -242,7 +242,7 @@ export async function staff(op, payload = {}) {
       if (crew.ship && store.ships[crew.ship]) store.ships[crew.ship].owner = { kind: 'crew', id };
       store.crews[id] = crew;
       saveStore();
-      return { id, crew, toast: `Équipage ${old ? 'modifié' : 'créé'} : ${crew.name}` };
+      return { id, crew, toast: `${crew.kind === 'flotte' ? 'Flotte' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
     }
     if (op === 'crew.delete') {
       if (store.player.crewId === payload.id) store.player.crewId = null;

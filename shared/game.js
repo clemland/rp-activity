@@ -29,7 +29,22 @@ export const HAKI = [
   { key: 'rois', name: 'Haki des rois', icon: 14 },
 ];
 export const FACTIONS = ['Pirate', 'Marine', 'Révolutionnaire', 'Chasseur de primes', 'Civil'];
-export const GRADES = ['Matelot', 'Caporal', 'Sergent', 'Adjudant', 'Enseigne', 'Lieutenant', 'Capitaine de corvette', 'Capitaine', 'Commodore', 'Vice-amiral', 'Amiral'];
+/** Grades de la Marine, du plus bas au plus haut, avec leur solde par semaine (berrys). */
+export const MARINE_GRADES = [
+  { name: '3ème Classe', pay: 250_000, medal: '🥉' },
+  { name: '2ème Classe', pay: 500_000, medal: '🥈' },
+  { name: '1ère Classe', pay: 1_000_000, medal: '🥇' },
+  { name: 'Lieutenant', pay: 2_500_000, medal: '🏅' },
+  { name: 'Capitaine', pay: 5_000_000, medal: '🏅' },
+  { name: 'Vice-Amiral', pay: 10_000_000, medal: '🎖️' },
+  { name: 'Amiral', pay: 30_000_000, medal: '🎖️' },
+  { name: 'Amiral en Chef', pay: 50_000_000, medal: '🏆' },
+];
+export const GRADES = MARINE_GRADES.map((g) => g.name);
+export const gradeOf = (name) => MARINE_GRADES.find((g) => g.name === name) || MARINE_GRADES[0];
+const WEEK = 7 * 24 * 3600 * 1000;
+/** Anciens grades → nouveaux. */
+const OLD_GRADES = { Matelot: '3ème Classe', Caporal: '2ème Classe', Sergent: '1ère Classe', Adjudant: '1ère Classe', Enseigne: 'Lieutenant', 'Capitaine de corvette': 'Capitaine', Commodore: 'Vice-Amiral', 'Vice-amiral': 'Vice-Amiral' };
 export const RACES = ['Humain', 'Mink', 'Géant', 'Shandia', 'Homme-poisson', 'Buccaneer'];
 export const CLASSES = ['Fighter', 'Sabreur', 'Tireur'];
 export const FRUIT_TYPES = ['Paramecia', 'Zoan', 'Logia'];
@@ -101,7 +116,7 @@ export function newPlayer(uid, { name, race, job, classe } = {}) {
   if (job && norm(job) !== 'aucun' && !j) fail(`Métier inconnu. Choix : ${Object.values(JOBS).map((x) => x.name).join(', ')} ou aucun.`);
   return normalize({
     uid,
-    id: { name: n, epithet: '', faction: 'Pirate', crew: '', crewRole: '', grade: 'Matelot', race: r, classe: c, bounty: 0 },
+    id: { name: n, epithet: '', faction: 'Pirate', crew: '', crewRole: '', grade: GRADES[0], race: r, classe: c, bounty: 0 },
     level: 1, xp: 0, statPts: 0, berry: 0,
     stats: { force: 10, rapidite: 10, resistance: 10, sdc: 10 },
     volonte: 0, haki: { observation: 0, armement: 0, rois: null }, fruit: null,
@@ -130,6 +145,8 @@ export function normalize(p) {
   p.techniques ??= [];
   for (const t of p.techniques) if (!TECH_SOURCES[t.src]) t.src = 'combat';
   p.crewId ??= null;
+  if (OLD_GRADES[p.id.grade]) p.id.grade = OLD_GRADES[p.id.grade];
+  if (!GRADES.includes(p.id.grade)) p.id.grade = GRADES[0];
   p.inv ??= [];
   p.inv = p.inv.slice(0, BAG).map((s) => (s && s[0] && s[1] > 0 ? s : null));
   while (p.inv.length < BAG) p.inv.push(null);
@@ -217,6 +234,30 @@ export function fixEquip(p) {
   for (const sl of Object.keys(SLOTS)) if (p.equip[sl] && equipSlotIndex(p, sl) < 0) p.equip[sl] = null;
   if (p.equip.arme1 && p.equip.arme1 === p.equip.arme2) p.equip.arme2 = null;
 }
+/**
+ * Solde de la Marine, versée chaque semaine selon le grade actuel.
+ * Appelée à chaque chargement de la fiche : verse les semaines écoulées.
+ * Le compteur démarre quand le joueur devient Marine (pas de rattrapage avant).
+ * Renvoie { weeks, amount } (0 si rien à verser) ; modifie p.
+ */
+export function paySalary(p, now = Date.now()) {
+  if (p.id?.faction !== 'Marine') {
+    p.salaryAt = null;
+    return { weeks: 0, amount: 0 };
+  }
+  if (!p.salaryAt) {
+    p.salaryAt = now;
+    return { weeks: 0, amount: 0 };
+  }
+  const weeks = Math.floor((now - p.salaryAt) / WEEK);
+  if (weeks <= 0) return { weeks: 0, amount: 0 };
+  const amount = weeks * gradeOf(p.id.grade).pay;
+  p.berry += amount;
+  p.salaryAt += weeks * WEEK;
+  return { weeks, amount };
+}
+export const nextPay = (p) => (p.id?.faction === 'Marine' && p.salaryAt ? p.salaryAt + WEEK : null);
+
 /** Ajoute de l'XP ; renvoie le nombre de niveaux gagnés. */
 export function gainXP(p, n) {
   if (!n) return 0;
@@ -386,8 +427,12 @@ export function playerAction(player, action, ctx = {}) {
       if (!c) fail('Aucune fabrication en cours.');
       if (now < c.end) fail(`Encore ${duree((c.end - now) / 1000)} de patience.`);
       const test = clone(p);
-      for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !addItem(test, k, q)) fail('Inventaire plein : libère de la place pour récupérer ta fabrication.');
-      for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k]) addItem(p, k, q);
+      const isShip = (k) => ITEMS[k]?.kind === 'bateau';
+      for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !isShip(k) && !addItem(test, k, q)) fail('Inventaire plein : libère de la place pour récupérer ta fabrication.');
+      for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !isShip(k)) addItem(p, k, q);
+      // Un bateau fabriqué sort à quai dans le salon où on le récupère.
+      out.newShips = Object.entries(c.gives).filter(([k]) => isShip(k)).flatMap(([k, q]) =>
+        Array.from({ length: q }, () => newShip({ model: k, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: ctx.channelName || '' } : null }, now)));
       p.craft = null;
       out.toast = `Récupéré : ${Object.entries(c.gives).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ')}`;
       out.item = Object.keys(c.gives)[0];
@@ -461,14 +506,13 @@ export function playerAction(player, action, ctx = {}) {
       if (stock === 0) fail('Épuisé.');
       if (p.berry < price) fail('Pas assez de berrys.');
       if (ITEMS[k].kind === 'bateau') {
-        const shipName = str(a.shipName, 60);
-        if (!shipName) fail('Donne un nom à ton bateau.');
-        out.newShip = newShip({ model: k, name: shipName, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: (shop.channel || '').replace(/^#/, '') } : null }, now);
+        // Le bateau arrive avec le nom de son type : le propriétaire le personnalise ensuite.
+        out.newShip = newShip({ model: k, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: (shop.channel || '').replace(/^#/, '') } : null }, now);
       }
       else if (!addItem(p, k, 1)) fail('Inventaire plein.');
       p.berry -= price;
       if (stock > 0) row[2]--;
-      out.shop = shop; out.toast = out.newShip ? `Bateau acheté : ${out.newShip.name}` : `Acheté : ${ITEMS[k].name}`; out.item = k; out.delta = -price;
+      out.shop = shop; out.toast = out.newShip ? `${out.newShip.type} acheté : donne-lui un nom dans Équipage > Bateaux` : `Acheté : ${ITEMS[k].name}`; out.item = k; out.delta = -price;
       break;
     }
     case 'shop.sell': {
@@ -542,6 +586,7 @@ export function staffAction(player, action) {
     case 'give': case 'take': {
       const k = a.key, q = int(a.qty ?? 1, 1, 9999);
       if (!ITEMS[k]) fail('Objet inconnu.');
+      if (ITEMS[k].kind === 'bateau' && a.type === 'give') fail('Un bateau se crée dans Flotte > Bateaux, pas dans l’inventaire.');
       if (a.type === 'give') { if (!addItem(p, k, q)) fail('Inventaire plein.'); out.toast = `Donné : ${q} × ${ITEMS[k].name}`; }
       else { removeItem(p, k, Math.min(q, count(p, k))); out.toast = `Retiré : ${q} × ${ITEMS[k].name}`; }
       break;
@@ -618,7 +663,7 @@ export function newShip({ model = null, name, desc, photo, type, cannons, capaci
   const given = { type, cannons, capacity, berths, sail };
   for (const k of Object.keys(given)) if (given[k] == null) delete given[k];
   const stats = normalizeShipStats(m ? { ...m.ship, ...given } : given);
-  return normalizeShip({ name: str(name, 60) || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, owner, position, created: now });
+  return normalizeShip({ name: str(name, 60) || stats.type || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, owner, position, created: now });
 }
 export function normalizeShip(s) {
   Object.assign(s, normalizeShipStats(s));
@@ -746,8 +791,11 @@ export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas sup
 const INVITE_TTL = 7 * 24 * 3600 * 1000;
 const defaultRank = () => ({ id: DEFAULT_RANK, name: 'Matelot', perms: { bankIn: true, chestIn: true, chestOut: true } });
 
+export const CREW_KINDS = { equipage: 'Équipage', flotte: 'Flotte de la Marine' };
+export const crewWord = (c) => (c?.kind === 'flotte' ? 'flotte' : 'équipage');
 export function normalizeCrew(c) {
-  c.name = str(c.name, 60) || 'Équipage sans nom';
+  c.kind = c.kind === 'flotte' ? 'flotte' : 'equipage';
+  c.name = str(c.name, 60) || (c.kind === 'flotte' ? 'Flotte sans nom' : 'Équipage sans nom');
   c.flag ??= null; // Jolly Roger (image)
   c.members = [...new Set((c.members || []).map(String))];
   c.captain = c.captain && c.members.includes(String(c.captain)) ? String(c.captain) : c.members[0] ?? null;
@@ -775,7 +823,7 @@ export function crewCan(crew, uid, perm) {
   const r = crew.ranks.find((x) => x.id === crew.memberRanks[uid]);
   return !!r?.perms?.[perm];
 }
-export const rankName = (crew, uid) => (crew.captain === uid ? 'Capitaine' : crew.ranks.find((r) => r.id === crew.memberRanks[uid])?.name ?? 'Matelot');
+export const rankName = (crew, uid) => (crew.captain === uid ? (crew.kind === 'flotte' ? 'Commandant' : 'Capitaine') : crew.ranks.find((r) => r.id === crew.memberRanks[uid])?.name ?? 'Matelot');
 export const chestWeight = (c) => Object.entries(c.chest || {}).reduce((a, [k, q]) => a + itemWeight(k) * q, 0);
 export const crewCapacity = (ship) => (ship ? ship.capacity : CHEST_BASE);
 
@@ -910,6 +958,7 @@ export function crewAction(player, action, ctx = {}) {
       need('invite');
       const u = String(a.uid || '');
       if (!u) fail('Choisis un joueur.');
+      if (crew.kind === 'flotte' && a.faction && a.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une flotte.');
       if (crew.members.includes(u)) fail('Ce joueur est déjà dans l’équipage.');
       if (crew.invites.some((i) => i.uid === u)) fail('Ce joueur est déjà invité.');
       crew.invites.push({ uid: u, by: p.uid, at: ctx.now || Date.now() });
@@ -963,6 +1012,7 @@ export function crewAction(player, action, ctx = {}) {
 export function inviteAction(player, action, ctx = {}) {
   const p = clone(player), crew = ctx.crew ? normalizeCrew(clone(ctx.crew)) : null;
   if (!crew || !crew.invites.some((i) => i.uid === p.uid)) fail('Cette invitation n’existe plus.');
+  if (action.type === 'crew.join' && crew.kind === 'flotte' && p.id.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une flotte.');
   crew.invites = crew.invites.filter((i) => i.uid !== p.uid);
   if (action.type === 'crew.decline') return { player: p, crew, toast: `Invitation de ${crew.name} refusée` };
   if (action.type !== 'crew.join') fail('Action inconnue.');
@@ -995,7 +1045,7 @@ export function demoCatalog() {
 export function demoPlayer() {
   return normalize({
     uid: 'demo', photo: null,
-    id: { name: 'Elio Varenne', epithet: 'Le Brise-Lames', faction: 'Pirate', crew: 'Équipage du Goéland Noir', crewRole: 'Capitaine', grade: 'Matelot', race: 'Humain', classe: 'Sabreur', bounty: 87000000 },
+    id: { name: 'Elio Varenne', epithet: 'Le Brise-Lames', faction: 'Pirate', crew: 'Équipage du Goéland Noir', crewRole: 'Capitaine', grade: '3ème Classe', race: 'Humain', classe: 'Sabreur', bounty: 87000000 },
     level: 12, xp: 470, statPts: 3, berry: 412500,
     stats: { force: 24, rapidite: 31, resistance: 20, sdc: 27 }, volonte: 2,
     haki: { observation: 2, armement: 1, rois: null },

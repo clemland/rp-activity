@@ -4,7 +4,7 @@
  * Toutes les règles sont appliquées ici, côté serveur.
  */
 import { handler, need } from './_lib/http.js';
-import { userFromRequest } from './_lib/discord.js';
+import { userFromRequest, channelName } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
@@ -34,7 +34,7 @@ export default handler(['POST'], async (req, body) => {
     const { player, version } = firstTry ? first : await loadPlayer(me.uid);
     firstTry = false;
     const ctx = { channelId, now: Date.now() };
-    const needsCrew = action.type.startsWith('crew.') || action.type.startsWith('ship.') || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau');
+    const needsCrew = action.type.startsWith('crew.') || action.type.startsWith('ship.') || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau') || action.type === 'craft.collect';
     const cs = needsCrew ? await loadCrewAndShips(player) : null;
     const reply = (out, extra = {}) =>
       cs
@@ -86,6 +86,7 @@ export default handler(['POST'], async (req, body) => {
         const target = await read('players', String(action.uid || ''));
         need(target, 404, 'Ce joueur n’a pas de fiche.');
         action.name = fullName(target.data);
+        action.faction = target.data.id?.faction; // une flotte n'accepte que des Marines
       }
       const out = crewAction(player, action, { crew: cs.crew, ships: cs.ships, now: Date.now() });
       const { id, memberNames, ...crewData } = out.crew;
@@ -141,16 +142,24 @@ export default handler(['POST'], async (req, body) => {
       ctx.shop = s.shop;
       shopV = s.version;
     }
+    if (action.type === 'craft.collect' && channelId) ctx.channelName = await channelName(channelId);
     const out = playerAction(player, action, ctx);
     if (out.shop) await write('shops', channelId, out.shop, shopV);
     const extra = {};
+    // Bateaux fabriqués : ils apparaissent dans « Mes bateaux », à quai dans ce salon.
+    for (const ship of out.newShips || []) {
+      let id = slug(ship.name), n = 2;
+      while (await read('ships', id)) id = `${slug(ship.name)}-${n++}`;
+      await write('ships', id, ship, null);
+      (extra.ships ??= {})[id] = ship;
+    }
     if (out.newShip) {
       // Bateau acheté : il apparaît dans « Mes bateaux », pas dans l'inventaire.
       let id = slug(out.newShip.name), n = 2;
       while (await read('ships', id)) id = `${slug(out.newShip.name)}-${n++}`;
       await write('ships', id, out.newShip, null);
       extra.ships = { [id]: out.newShip };
-      out.toast = `${out.newShip.name} est à toi ! Donne-lui un nom dans « Équipage ».`;
+      out.toast = `${out.newShip.type} acheté ! Donne-lui un nom dans Équipage > Bateaux.`;
     }
     await write('players', me.uid, out.player, version);
     return reply(out, extra);

@@ -175,9 +175,8 @@ test('poids des objets et de l’inventaire', () => {
 test('bateau : achat en boutique, nom/photo par le propriétaire', () => {
   cat();
   const p = G.demoPlayer(), shop = G.demoShop();
-  assert.throws(() => G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop }), /nom/);
-  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex', shipName: 'La Belle' }, { shop, now: 5 });
-  assert.equal(r.newShip.name, 'La Belle');
+  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop, now: 5 });
+  assert.equal(r.newShip.name, 'Caravelle', 'le nom de son type, à personnaliser ensuite');
   assert.equal(r.newShip.type, 'Caravelle');
   assert.equal(r.newShip.cannons, 4);
   assert.equal(r.newShip.capacity, 300);
@@ -312,7 +311,7 @@ test('grades : classement par importance', () => {
 test('bateaux : places, voile, position, achat à quai dans le salon de la boutique', () => {
   cat();
   const p = G.demoPlayer();
-  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex', shipName: 'La Belle' }, { shop: G.demoShop(), channelId: 'demo' });
+  const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop: G.demoShop(), channelId: 'demo' });
   assert.equal(r.newShip.berths, 6);
   assert.equal(r.newShip.sail, 2);
   assert.deepEqual(r.newShip.position, { channelId: 'demo', name: 'port-brisant' });
@@ -355,4 +354,43 @@ test('améliorations : installées par le propriétaire, l’objet est consommé
   G.addItem(membre, 'cale-ex', 1);
   assert.throws(() => G.shipAction(membre, ships['brise-lames'], { type: 'ship.upgrade', slot: membre.inv.findIndex((x) => x && x[0] === 'cale-ex') }, { crew }), /pas ton bateau/);
   assert.deepEqual(G.normalizeItem({ name: 'Voile renforcée', kind: 'amelioration', upgrade: { type: 'voile', amount: 2 } }).upgrade, { type: 'voile', amount: 2 });
+});
+
+test('Marine : grades, conversion des anciens, solde hebdomadaire', () => {
+  cat();
+  assert.deepEqual(G.GRADES, ['3ème Classe', '2ème Classe', '1ère Classe', 'Lieutenant', 'Capitaine', 'Vice-Amiral', 'Amiral', 'Amiral en Chef']);
+  const vieux = G.normalize({ id: { name: 'X', faction: 'Marine', grade: 'Commodore' } });
+  assert.equal(vieux.id.grade, 'Vice-Amiral');
+  const W = 7 * 24 * 3600 * 1000;
+  const p = G.normalize({ uid: 'm', id: { name: 'Coby', faction: 'Marine', grade: 'Lieutenant' }, berry: 0 });
+  assert.deepEqual(G.paySalary(p, 1000), { weeks: 0, amount: 0 }, 'le compteur démarre');
+  assert.deepEqual(G.paySalary(p, 1000 + W - 1), { weeks: 0, amount: 0 });
+  assert.deepEqual(G.paySalary(p, 1000 + 2 * W + 5), { weeks: 2, amount: 5_000_000 });
+  assert.equal(p.berry, 5_000_000);
+  assert.deepEqual(G.paySalary(p, 1000 + 2 * W + 10), { weeks: 0, amount: 0 }, 'pas deux fois');
+  const pirate = G.normalize({ id: { name: 'Luffy', faction: 'Pirate' }, salaryAt: 5 });
+  assert.equal(G.paySalary(pirate, 1e12).amount, 0);
+  assert.equal(pirate.salaryAt, null);
+});
+
+test('flottes de la Marine : réservées aux Marines', () => {
+  cat();
+  const flotte = G.normalizeCrew({ id: 'f1', kind: 'flotte', name: 'Flotte du Nord', members: ['cmd'], invites: [{ uid: 'p1', by: 'cmd', at: Date.now() }, { uid: 'm1', by: 'cmd', at: Date.now() }] });
+  assert.equal(G.rankName(flotte, 'cmd'), 'Commandant');
+  const pirate = G.normalize({ uid: 'p1', id: { name: 'P', faction: 'Pirate' } });
+  assert.throws(() => G.inviteAction(pirate, { type: 'crew.join' }, { crew: flotte }), /Marines/);
+  const marine = G.normalize({ uid: 'm1', id: { name: 'M', faction: 'Marine' } });
+  assert.ok(G.inviteAction(marine, { type: 'crew.join' }, { crew: flotte }).crew.members.includes('m1'));
+});
+
+test('bateau fabriqué : sort à quai dans le salon, avec le nom de son type', () => {
+  cat();
+  const p = G.demoPlayer();
+  p.craft = { recipe: 'x', name: 'x', gives: { 'caravelle-ex': 1, 'clous-ex': 2 }, start: 0, end: 0 };
+  const r = G.playerAction(p, { type: 'craft.collect' }, { channelId: 'c9', channelName: 'chantier', now: 10 });
+  assert.equal(r.newShips.length, 1);
+  assert.equal(r.newShips[0].name, 'Caravelle');
+  assert.deepEqual(r.newShips[0].position, { channelId: 'c9', name: 'chantier' });
+  assert.equal(G.count(r.player, 'caravelle-ex'), 0);
+  assert.equal(G.count(r.player, 'clous-ex'), 4);
 });

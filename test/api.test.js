@@ -281,7 +281,7 @@ test('bateaux : création par le staff, achat en boutique, renommage, assignatio
   await call('staff', { body: { op: 'item.save', item: { name: 'Caravelle', kind: 'bateau', value: 1000, ship: { type: 'Caravelle', cannons: 4, capacity: 300 } } }, headers: MJ });
   await call('staff', { body: { op: 'shop.save', channelId: '111111111111111111', shop: { name: 'Chantier', seller: 'Franky', items: [['caravelle', 100, 1]] } }, headers: MJ });
   await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'berry', amount: 1000 } }, headers: MJ });
-  r = await call('action', { body: { channelId: '111111111111111111', action: { type: 'shop.buy', key: 'caravelle', shipName: 'La Mouette' } }, headers: J });
+  r = await call('action', { body: { channelId: '111111111111111111', action: { type: 'shop.buy', key: 'caravelle' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   const achat = r.out.ships.find((s) => s.type === 'Caravelle');
   assert.ok(achat, 'le bateau acheté apparaît');
@@ -407,4 +407,26 @@ test('navigation : bateaux à quai, demande d’embarquement acceptée par le pr
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(tables.ships.get(sh.id).data.sail, 3);
   assert.equal(tables.players.get('u2').data.inv.some((x) => x && x[0] === 'voile-renforcee'), false);
+});
+
+test('Marine : solde versée à l’ouverture, flotte réservée aux Marines', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  await call('bot', { body: { op: 'register', userId: 'm1', name: 'Coby', race: 'Humain', classe: 'Fighter' }, headers: H });
+  USERS['tok-m1'] = { id: 'm1', username: 'coby' };
+  const M1 = { authorization: 'Bearer tok-m1' };
+  await call('staff', { body: { op: 'act', target: 'm1', action: { type: 'edit', patch: { id: { faction: 'Marine', grade: 'Capitaine' } } } }, headers: MJ });
+  let r = await call('state', { method: 'GET', query: {}, headers: M1 });
+  assert.equal(r.out.salary.amount, 0, 'premier passage : le compteur démarre');
+  // trois semaines plus tard
+  tables.players.get('m1').data.salaryAt -= 3 * 7 * 24 * 3600 * 1000;
+  r = await call('state', { method: 'GET', query: {}, headers: M1 });
+  assert.equal(r.out.salary.amount, 15_000_000);
+  assert.equal(r.out.player.berry, 15_000_000);
+  // flotte : un pirate est refusé
+  r = await call('staff', { body: { op: 'crew.save', crew: { kind: 'flotte', name: 'Flotte du Nord', members: ['m1', 'u9'] } }, headers: MJ });
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /pas Marine/);
+  r = await call('staff', { body: { op: 'crew.save', crew: { kind: 'flotte', name: 'Flotte du Nord', members: ['m1'] } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.crew.kind, 'flotte');
 });

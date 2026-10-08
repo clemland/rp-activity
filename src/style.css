@@ -977,7 +977,7 @@ body{background:var(--sea)}
 body.busy{cursor:progress}
 .mj-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--ink);color:#fff3cf;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-weight:700;box-shadow:4px 4px 0 var(--shadow)}
 .mj-banner .btn{box-shadow:2px 2px 0 rgba(0,0,0,.4)}
-.readonly .sq,.readonly [data-equip],.readonly [data-drop],.readonly #job-do,.readonly #job-up,.readonly #new-tech,.readonly [data-edit-tech],.readonly [data-del-tech]{display:none!important}
+.readonly #s-fiche .sq,.readonly #s-fiche [data-equip],.readonly #s-fiche [data-drop],.readonly #s-fiche #job-do,.readonly #s-fiche #job-up,.readonly #s-fiche #new-tech,.readonly #s-fiche [data-edit-tech],.readonly #s-fiche [data-del-tech],.readonly #s-fiche [data-craft],.readonly #s-fiche #craft-collect,.readonly #s-fiche #craft-cancel{display:none!important}
 .mj-players{display:grid;gap:6px;max-height:50vh;overflow:auto;margin-top:10px}
 .mj-player{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;text-align:left;border:2px solid var(--ink);border-radius:8px;background:#fbf0d2;padding:6px 10px;cursor:pointer;font:inherit;color:inherit}
 .mj-player:hover{background:#fff6dc}
@@ -1193,3 +1193,10 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .owner{margin:0 0 4px}
 .upg-row{margin-top:6px}
 .upg-row select{font:inherit;font-size:14px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:3px 6px;max-width:100%}
+
+/* ═══ v30 : Marine ═══════════════════════════════════ */
+.grade-scale{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.grade-scale > span{display:grid;border:2px solid var(--ink);border-radius:6px;background:#e8ecfb;padding:4px 10px}
+.grade-scale small{color:var(--muted);font-size:12px}
+.marine-row .sq{width:30px;height:30px}
+.plaque.blue .pl-foot{color:#d7e3ff}

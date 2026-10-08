@@ -252,9 +252,18 @@ export async function staff(op, payload = {}) {
       return { toast: 'Équipage supprimé' };
     }
     if (op === 'ship.save') {
-      const id = payload.id && store.ships[payload.id] ? payload.id : G.slug(payload.ship.name);
-      const { id: _i, ...input } = payload.ship;
-      const ship = store.ships[id] ? G.normalizeShip({ ...store.ships[id], ...input }) : G.newShip(input);
+      const { id: _i, positionId, ...input } = payload.ship;
+      const existing = payload.id && store.ships[payload.id] ? payload.id : null;
+      if (!existing) {
+        if (store.catalog.items[input.model]?.kind !== 'bateau') throw new Error('Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
+        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail']) delete input[k];
+      }
+      if (positionId !== undefined) input.position = positionId ? { channelId: positionId, name: positionId === 'demo' ? 'port-brisant' : `salon-${positionId.slice(-4)}` } : null;
+      G.setCatalog(store.catalog);
+      let id = existing || G.slug(input.name || store.catalog.items[input.model].name);
+      if (!existing) for (let n = 2; store.ships[id]; n++) id = `${G.slug(input.name || 'bateau')}-${n}`;
+      const ship = existing ? G.normalizeShip({ ...store.ships[id], ...input }) : G.newShip(input);
+      if (ship.owner?.kind === 'crew' && store.crews[ship.owner.id] && !store.crews[ship.owner.id].ship) store.crews[ship.owner.id].ship = id;
       store.ships[id] = ship;
       saveStore();
       return { id, ship, toast: `Bateau enregistré : ${ship.name}` };

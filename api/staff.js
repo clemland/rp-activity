@@ -159,7 +159,13 @@ export default handler(['POST'], async (req, body) => {
         delete input.positionId;
       }
       const ships = await readAll('ships');
-      const id = body.id && ships[body.id] ? body.id : freeId(input.name || 'bateau', ships);
+      const existing = body.id && ships[body.id] ? body.id : null;
+      if (!existing) {
+        // Un nouveau bateau vient toujours d'un modèle créé dans Gestion (catégorie Bateau).
+        need(input.model && catalog.items[input.model]?.kind === 'bateau', 400, 'Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
+        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail']) delete input[k]; // les chiffres viennent du modèle
+      }
+      const id = existing || freeId(input.name || catalog.items[input.model].name, ships);
       const old = ships[id] || null;
       const ship = old ? normalizeShip({ ...old, ...input }) : newShip(input);
       if (input.photo !== undefined) ship.photo = input.photo ? await ingest(input.photo, 'bateaux', id) : null;
@@ -172,6 +178,13 @@ export default handler(['POST'], async (req, body) => {
         const row = await read('ships', id);
         await write('ships', id, ship, row?.version ?? null);
       });
+      // Donné à un équipage ou une flotte sans bateau attitré : il le devient.
+      if (ship.owner?.kind === 'crew') {
+        await retry(async () => {
+          const c = await read('crews', ship.owner.id);
+          if (c && !c.data.ship) await write('crews', ship.owner.id, { ...c.data, ship: id }, c.version);
+        });
+      }
       return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}` };
     }
 

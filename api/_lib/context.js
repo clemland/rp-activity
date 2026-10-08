@@ -117,7 +117,8 @@ export async function loadHarbor(player, crew, channelId) {
   const [players, crews] = await Promise.all([readMany('players', [...uids]), readMany('crews', [...crewIds])]);
   const names = Object.fromEntries([...uids].map((u) => [u, players[u] ? fullName(players[u].data) : '?']));
   const crewNames = Object.fromEntries([...crewIds].map((c) => [c, crews[c]?.data.name ?? '?']));
+  const crewKinds = Object.fromEntries([...crewIds].map((c) => [c, crews[c]?.data.kind === 'flotte' ? 'flotte' : 'equipage']));
   // Les demandes des autres ne regardent que le propriétaire : on ne garde que la sienne.
   const hide = (sh) => ({ ...sh, requests: canManageShip(player, sh, crew) ? sh.requests : sh.requests.filter((r) => r.uid === player.uid) });
-  return { harbor: harbor.map(hide), aboard: aboard ? hide(aboard) : null, requests, names, crewNames };
+  return { harbor: harbor.map(hide), aboard: aboard ? hide(aboard) : null, requests, names, crewNames, crewKinds };
 }

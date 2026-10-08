@@ -779,8 +779,6 @@ export function shipAction(player, ship0, action, ctx = {}) {
 export const CREW_PERMS = {
   bankIn: 'Déposer à la banque',
   bankOut: 'Retirer de la banque',
-  chestIn: 'Déposer dans la cale',
-  chestOut: 'Prendre dans la cale',
   invite: 'Inviter des joueurs',
   kick: 'Exclure des membres',
   ranks: 'Attribuer les grades',
@@ -789,7 +787,15 @@ export const CREW_PERMS = {
 };
 export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas supprimable
 const INVITE_TTL = 7 * 24 * 3600 * 1000;
-const defaultRank = () => ({ id: DEFAULT_RANK, name: 'Matelot', perms: { bankIn: true, chestIn: true, chestOut: true } });
+const defaultRank = () => ({ id: DEFAULT_RANK, name: 'Matelot', perms: { bankIn: true } });
+/** Permissions qui ont du sens selon le type : une flotte n'a pas de banque. */
+export const permsFor = (c) => Object.fromEntries(Object.entries(CREW_PERMS).filter(([k]) => c?.kind !== 'flotte' || !k.startsWith('bank')));
+/** Mots selon le type : « l’équipage » / « la flotte », etc. */
+export function crewWords(c) {
+  return c?.kind === 'flotte'
+    ? { Nom: 'Flotte', le: 'la flotte', de: 'de la flotte', ce: 'cette flotte', un: 'une flotte', chef: 'commandant', Chef: 'Commandant' }
+    : { Nom: 'Équipage', le: 'l’équipage', de: 'de l’équipage', ce: 'cet équipage', un: 'un équipage', chef: 'capitaine', Chef: 'Capitaine' };
+}
 
 export const CREW_KINDS = { equipage: 'Équipage', flotte: 'Flotte de la Marine' };
 export const crewWord = (c) => (c?.kind === 'flotte' ? 'flotte' : 'équipage');
@@ -799,7 +805,7 @@ export function normalizeCrew(c) {
   c.flag ??= null; // Jolly Roger (image)
   c.members = [...new Set((c.members || []).map(String))];
   c.captain = c.captain && c.members.includes(String(c.captain)) ? String(c.captain) : c.members[0] ?? null;
-  c.bank = int(c.bank, 0, 1e13);
+  c.bank = c.kind === 'flotte' ? 0 : int(c.bank, 0, 1e13); // une flotte n'a pas de banque commune
   c.chest = Object.fromEntries(Object.entries(c.chest || {}).map(([k, q]) => [k, int(q, 0, 1e7)]).filter(([, q]) => q > 0));
   c.ship ??= null;
   // Grades
@@ -834,7 +840,8 @@ export const crewCapacity = (ship) => (ship ? ship.capacity : CHEST_BASE);
 export function crewAction(player, action, ctx = {}) {
   const p = clone(player), crew = ctx.crew ? normalizeCrew(clone(ctx.crew)) : null;
   const a = action || {};
-  if (!crew || !crew.members.includes(p.uid)) fail('Tu ne fais pas partie de cet équipage.');
+  if (!crew || !crew.members.includes(p.uid)) fail(`Tu ne fais pas partie de ${crewWords(crew).ce}.`);
+  const W = crewWords(crew);
   const need = (perm) => {
     if (!crewCan(crew, p.uid, perm)) fail(`Ton grade ne permet pas de : ${CREW_PERMS[perm].toLowerCase()}.`);
   };
@@ -843,15 +850,17 @@ export function crewAction(player, action, ctx = {}) {
   const out = { player: p, crew, toast: null };
   switch (a.type) {
     case 'crew.bank.deposit': {
+      if (crew.kind === 'flotte') fail('Une flotte n’a pas de banque commune.');
       need('bankIn');
       const n = int(a.amount, 0, 1e13);
       if (!n) fail('Indique un montant.');
       if (p.berry < n) fail('Pas assez de berrys.');
       p.berry -= n; crew.bank += n;
-      out.toast = `${fmt(n)} berrys déposés dans la banque de l’équipage`;
+      out.toast = `${fmt(n)} berrys déposés dans la banque ${W.de}`;
       break;
     }
     case 'crew.bank.withdraw': {
+      if (crew.kind === 'flotte') fail('Une flotte n’a pas de banque commune.');
       need('bankOut');
       const n = int(a.amount, 0, 1e13);
       if (!n) fail('Indique un montant.');
@@ -861,7 +870,6 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.chest.deposit': {
-      need('chestIn');
       const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
       if (count(p, k) < q) fail('Tu n’as pas assez de cet objet.');
       if (freeCount(p, k) < q) fail('Retire-le d’abord de ton équipement.');
@@ -873,7 +881,6 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.chest.withdraw': {
-      need('chestOut');
       const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
       if ((crew.chest[k] || 0) < q) fail('Le coffre n’en contient pas assez.');
       if (!ITEMS[k]) fail('Objet supprimé : il ne peut plus être sorti.');
@@ -890,30 +897,30 @@ export function crewAction(player, action, ctx = {}) {
       if (!s) fail('Bateau introuvable.');
       const mine = s.owner?.kind === 'player' && s.owner.id === p.uid;
       const ours = s.owner?.kind === 'crew' && s.owner.id === crew.id;
-      if (!mine && !ours) fail('Ce bateau n’appartient ni à toi ni à l’équipage.');
+      if (!mine && !ours) fail(`Ce bateau n’appartient ni à toi ni à ${W.le}.`);
       if (chestWeight(crew) > s.capacity) fail(`Le coffre (${kg(chestWeight(crew))}) ne tient pas dans ce bateau (${kg(s.capacity)}).`);
       s.owner = { kind: 'crew', id: crew.id }; // le bateau devient celui de l'équipage
       crew.ship = a.shipId;
       out.ships = { [a.shipId]: s };
-      out.toast = `${s.name} est maintenant le bateau de l’équipage`;
+      out.toast = `${s.name} est maintenant le bateau ${W.de}`;
       break;
     }
     case 'crew.edit': {
       need('edit');
       if ('name' in a) {
         const n = str(a.name, 60);
-        if (!n) fail('Donne un nom à l’équipage.');
+        if (!n) fail(`Donne un nom à ${W.le}.`);
         crew.name = n;
       }
       if ('flag' in a) crew.flag = a.flag ? str(a.flag, 3_000_000) : null;
-      out.toast = 'Équipage mis à jour';
+      out.toast = `${W.Nom} mis${crew.kind === 'flotte' ? 'e' : ''} à jour`;
       break;
     }
     case 'crew.rank.save': {
-      if (!isCap) fail('Seul le capitaine crée et modifie les grades.');
+      if (!isCap) fail(`Seul le ${W.chef} crée et modifie les grades.`);
       const name = str(a.name, 30);
       if (!name) fail('Donne un nom au grade.');
-      const perms = Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!a.perms?.[k]]));
+      const perms = Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!a.perms?.[k] && k in permsFor(crew)]));
       let r = a.id && crew.ranks.find((x) => x.id === a.id);
       if (r) Object.assign(r, { name, perms });
       else {
@@ -927,7 +934,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.rank.delete': {
-      if (!isCap) fail('Seul le capitaine supprime les grades.');
+      if (!isCap) fail(`Seul le ${W.chef} supprime les grades.`);
       if (a.id === DEFAULT_RANK) fail('Le grade de base ne peut pas être supprimé (tu peux le renommer).');
       const r = crew.ranks.find((x) => x.id === a.id);
       if (!r) fail('Grade introuvable.');
@@ -937,7 +944,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.rank.move': {
-      if (!isCap) fail('Seul le capitaine organise les grades.');
+      if (!isCap) fail(`Seul le ${W.chef} organise les grades.`);
       const i = crew.ranks.findIndex((x) => x.id === a.id), j = i + (a.dir < 0 ? -1 : 1);
       if (i < 0) fail('Grade introuvable.');
       if (j < 0 || j >= crew.ranks.length) break;
@@ -946,8 +953,8 @@ export function crewAction(player, action, ctx = {}) {
     }
     case 'crew.member.rank': {
       need('ranks');
-      if (!crew.members.includes(a.uid)) fail('Ce joueur n’est pas dans l’équipage.');
-      if (a.uid === crew.captain) fail('Le capitaine n’a pas de grade à changer.');
+      if (!crew.members.includes(a.uid)) fail(`Ce joueur n’est pas dans ${W.le}.`);
+      if (a.uid === crew.captain) fail(`Le ${W.chef} n’a pas de grade à changer.`);
       if (!crew.ranks.some((x) => x.id === a.rankId)) fail('Grade introuvable.');
       if (!isCap && a.uid === p.uid) fail('Tu ne peux pas changer ton propre grade.');
       crew.memberRanks[a.uid] = a.rankId;
@@ -959,7 +966,7 @@ export function crewAction(player, action, ctx = {}) {
       const u = String(a.uid || '');
       if (!u) fail('Choisis un joueur.');
       if (crew.kind === 'flotte' && a.faction && a.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une flotte.');
-      if (crew.members.includes(u)) fail('Ce joueur est déjà dans l’équipage.');
+      if (crew.members.includes(u)) fail(`Ce joueur est déjà dans ${W.le}.`);
       if (crew.invites.some((i) => i.uid === u)) fail('Ce joueur est déjà invité.');
       crew.invites.push({ uid: u, by: p.uid, at: ctx.now || Date.now() });
       out.toast = `Invitation envoyée${a.name ? ` à ${str(a.name, 60)}` : ''}`;
@@ -973,9 +980,9 @@ export function crewAction(player, action, ctx = {}) {
     }
     case 'crew.kick': {
       need('kick');
-      if (!crew.members.includes(a.uid)) fail('Ce joueur n’est pas dans l’équipage.');
-      if (a.uid === crew.captain) fail('On ne peut pas exclure le capitaine.');
-      if (a.uid === p.uid) fail('Pour partir, utilise « Quitter l’équipage ».');
+      if (!crew.members.includes(a.uid)) fail(`Ce joueur n’est pas dans ${W.le}.`);
+      if (a.uid === crew.captain) fail(`On ne peut pas exclure le ${W.chef}.`);
+      if (a.uid === p.uid) fail(`Pour partir, utilise « Quitter ${W.le} ».`);
       crew.members = crew.members.filter((u) => u !== a.uid);
       delete crew.memberRanks[a.uid];
       out.kicked = a.uid;
@@ -983,15 +990,15 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.transfer': {
-      if (!isCap) fail('Seul le capitaine peut céder sa place.');
-      if (!crew.members.includes(a.uid) || a.uid === p.uid) fail('Choisis un autre membre de l’équipage.');
+      if (!isCap) fail(`Seul le ${W.chef} peut céder sa place.`);
+      if (!crew.members.includes(a.uid) || a.uid === p.uid) fail(`Choisis un autre membre ${W.de}.`);
       crew.captain = a.uid;
       crew.memberRanks[p.uid] = DEFAULT_RANK;
-      out.toast = 'Tu as cédé ta place de capitaine';
+      out.toast = `Tu as cédé ta place de ${W.chef}`;
       break;
     }
     case 'crew.leave': {
-      if (isCap && crew.members.length > 1) fail('Cède d’abord ta place de capitaine à un autre membre.');
+      if (isCap && crew.members.length > 1) fail(`Cède d’abord ta place de ${W.chef} à un autre membre.`);
       crew.members = crew.members.filter((u) => u !== p.uid);
       delete crew.memberRanks[p.uid];
       if (isCap) crew.captain = null;

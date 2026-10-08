@@ -890,7 +890,7 @@ setInterval(() => {
 /* ═══ Navigation : le port du salon ═════════════════════════════════════ */
 function ownerLabel(sh) {
   if (!sh.owner) return 'Sans propriétaire';
-  if (sh.owner.kind === 'crew') return `Équipage : ${esc(NAVD?.crewNames?.[sh.owner.id] ?? '?')}`;
+  if (sh.owner.kind === 'crew') return `${NAVD?.crewKinds?.[sh.owner.id] === 'flotte' ? 'Flotte' : 'Équipage'} : ${esc(NAVD?.crewNames?.[sh.owner.id] ?? '?')}`;
   return sh.owner.id === S.uid ? 'À toi' : `À ${esc(NAVD?.names?.[sh.owner.id] ?? '?')}`;
 }
 const navName = (u) => (u === S.uid ? 'toi' : esc(NAVD?.names?.[u] ?? '?'));
@@ -1599,7 +1599,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, admin: ADMIN, marine: tools(), ashop: tools(), fleet: tools(), gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, admin: ADMIN, marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -1806,11 +1806,11 @@ function invitesHTML() {
       <span><b>${esc(i.name)}</b><small>${i.members} membre${i.members > 1 ? 's' : ''}${i.byName ? ` · invité par ${esc(i.byName)}` : ''}</small></span>
       <span class="invite-acts"><button class="btn sm" data-join="${esc(i.id)}">Rejoindre</button><button class="btn sm ghost" data-decline="${esc(i.id)}">Refuser</button></span>
     </div>`).join('')}
-    ${CREW ? '<p class="note" style="margin:0">Rejoindre un autre équipage te fera quitter le tien.</p>' : ''}
+    ${CREW ? '<p class="note" style="margin:0">En rejoindre un autre te fera quitter ${G.crewWords(CREW).le}.</p>' : ''}
   </section>`;
 }
 function crewTabHTML() {
-  const c = CREW, me = S.uid, isCap = c.captain === me;
+  const c = CREW, me = S.uid, isCap = c.captain === me, W = G.crewWords(c);
   const order = (u) => (u === c.captain ? -1 : c.ranks.findIndex((r) => r.id === c.memberRanks[u]));
   const members = [...c.members].sort((a, b) => order(a) - order(b));
   const rankOpts = (uid) => c.ranks.map((r) => `<option value="${esc(r.id)}" ${c.memberRanks[uid] === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
@@ -1824,28 +1824,28 @@ function crewTabHTML() {
             : can('ranks') && (isCap || u !== me) ? `<select data-rank-of="${esc(u)}" aria-label="Grade de ${nameOf(u)}">${rankOpts(u)}</select>`
             : `<span class="rank-badge">${esc(G.rankName(c, u))}</span>`}
           <span class="m-acts">
-            ${isCap && u !== me ? `<button class="btn sm ghost" data-captain="${esc(u)}" title="Céder ta place de capitaine">Nommer capitaine</button>` : ''}
+            ${isCap && u !== me ? `<button class="btn sm ghost" data-captain="${esc(u)}" title="Céder ta place de ${W.chef}">Nommer ${W.chef}</button>` : ''}
             ${can('kick') && u !== c.captain && u !== me ? `<button class="btn sm ghost danger-txt" data-kick="${esc(u)}">Exclure</button>` : ''}
           </span>
         </div>`).join('')}</div>
     </section>
     ${can('invite') ? `<section class="crew-box">
-      <h3>Inviter un joueur</h3>
+      <h3>Inviter ${c.kind === 'flotte' ? 'un Marine' : 'un joueur'}</h3>
       <input class="mj-search" id="crew-search" type="search" placeholder="Nom du joueur…" value="${esc(crewSearch)}" autocomplete="off">
-      <div class="search-results" id="crew-results">${crewResults.map((x) => `<div class="member-row"><span class="m-name"><b>${esc(x.name)}</b>${x.crew ? ' <small class="note">(a déjà un équipage)</small>' : ''}</span><span></span><span class="m-acts"><button class="btn sm" data-invite="${esc(x.uid)}">Inviter</button></span></div>`).join('') || (crewSearch ? '<p class="note">Aucun joueur trouvé.</p>' : '')}</div>
+      <div class="search-results" id="crew-results">${crewResults.map((x) => `<div class="member-row"><span class="m-name"><b>${esc(x.name)}</b>${x.crew ? ' <small class="note">(a déjà un équipage ou une flotte)</small>' : ''}</span><span></span><span class="m-acts"><button class="btn sm" data-invite="${esc(x.uid)}">Inviter</button></span></div>`).join('') || (crewSearch ? '<p class="note">Aucun joueur trouvé.</p>' : '')}</div>
       ${c.invites.length ? `<b>Invitations en attente</b><div class="member-list">${c.invites.map((i) => `<div class="member-row"><span class="m-name">${nameOf(i.uid)}</span><span class="rank-badge">invité</span><span class="m-acts"><button class="btn sm ghost" data-uninvite="${esc(i.uid)}">Annuler</button></span></div>`).join('')}</div>` : ''}
     </section>` : ''}
     ${isCap ? `<section class="crew-box">
       <h3>Grades</h3>
       <p class="note" style="margin:0">Du plus important au moins important. Clique sur un grade pour régler ses permissions.</p>
       <div class="rank-list">${c.ranks.map((r, i) => {
-        const nb = Object.values(r.perms).filter(Boolean).length, who = c.members.filter((u) => u !== c.captain && c.memberRanks[u] === r.id).length;
+        const nb = Object.keys(G.permsFor(c)).filter((k) => r.perms[k]).length, who = c.members.filter((u) => u !== c.captain && c.memberRanks[u] === r.id).length;
         return `<details class="rank-edit" data-rank="${esc(r.id)}" ${openRanks.has(r.id) ? 'open' : ''}>
           <summary><span class="rank-order"><button class="sq" data-rank-move="${esc(r.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Monter">↑</button><button class="sq" data-rank-move="${esc(r.id)}" data-dir="1" ${i === c.ranks.length - 1 ? 'disabled' : ''} aria-label="Descendre">↓</button></span>
             <b>${esc(r.name)}</b><small class="note">${nb} permission${nb > 1 ? 's' : ''} · ${who} membre${who > 1 ? 's' : ''}${r.id === G.DEFAULT_RANK ? ' · grade de base' : ''}</small><span class="chev" aria-hidden="true">▾</span></summary>
           <div class="rank-body">
             <div class="rank-top"><input class="rank-name" value="${esc(r.name)}" maxlength="30" aria-label="Nom du grade"></div>
-            <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${r.perms[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+            <div class="perms">${Object.entries(G.permsFor(c)).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${r.perms[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
             <div class="rank-top"><button class="btn sm" data-rank-save="${esc(r.id)}">Enregistrer</button>${r.id !== G.DEFAULT_RANK ? `<button class="btn sm ghost danger-txt" data-rank-del="${esc(r.id)}">Supprimer</button>` : ''}</div>
           </div>
         </details>`;
@@ -1854,14 +1854,14 @@ function crewTabHTML() {
         <summary><b>+ Nouveau grade</b><span class="chev" aria-hidden="true">▾</span></summary>
         <div class="rank-body">
           <div class="rank-top"><input class="rank-name" placeholder="Nom (ex. Second)" maxlength="30" aria-label="Nom du nouveau grade"></div>
-          <div class="perms">${Object.entries(G.CREW_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}"> ${l}</label>`).join('')}</div>
+          <div class="perms">${Object.entries(G.permsFor(c)).map(([k, l]) => `<label><input type="checkbox" data-perm="${k}"> ${l}</label>`).join('')}</div>
           <div class="rank-top"><button class="btn sm" data-rank-save="">Créer le grade</button></div>
         </div>
       </details>
     </section>` : ''}
     ${can('edit') ? `<section class="crew-box">
-      <h3>Nom et Jolly Roger</h3>
-      <div class="form"><div class="wide"><label for="crew-name">Nom de l’équipage</label><input id="crew-name" value="${esc(c.name)}" maxlength="60"></div></div>
+      <h3>Nom et ${c.kind === 'flotte' ? 'emblème' : 'Jolly Roger'}</h3>
+      <div class="form"><div class="wide"><label for="crew-name">Nom ${W.de}</label><input id="crew-name" value="${esc(c.name)}" maxlength="60"></div></div>
       <div class="img-field"><div class="prev flag-prev">${c.flag ? `<img src="${imgSrc(c.flag)}" alt="">` : ico(1)}</div>
         <div class="se-face-ctl">
           <div class="se-row"><button type="button" class="btn sm" id="flag-pick">Choisir une image</button><input type="file" id="flag-file" accept="image/*" hidden>${c.flag ? '<button type="button" class="btn sm ghost" id="flag-none">Retirer</button>' : ''}</div>
@@ -1869,7 +1869,7 @@ function crewTabHTML() {
         </div></div>
       <div><button class="btn" id="crew-edit-save">Enregistrer le nom</button></div>
     </section>` : ''}
-    <div><button class="btn ghost danger-txt" id="crew-leave">Quitter l’équipage</button></div>`;
+    <div><button class="btn ghost danger-txt" id="crew-leave">Quitter ${W.le}</button></div>`;
 }
 function cargoHTML() {
   const c = CREW;
@@ -1883,14 +1883,14 @@ function cargoHTML() {
   const selQ = cx.key ? (cx.side === 'inv' ? inv[cx.key] : c.chest[cx.key]) || 0 : 0;
   if (cx.key && !selQ) cx = { side: null, key: null, qty: 1 };
   const it = cx.key ? itemOf(cx.key) : null;
-  const okPerm = cx.side === 'inv' ? can('chestIn') : can('chestOut');
+  const okPerm = true; // tous les membres utilisent la cale
   return `
-    <section class="crew-box">
-      <h3>${c.kind === 'flotte' ? 'Trésorerie de la flotte' : 'Banque commune'}</h3>
+    ${c.kind === 'flotte' ? '' : `<section class="crew-box">
+      <h3>Banque commune</h3>
       <div class="bank-amount">${berry(c.bank)}</div>
       <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
         ${can('bankIn') ? '<button class="btn sm" id="bank-in">Déposer</button>' : ''}${can('bankOut') ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div>
-    </section>
+    </section>`}
     <section class="crew-box">
       <h3>Cale ${ship ? `du navire « ${esc(ship.name)} »` : '(sans bateau)'}</h3>
       <div class="gauge" aria-label="Chargement de la cale"><i style="width:${Math.min(100, (load / Math.max(cap, 1)) * 100)}%"></i></div>
@@ -1914,12 +1914,12 @@ function shipsTabHTML() {
   const mine = SHIPS.filter((x) => x.owner?.kind === 'player' && x.owner.id === S.uid);
   const crewShips = c ? SHIPS.filter((x) => x.owner?.kind === 'crew' && x.owner.id === c.id) : [];
   return `
-    ${c ? `<h3 class="ed-h" style="margin-top:0;border:none;padding-top:0">Bateau de l’équipage</h3>
-      ${ship ? shipCard(ship, { actions: can('ship') ? `<button class="btn sm ghost" data-ship-edit="${esc(ship.id)}">Modifier</button>` : '', upgrade: can('ship') }) : '<p class="note">L’équipage n’a pas encore de bateau attitré.</p>'}
+    ${c ? `<h3 class="ed-h" style="margin-top:0;border:none;padding-top:0">Bateaux ${G.crewWords(c).de}</h3>
+      ${crewShips.length ? `<div class="ships">${crewShips.map((x) => shipCard(x, { extra: x.id === c.ship ? '<p class="note owner">⭐ Bateau attitré (sa cale sert de cale commune)</p>' : '', actions: can('ship') ? `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Modifier</button>` : '', upgrade: can('ship') })).join('')}</div>` : `<p class="note">${G.crewWords(c).Nom === 'Flotte' ? 'La flotte' : 'L’équipage'} n’a pas encore de bateau.</p>`}
       ${can('ship') && [...mine, ...crewShips].length ? `<div class="mj-row" style="margin-top:10px"><label for="crew-ship">Bateau attitré</label>
         <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)}, ${G.kg(x.capacity)})</option>`).join('')}</select>
         <button class="btn sm" id="crew-ship-go">Choisir</button></div>
-        <p class="note">Un de tes bateaux choisi ici devient celui de l’équipage.</p>` : ''}` : ''}
+        <p class="note">Le bateau attitré donne sa cale à ${G.crewWords(c).le}. Un de tes bateaux choisi ici devient celui ${G.crewWords(c).de}.</p>` : ''}` : ''}
     <h3 class="ed-h">Mes bateaux</h3>
     ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { actions: `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>`, upgrade: true })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}`;
 }
@@ -1931,14 +1931,14 @@ function renderCrew() {
   if (!c && crewTab !== 'ships') crewTab = 'crew';
   const head = c ? `
     <div class="crew-hero">
-      <div class="flag">${c.flag ? `<img src="${imgSrc(c.flag)}" alt="Jolly Roger" onerror="this.replaceWith(document.createTextNode('☠'))">` : ico(1)}</div>
+      <div class="flag">${c.flag ? `<img src="${imgSrc(c.flag)}" alt="${c.kind === 'flotte' ? 'Emblème' : 'Jolly Roger'}" onerror="this.replaceWith(document.createTextNode('☠'))">` : ico(1)}</div>
       <div>
         <h2>${esc(c.name)}</h2>
-        <p class="lede" style="margin:4px 0 0">${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ton grade : <b>${esc(G.rankName(c, S.uid))}</b></p>
+        <p class="lede" style="margin:4px 0 0">${c.kind === 'flotte' ? 'Flotte de la Marine · ' : ''}${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ton grade : <b>${esc(G.rankName(c, S.uid))}</b></p>
       </div>
-    </div>` : `<div class="no-shop">${ico(1)}<h2>Pas d’équipage</h2><p class="note">Tu ne fais partie d’aucun équipage. Un capitaine peut t’inviter.</p></div>`;
+    </div>` : `<div class="no-shop">${ico(1)}<h2>${S.id.faction === 'Marine' ? 'Pas de flotte' : 'Pas d’équipage'}</h2><p class="note">${S.id.faction === 'Marine' ? 'Tu n’es affecté à aucune flotte. Un commandant peut t’inviter.' : 'Tu ne fais partie d’aucun équipage. Un capitaine peut t’inviter.'}</p></div>`;
   const tabs = `<div class="seg crew-seg" role="group" aria-label="Section">
-    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">${c.kind === 'flotte' ? 'Flotte' : 'Équipage'}</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">Cale et banque</button>` : ''}
+    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">${c.kind === 'flotte' ? 'Flotte' : 'Équipage'}</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">${c.kind === 'flotte' ? 'Cale' : 'Cale et banque'}</button>` : ''}
     <button aria-pressed="${crewTab === 'ships'}" data-ct="ships">Bateaux</button></div>`;
   $('v-crew').innerHTML = `${head}${invitesHTML()}${tabs}
     <div class="crew-body">${crewTab === 'ships' ? shipsTabHTML() : !c ? '' : crewTab === 'cargo' ? cargoHTML() : crewTabHTML()}</div>`;
@@ -2020,9 +2020,9 @@ $('v-crew').addEventListener('click', async (e) => {
   const un = e.target.closest('[data-uninvite]')?.dataset.uninvite;
   if (un) return void run({ type: 'crew.invite.cancel', uid: un });
   const kick = e.target.closest('[data-kick]')?.dataset.kick;
-  if (kick && (await askConfirm(`${CREW.memberNames?.[kick] || 'Ce membre'} ne fera plus partie de l’équipage.`, { title: 'Exclure ce membre ?', ok: 'Exclure', danger: true }))) return void run({ type: 'crew.kick', uid: kick });
+  if (kick && (await askConfirm(`${CREW.memberNames?.[kick] || 'Ce membre'} ne fera plus partie de ${G.crewWords(CREW).le}.`, { title: 'Exclure ce membre ?', ok: 'Exclure', danger: true }))) return void run({ type: 'crew.kick', uid: kick });
   const cap = e.target.closest('[data-captain]')?.dataset.captain;
-  if (cap && (await askConfirm(`${CREW.memberNames?.[cap] || 'Ce membre'} deviendra capitaine, et tu passeras au grade de base.`, { title: 'Céder ta place de capitaine ?', ok: 'Céder ma place', danger: true }))) return void run({ type: 'crew.transfer', uid: cap });
+  if (cap && (await askConfirm(`${CREW.memberNames?.[cap] || 'Ce membre'} deviendra ${G.crewWords(CREW).chef}, et tu passeras au grade de base.`, { title: `Céder ta place de ${G.crewWords(CREW).chef} ?`, ok: 'Céder ma place', danger: true }))) return void run({ type: 'crew.transfer', uid: cap });
   const mv = e.target.closest('[data-rank-move]');
   if (mv) {
     e.preventDefault(); // ne pas replier/déplier le grade
@@ -2124,6 +2124,7 @@ function openShipEdit(ship, { player = false } = {}) {
   shipDraftId = ship?.id ?? null;
   shipDraft = structuredClone(ship || { name: '', desc: '', photo: null, icon: null, type: G.SHIP_TYPES[0], cannons: 0, capacity: 100, berths: 4, sail: 1, owner: null, model: null });
   $('sh-title').textContent = shipDraftId ? ship.name : 'Nouveau bateau';
+  if (!shipDraftId && !player && !Object.values(G.ITEMS).some((it) => it.kind === 'bateau')) return toast('Crée d’abord un modèle de bateau dans Gestion.');
   $('sh-sub').textContent = player ? 'Le type, les canons et la capacité sont fixés à la création.' : 'Bateau créé par le staff, ou modèle acheté par un joueur.';
   $('sh-del').hidden = player || !shipDraftId;
   $('sh-err').textContent = '';
@@ -2134,20 +2135,25 @@ function renderShipEdit() {
   const d = shipDraft;
   const models = Object.entries(G.ITEMS).filter(([, it]) => it.kind === 'bateau');
   const ownerVal = d.owner ? `${d.owner.kind}:${d.owner.id}` : '';
+  const isNew = !shipDraftId;
+  if (isNew && !shipAsPlayer && !d.model && models.length) Object.assign(d, { model: models[0][0], ...models[0][1].ship, icon: models[0][1].img, desc: d.desc || models[0][1].desc });
+  const m = d.model ? G.ITEMS[d.model] : null;
   $('sh-body').innerHTML = `
     <div class="form">
-      <div class="wide"><label for="sh-name">Nom du bateau</label><input id="sh-name" value="${esc(d.name)}" maxlength="60"></div>
+      ${!shipAsPlayer && isNew ? `<div class="wide"><label for="sh-model">Modèle (créé dans Gestion)</label><select id="sh-model">${models.map(([k, it]) => `<option value="${esc(k)}" ${d.model === k ? 'selected' : ''}>${esc(it.name)} · cale ${G.kg(it.ship.capacity)}, vitesse ${it.ship.sail}, ${it.ship.berths} places, ${it.ship.cannons} canons</option>`).join('')}</select></div>` : ''}
+      <div class="wide"><label for="sh-name">Nom du bateau</label><input id="sh-name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(m?.name || d.type || '')}"></div>
       ${shipAsPlayer ? '' : `
-        ${!shipDraftId && models.length ? `<div class="wide"><label for="sh-model">À partir d’un modèle (facultatif)</label><select id="sh-model"><option value="">Aucun : caractéristiques libres</option>${models.map(([k, it]) => `<option value="${esc(k)}" ${d.model === k ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</select></div>` : ''}
-        <div><label for="sh-type">Type</label><input id="sh-type" list="ship-types" value="${esc(d.type)}" maxlength="40"></div>
+        ${isNew ? `<p class="note wide" style="margin:0">Type, cale, vitesse, places et canons viennent du modèle. Les améliorations les feront évoluer.</p>` : `
+        <div><label>Type</label><input value="${esc(d.type)}" disabled></div>
         <div><label for="sh-cannons">Canons</label><input id="sh-cannons" type="number" min="0" value="${d.cannons}"></div>
-        <div><label for="sh-cap">Capacité de stockage (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
+        <div><label for="sh-cap">Cale (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
         <div><label for="sh-berths">Places (personnes)</label><input id="sh-berths" type="number" min="1" value="${d.berths ?? 4}"></div>
-        <div><label for="sh-sail">Niveau de voile (vitesse)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
-        <div><label for="sh-pos">À quai dans le salon (ID)</label><input id="sh-pos" inputmode="numeric" value="${esc(d.positionId ?? d.position?.channelId ?? '')}" placeholder="ID du salon, vide = nulle part"><small class="note">${d.position ? `Actuellement : #${esc(d.position.name || d.position.channelId)}` : 'Pas à quai'}</small></div>
+        <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>`}
         <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
-          <optgroup label="Équipages">${Object.entries(fleet.crews || {}).map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
-          <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>`}
+          <optgroup label="Flottes de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
+          <optgroup label="Équipages">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind !== 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
+          <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>
+        <div><label for="sh-pos">À quai dans le salon (ID)</label><input id="sh-pos" inputmode="numeric" value="${esc(d.positionId ?? d.position?.channelId ?? '')}" placeholder="ID du salon, vide = nulle part"><small class="note">${d.position ? `Actuellement : #${esc(d.position.name || d.position.channelId)}` : 'Pas à quai'}</small></div>`}
       <div class="wide"><label for="sh-desc">Description</label><textarea id="sh-desc" maxlength="600" rows="3" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px">${esc(d.desc)}</textarea></div>
     </div>
     <div class="img-field" style="margin-top:12px">
@@ -2164,11 +2170,12 @@ function readShipEdit() {
   d.name = $('sh-name').value;
   d.desc = $('sh-desc').value;
   if (shipAsPlayer) return;
-  d.type = $('sh-type').value;
-  d.cannons = Math.max(0, Math.round(+$('sh-cannons').value || 0));
-  d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
-  d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
-  d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
+  if ($('sh-cannons')) {
+    d.cannons = Math.max(0, Math.round(+$('sh-cannons').value || 0));
+    d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
+    d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
+    d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
+  }
   d.positionId = $('sh-pos').value.trim();
   const o = $('sh-owner').value;
   d.owner = o ? { kind: o.split(':')[0], id: o.slice(o.indexOf(':') + 1) } : null;
@@ -2178,7 +2185,7 @@ $('d-ship').addEventListener('change', async (e) => {
     readShipEdit();
     const m = G.ITEMS[e.target.value];
     shipDraft.model = e.target.value || null;
-    if (m) Object.assign(shipDraft, { ...m.ship, name: shipDraft.name || m.name, desc: shipDraft.desc || m.desc, icon: m.img });
+    if (m) Object.assign(shipDraft, { ...m.ship, desc: shipDraft.desc || m.desc, icon: m.img });
     renderShipEdit();
   }
   if (e.target.id === 'sh-file') {
@@ -2207,7 +2214,8 @@ $('d-ship').addEventListener('click', (e) => {
 });
 $('sh-save').addEventListener('click', async () => {
   readShipEdit();
-  if (!shipDraft.name.trim()) return void ($('sh-err').textContent = 'Donne un nom au bateau.');
+  if (!shipDraft.name.trim()) shipDraft.name = shipDraft.type || G.ITEMS[shipDraft.model]?.name || ''; // sans nom : celui du type
+  if (!shipDraft.name) return void ($('sh-err').textContent = 'Donne un nom au bateau.');
   $('sh-save').disabled = true;
   $('sh-err').textContent = shipDraft.photo?.startsWith('data:') ? 'Envoi de la photo…' : '';
   try {
@@ -2271,7 +2279,7 @@ function renderMarine() {
     ${fleets.length ? `<div class="fleet-list">${fleets.map(([id, c]) => `
       <button class="gest-card" data-crew="${esc(id)}">
         <span class="slot-ico">${c.flag ? `<span class="ico item-img"><img src="${imgSrc(c.flag)}" alt=""></span>` : ico(160)}</span>
-        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ${berry(c.bank || 0)}</small></span>
+        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''}${(() => { const n = Object.values(fleet.ships || {}).filter((sh) => sh.owner?.kind === 'crew' && sh.owner.id === id).length; return ` · ${n} bateau${n > 1 ? 'x' : ''}`; })()}${c.ship && fleet.ships?.[c.ship] ? ` (attitré : ${esc(fleet.ships[c.ship].name)})` : ''}</small></span>
       </button>`).join('')}</div>` : '<p class="note">Aucune flotte.</p>'}`;
   paintStatic($('v-marine'));
 }
@@ -2301,61 +2309,81 @@ $('v-marine').addEventListener('click', async (e) => {
   if (e.target.closest('#marine-fleet')) {
     fleetKindNew = 'flotte';
     openCrewEdit(null);
-    fleetKindNew = 'equipage';
   }
 });
 
 /* ═══ Flotte (panneau admin) : équipages et bateaux ══════════════════════ */
-let fleet = { crews: null, ships: null }, fleetTab = 'crews';
+let fleet = { crews: null, ships: null };
 async function loadFleet() {
   try {
     const out = await API.staff('crews');
     fleet = { crews: out.crews, ships: out.ships };
     if (screen === 'marine') renderMarine();
+    if (screen === 'ships') renderShipsAdmin();
   } catch (err) {
     fleet = { crews: {}, ships: {} };
     toast(esc(err.message));
   }
   renderFleet();
 }
-const ownerName = (o) => !o ? 'Sans propriétaire' : o.kind === 'crew' ? `Équipage : ${fleet.crews?.[o.id]?.name ?? '?'}` : `Joueur : ${G.fullName({ id: players.find((p) => p.uid === o.id)?.ident || {} })}`;
+const ownerName = (o) => {
+  if (!o) return 'Sans propriétaire';
+  if (o.kind === 'crew') {
+    const c = fleet.crews?.[o.id];
+    return `${c?.kind === 'flotte' ? 'Flotte' : 'Équipage'} : ${c?.name ?? '?'}`;
+  }
+  return `Joueur : ${G.fullName({ id: players.find((p) => p.uid === o.id)?.ident || {} })}`;
+};
+/** Écran Équipages (panneau admin) : équipages pirates seulement. Les flottes sont dans l'écran Marine. */
 function renderFleet() {
   if (!tools()) return;
   const el = $('v-fleet');
   if (!fleet.crews) return void (el.innerHTML = '<p class="note">Chargement…</p>');
-  const crews = Object.entries(fleet.crews).sort((a, b) => a[1].name.localeCompare(b[1].name));
-  const ships = Object.entries(fleet.ships).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const crews = Object.entries(fleet.crews).filter(([, c]) => c.kind !== 'flotte').sort((a, b) => a[1].name.localeCompare(b[1].name));
   el.innerHTML = `
     <div class="sec-head">
-      <div><h2>Flotte</h2><p class="lede" style="margin:0">Les équipages et les bateaux du RP.</p></div>
-      <button class="btn" id="fleet-new">${fleetTab === 'crews' ? '+ Nouvel équipage' : '+ Nouveau bateau'}</button>
+      <div><h2>Équipages</h2><p class="lede" style="margin:0">Les équipages du RP. Les flottes de la Marine sont dans l’écran Marine.</p></div>
+      <button class="btn" id="fleet-new">+ Nouvel équipage</button>
     </div>
-    <div class="seg" role="group" aria-label="Section">
-      <button aria-pressed="${fleetTab === 'crews'}" data-ft="crews">Équipages (${crews.length})</button>
-      <button aria-pressed="${fleetTab === 'ships'}" data-ft="ships">Bateaux (${ships.length})</button>
+    ${crews.length ? `<div class="fleet-list">${crews.map(([id, c]) => {
+      const owned = Object.values(fleet.ships).filter((sh) => sh.owner?.kind === 'crew' && sh.owner.id === id).length;
+      return `<button class="gest-card" data-crew="${esc(id)}">
+        <span class="slot-ico flag-mini">${c.flag ? `<span class="ico item-img"><img src="${imgSrc(c.flag)}" alt=""></span>` : ico(1)}</span>
+        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ${berry(c.bank || 0)} · ${owned} bateau${owned > 1 ? 'x' : ''}${c.ship && fleet.ships[c.ship] ? ` (attitré : ${esc(fleet.ships[c.ship].name)})` : ''}</small></span>
+      </button>`;
+    }).join('')}</div>` : '<p class="note">Aucun équipage.</p>'}`;
+  paintStatic(el);
+}
+/** Écran Bateaux (panneau admin). */
+function renderShipsAdmin() {
+  if (!tools()) return;
+  const el = $('v-ships');
+  if (!fleet.ships) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const ships = Object.entries(fleet.ships).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const models = Object.values(G.ITEMS).filter((it) => it.kind === 'bateau').length;
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Bateaux</h2><p class="lede" style="margin:0">Tous les bateaux, achetés, fabriqués ou créés ici à partir d’un modèle.</p></div>
+      <button class="btn" id="ships-new" ${models ? '' : 'disabled title="Crée d’abord un modèle dans Gestion (catégorie Bateau)"'}>+ Nouveau bateau</button>
     </div>
-    ${fleetTab === 'crews'
-      ? crews.length ? `<div class="fleet-list">${crews.map(([id, c]) => `
-          <button class="gest-card" data-crew="${esc(id)}">
-            <span class="slot-ico flag-mini">${c.flag ? `<span class="ico item-img"><img src="${imgSrc(c.flag)}" alt=""></span>` : ico(1)}</span>
-            <span><b>${esc(c.name)}</b><small>${c.kind === 'flotte' ? '⚓ Flotte de la Marine · ' : ''}${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ${berry(c.bank || 0)}${c.ship && fleet.ships[c.ship] ? ` · ${esc(fleet.ships[c.ship].name)}` : ''}</small></span>
-          </button>`).join('')}</div>` : '<p class="note">Aucun équipage.</p>'
-      : ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => `
-          <button class="gest-card" data-ship="${esc(id)}">
-            <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${imgSrc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
-            <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · ${sh.berths ?? 4} places · voile ${sh.sail ?? 1} · ${sh.cannons} canons · ${G.kg(sh.capacity)}<br>${esc(ownerName(sh.owner))}${sh.position ? ` · ⚓ #${esc(sh.position.name || sh.position.channelId)}` : ''}</small></span>
-          </button>`).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
+    ${models ? '' : '<p class="note">Aucun modèle de bateau : crée-en un dans Gestion, catégorie « Bateau » (le nom est le type, ex. Voilier).</p>'}
+    ${ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => `
+      <button class="gest-card" data-ship="${esc(id)}">
+        <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${imgSrc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
+        <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · cale ${G.kg(sh.capacity)} · vitesse ${sh.sail ?? 1} · ${sh.berths ?? 4} places · ${sh.cannons} canons<br>${esc(ownerName(sh.owner))}${sh.position ? ` · ⚓ #${esc(sh.position.name || sh.position.channelId)}` : ''}</small></span>
+      </button>`).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
   paintStatic(el);
 }
 $('v-fleet').addEventListener('click', (e) => {
-  const ft = e.target.closest('[data-ft]')?.dataset.ft;
-  if (ft) {
-    fleetTab = ft;
-    return renderFleet();
+  if (e.target.closest('#fleet-new')) {
+    fleetKindNew = 'equipage';
+    return openCrewEdit(null);
   }
-  if (e.target.closest('#fleet-new')) return fleetTab === 'crews' ? openCrewEdit(null) : openShipEdit(null);
   const c = e.target.closest('[data-crew]')?.dataset.crew;
   if (c) return openCrewEdit(c);
+});
+$('v-ships').addEventListener('click', (e) => {
+  if (e.target.closest('#ships-new')) return openShipEdit(null);
   const sh = e.target.closest('[data-ship]')?.dataset.ship;
   if (sh) return openShipEdit({ id: sh, ...fleet.ships[sh] });
 });
@@ -2366,7 +2394,7 @@ function openCrewEdit(id) {
   crewDraftId = id;
   crewDraft = structuredClone(id ? fleet.crews[id] : { kind: fleetKindNew, name: '', flag: null, captain: null, members: [], bank: 0, chest: {}, ship: null });
   crewQuery = '';
-  $('cr-title').textContent = id ? crewDraft.name : 'Nouvel équipage';
+  $('cr-title').textContent = id ? crewDraft.name : crewDraft.kind === 'flotte' ? 'Nouvelle flotte' : 'Nouvel équipage';
   $('cr-del').hidden = !id;
   $('cr-err').textContent = '';
   renderCrewEdit();
@@ -2375,26 +2403,26 @@ function openCrewEdit(id) {
 function renderCrewEdit() {
   const d = crewDraft;
   const q = normTxt(crewQuery);
-  const list = players.filter((p) => !q || normTxt(G.fullName({ id: p.ident })).includes(q) || d.members.includes(p.uid));
+  const list = players.filter((p) => (d.kind !== 'flotte' || p.ident.faction === 'Marine' || d.members.includes(p.uid)) && (!q || normTxt(G.fullName({ id: p.ident })).includes(q) || d.members.includes(p.uid)));
   $('cr-body').innerHTML = `
     <div class="form">
       <div class="wide"><label for="cr-name">Nom</label><input id="cr-name" value="${esc(d.name)}" maxlength="60"></div>
-      <div><label for="cr-kind">Type</label><select id="cr-kind">${Object.entries(G.CREW_KINDS).map(([k, l]) => `<option value="${k}" ${(d.kind || 'equipage') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div><label for="cr-bank">Banque (berrys)</label><input id="cr-bank" type="number" min="0" value="${d.bank || 0}"></div>
-      <div><label for="cr-ship">Bateau de l’équipage</label><select id="cr-ship"><option value="">Aucun</option>${Object.entries(fleet.ships || {}).map(([sid, sh]) => `<option value="${esc(sid)}" ${d.ship === sid ? 'selected' : ''}>${esc(sh.name)} (${esc(sh.type)}, ${G.kg(sh.capacity)})</option>`).join('')}</select></div>
+      <input type="hidden" id="cr-kind" value="${d.kind || 'equipage'}">
+      ${d.kind === 'flotte' ? '<input type="hidden" id="cr-bank" value="0">' : `<div><label for="cr-bank">Banque (berrys)</label><input id="cr-bank" type="number" min="0" value="${d.bank || 0}"></div>`}
+      <div><label for="cr-ship">Bateau attitré</label><select id="cr-ship"><option value="">Aucun</option>${Object.entries(fleet.ships || {}).map(([sid, sh]) => `<option value="${esc(sid)}" ${d.ship === sid ? 'selected' : ''}>${esc(sh.name)} (${esc(sh.type)}, ${G.kg(sh.capacity)})</option>`).join('')}</select></div>
     </div>
     <div class="img-field" style="margin-top:12px">
       <div class="prev flag-prev">${d.flag ? `<img src="${imgSrc(d.flag)}" alt="">` : ico(1)}</div>
       <div class="se-face-ctl">
-        <b>Jolly Roger</b>
+        <b>${d.kind === 'flotte' ? 'Emblème' : 'Jolly Roger'}</b>
         <div class="se-row"><button type="button" class="btn sm" id="cr-pick">Choisir une image</button><input type="file" id="cr-file" accept="image/*" hidden>${d.flag ? '<button type="button" class="btn sm ghost" id="cr-noflag">Retirer</button>' : ''}</div>
         <div class="ph-url-row"><input type="url" id="cr-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="cr-url-go">Utiliser</button></div>
       </div>
     </div>
-    <h3 class="ed-h">Membres (${d.members.length})</h3>
+    <h3 class="ed-h">Membres (${d.members.length})${d.kind === 'flotte' ? ' <small class="note">Marines uniquement</small>' : ''}</h3>
     <input class="mj-search" id="cr-q" type="search" placeholder="Chercher un joueur…" value="${esc(crewQuery)}">
-    <div class="member-pick">${list.map((p) => `<label><input type="checkbox" data-member="${esc(p.uid)}" ${d.members.includes(p.uid) ? 'checked' : ''}> ${esc(G.fullName({ id: p.ident }))}${p.crewId && p.crewId !== crewDraftId ? ` <small class="note">(dans ${esc(fleet.crews?.[p.crewId]?.name ?? 'un autre équipage')}, il le quittera)</small>` : ''}</label>`).join('') || '<p class="note">Aucun joueur.</p>'}</div>
-    <div class="field"><label for="cr-cap">Capitaine</label><select id="cr-cap">${d.members.map((u) => `<option value="${esc(u)}" ${u === d.captain ? 'selected' : ''}>${esc(G.fullName({ id: players.find((p) => p.uid === u)?.ident || {} }))}</option>`).join('') || '<option value="">Ajoute d’abord des membres</option>'}</select></div>
+    <div class="member-pick">${list.map((p) => `<label><input type="checkbox" data-member="${esc(p.uid)}" ${d.members.includes(p.uid) ? 'checked' : ''}> ${esc(G.fullName({ id: p.ident }))}${p.crewId && p.crewId !== crewDraftId ? ` <small class="note">(dans ${esc(fleet.crews?.[p.crewId]?.name ?? 'un autre groupe')}, il le quittera)</small>` : ''}</label>`).join('') || '<p class="note">Aucun joueur.</p>'}</div>
+    <div class="field"><label for="cr-cap">${d.kind === 'flotte' ? 'Commandant' : 'Capitaine'}</label><select id="cr-cap">${d.members.map((u) => `<option value="${esc(u)}" ${u === d.captain ? 'selected' : ''}>${esc(G.fullName({ id: players.find((p) => p.uid === u)?.ident || {} }))}</option>`).join('') || '<option value="">Ajoute d’abord des membres</option>'}</select></div>
     ${Object.keys(d.chest || {}).length ? `<h3 class="ed-h">Coffre (${G.kg(G.chestWeight(d))})</h3><div class="chest">${Object.entries(d.chest).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>` : ''}`;
 }
 function readCrewEdit() {
@@ -2739,6 +2767,7 @@ function renderAll() {
     renderGestion();
     renderAdminShops();
     renderFleet();
+    renderShipsAdmin();
     if (has) {
       renderHero();
       [renderPerso, renderTech, renderInv, renderJob, renderMjTab].forEach((f) => f());
@@ -2777,6 +2806,7 @@ function showScreen(name) {
   });
   if (name === 'ashop') renderAdminShops();
   if (name === 'fleet') renderFleet();
+  if (name === 'ships') renderShipsAdmin();
   if (name === 'marine') renderMarine();
   if (name === 'crew') renderCrew();
   if (name === 'shop') {

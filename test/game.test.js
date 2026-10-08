@@ -402,3 +402,17 @@ test('modèle de bateau : le nom est le type, pas de poids', () => {
   assert.equal(it.weight, 0);
   assert.deepEqual([it.ship.capacity, it.ship.sail, it.ship.berths, it.ship.cannons], [250, 3, 5, 0]);
 });
+
+test('flottes : pas de banque, cale ouverte à tous, mots adaptés', () => {
+  cat();
+  const flotte = G.normalizeCrew({ id: 'f', kind: 'flotte', name: 'Flotte du Nord', members: ['cmd', 'm'], bank: 9999, chest: { 'bois-ex': 2 } });
+  assert.equal(flotte.bank, 0);
+  assert.deepEqual(Object.keys(G.permsFor(flotte)).filter((k) => k.startsWith('bank')), []);
+  const m = G.normalize({ uid: 'm', id: { name: 'M', faction: 'Marine' }, berry: 100 });
+  assert.throws(() => G.crewAction(m, { type: 'crew.bank.deposit', amount: 10 }, { crew: flotte }), /pas de banque/);
+  // simple membre : peut prendre dans la cale sans permission particulière
+  const r = G.crewAction(m, { type: 'crew.chest.withdraw', key: 'bois-ex', qty: 1 }, { crew: flotte });
+  assert.equal(G.count(r.player, 'bois-ex'), 1);
+  assert.throws(() => G.crewAction(G.normalize({ uid: 'x', id: { name: 'X' } }), { type: 'crew.chest.withdraw', key: 'bois-ex' }, { crew: flotte }), /cette flotte/);
+  assert.equal(G.crewWords(flotte).chef, 'commandant');
+});

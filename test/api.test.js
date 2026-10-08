@@ -275,9 +275,13 @@ test('équipage : banque et coffre par les joueurs, retrait d’argent réservé
 });
 
 test('bateaux : création par le staff, achat en boutique, renommage, assignation à l’équipage', async () => {
-  let r = await call('staff', { body: { op: 'ship.save', ship: { name: 'Le Vaillant', type: 'Frégate', cannons: 20, capacity: 800, owner: { kind: 'player', id: 'u1' } } }, headers: MJ });
+  let r = await call('staff', { body: { op: 'ship.save', ship: { name: 'Sans modèle', owner: { kind: 'player', id: 'u1' } } }, headers: MJ });
+  assert.equal(r.status, 400, 'un modèle est obligatoire');
+  await call('staff', { body: { op: 'item.save', item: { name: 'Frégate', kind: 'bateau', value: 1, ship: { cannons: 20, capacity: 800, berths: 12, sail: 2 } } }, headers: MJ });
+  r = await call('staff', { body: { op: 'ship.save', ship: { model: 'fregate', name: 'Le Vaillant', capacity: 999999, owner: { kind: 'player', id: 'u1' } } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(r.out.id, 'le-vaillant');
+  assert.deepEqual([r.out.ship.type, r.out.ship.capacity, r.out.ship.cannons], ['Frégate', 800, 20], 'les chiffres viennent du modèle');
   await call('staff', { body: { op: 'item.save', item: { name: 'Caravelle', kind: 'bateau', value: 1000, ship: { type: 'Caravelle', cannons: 4, capacity: 300 } } }, headers: MJ });
   await call('staff', { body: { op: 'shop.save', channelId: '111111111111111111', shop: { name: 'Chantier', seller: 'Franky', items: [['caravelle', 100, 1]] } }, headers: MJ });
   await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'berry', amount: 1000 } }, headers: MJ });
@@ -306,7 +310,7 @@ test('équipage : grades, invitation et arrivée d’un joueur, exclusion', asyn
   const U9 = { authorization: 'Bearer tok-u9' };
   USERS['tok-u9'] = { id: 'u9', username: 'nami' };
   // u1 est capitaine des Mouettes : il crée un grade et cherche u9
-  let r = await call('action', { body: { action: { type: 'crew.rank.save', name: 'Navigatrice', perms: { chestOut: true } } }, headers: J });
+  let r = await call('action', { body: { action: { type: 'crew.rank.save', name: 'Navigatrice', perms: { invite: true } } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   r = await call('action', { body: { action: { type: 'crew.search', q: 'nami' } }, headers: J });
   assert.deepEqual(r.out.results.map((x) => x.uid), ['u9']);
@@ -382,7 +386,8 @@ test('navigation : bateaux à quai, demande d’embarquement acceptée par le pr
   const C1 = '111111111111111111';
   // u2 (MJ) possède un bateau à quai dans C1
   await call('bot', { body: { op: 'register', userId: 'u2', name: 'Le MJ', race: 'Humain', classe: 'Fighter' }, headers: { 'x-bot-secret': 'secret' } }).catch(() => {});
-  let r = await call('staff', { body: { op: 'ship.save', ship: { name: 'Le Marchand', type: 'Brick', cannons: 2, capacity: 100, berths: 2, owner: { kind: 'player', id: 'u2' }, positionId: C1 } }, headers: MJ });
+  await call('staff', { body: { op: 'item.save', item: { name: 'Brick', kind: 'bateau', value: 1, ship: { cannons: 2, capacity: 100, berths: 2, sail: 1 } } }, headers: MJ });
+  let r = await call('staff', { body: { op: 'ship.save', ship: { model: 'brick', name: 'Le Marchand', owner: { kind: 'player', id: 'u2' }, positionId: C1 } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.deepEqual(r.out.ship.position, { channelId: C1, name: 'port-brisant' });
   // u1 voit le bateau à quai et demande à monter
@@ -405,7 +410,7 @@ test('navigation : bateaux à quai, demande d’embarquement acceptée par le pr
   const slot = tables.players.get('u2').data.inv.findIndex((x) => x && x[0] === 'voile-renforcee');
   r = await call('action', { body: { channelId: C1, action: { type: 'ship.upgrade', shipId: sh.id, slot } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
-  assert.equal(tables.ships.get(sh.id).data.sail, 3);
+  assert.equal(tables.ships.get(sh.id).data.sail, 3, 'voile 1 + 2');
   assert.equal(tables.players.get('u2').data.inv.some((x) => x && x[0] === 'voile-renforcee'), false);
 });
 
@@ -429,4 +434,11 @@ test('Marine : solde versée à l’ouverture, flotte réservée aux Marines', a
   r = await call('staff', { body: { op: 'crew.save', crew: { kind: 'flotte', name: 'Flotte du Nord', members: ['m1'] } }, headers: MJ });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(r.out.crew.kind, 'flotte');
+});
+
+test('bateau donné à une flotte sans bateau attitré : il le devient', async () => {
+  await call('staff', { body: { op: 'crew.save', id: 'flotte-du-nord', crew: { ship: null } }, headers: MJ });
+  const r = await call('staff', { body: { op: 'ship.save', ship: { model: 'brick', name: 'Le Garde-Côte', owner: { kind: 'crew', id: 'flotte-du-nord' } } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(tables.crews.get('flotte-du-nord').data.ship, r.out.id);
 });

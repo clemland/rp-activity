@@ -178,7 +178,7 @@ test('bateau : achat en boutique, nom/photo par le propriétaire', () => {
   const r = G.playerAction(p, { type: 'shop.buy', key: 'caravelle-ex' }, { shop, now: 5 });
   assert.equal(r.newShip.name, 'Caravelle', 'le nom de son type, à personnaliser ensuite');
   assert.equal(r.newShip.type, 'Caravelle');
-  assert.equal(r.newShip.cannons, 4);
+  assert.equal(r.newShip.cannons, 0, 'canons au départ du modèle');
   assert.equal(r.newShip.capacity, 300);
   assert.deepEqual(r.newShip.owner, { kind: 'player', id: 'demo' });
   assert.equal(G.count(r.player, 'caravelle-ex'), 0, 'pas dans l’inventaire');
@@ -393,4 +393,12 @@ test('bateau fabriqué : sort à quai dans le salon, avec le nom de son type', (
   assert.deepEqual(r.newShips[0].position, { channelId: 'c9', name: 'chantier' });
   assert.equal(G.count(r.player, 'caravelle-ex'), 0);
   assert.equal(G.count(r.player, 'clous-ex'), 4);
+});
+
+test('modèle de bateau : le nom est le type, pas de poids', () => {
+  cat();
+  const it = G.normalizeItem({ name: 'Voilier', kind: 'bateau', weight: 50, ship: { type: 'autre chose', capacity: 250, sail: 3, berths: 5 } });
+  assert.equal(it.ship.type, 'Voilier');
+  assert.equal(it.weight, 0);
+  assert.deepEqual([it.ship.capacity, it.ship.sail, it.ship.berths, it.ship.cannons], [250, 3, 5, 0]);
 });

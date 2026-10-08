@@ -2499,7 +2499,7 @@ function renderGestion() {
       ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
           <button class="gest-card" data-item="${esc(id)}">
             <span class="slot-ico">${itemIco(id)}</span>
-            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'} · ${G.kg(it.weight || 0)}${it.kind === 'bateau' ? ` · ${it.ship.berths} places, ${it.ship.cannons} canons, cale ${G.kg(it.ship.capacity)}` : ''}${it.kind === 'amelioration' ? ` · +${fmt(it.upgrade.amount)} ${G.UPGRADES[it.upgrade.type].unit}` : ''}</small></span>
+            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'}${it.kind === 'bateau' ? ` · cale ${G.kg(it.ship.capacity)}, vitesse ${it.ship.sail}, ${it.ship.berths} places${it.ship.cannons ? `, ${it.ship.cannons} canons` : ''}` : ` · ${G.kg(it.weight || 0)}`}${it.kind === 'amelioration' ? ` · +${fmt(it.upgrade.amount)} ${G.UPGRADES[it.upgrade.type].unit}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
           <button class="gest-card" data-recipe="${esc(id)}">
@@ -2554,13 +2554,12 @@ function openItemEdit(id = null) {
   $('it-kind').innerHTML = Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === itemDraft.kind ? 'selected' : ''}>${l}</option>`).join('');
   $('it-value').value = itemDraft.value;
   $('it-weight').value = itemDraft.weight ?? 0;
-  const sh = itemDraft.ship || { type: G.SHIP_TYPES[0], cannons: 0, capacity: 100 };
-  $('it-stype').value = sh.type;
+  const sh = itemDraft.ship || { cannons: 0, capacity: 100, berths: 4, sail: 1 };
   $('it-cannons').value = sh.cannons;
   $('it-cap').value = sh.capacity;
   $('it-berths').value = sh.berths ?? 4;
   $('it-sail').value = sh.sail ?? 1;
-  $('it-ship').hidden = itemDraft.kind !== 'bateau';
+  syncItemKind(itemDraft.kind);
   const up = itemDraft.upgrade || { type: 'cale', amount: 100 };
   $('it-utype').innerHTML = Object.entries(G.UPGRADES).map(([k, u]) => `<option value="${k}" ${k === up.type ? 'selected' : ''}>${u.name} (+ ${u.unit})</option>`).join('');
   $('it-uamount').value = up.amount;
@@ -2576,9 +2575,17 @@ function showItemImg() {
   $('it-preview').innerHTML = itemDraft.img ? `<img src="${imgSrc(itemDraft.img)}" alt="">` : ico(KIND_ICON[$('it-kind').value] ?? 237);
   $('it-noimg').hidden = !itemDraft.img;
 }
+/** Champs propres à la catégorie : pour un bateau, le nom est le type et il n'y a pas de poids. */
+function syncItemKind(kind) {
+  const ship = kind === 'bateau';
+  $('it-ship').hidden = !ship;
+  $('it-upg').hidden = kind !== 'amelioration';
+  $('it-weight-box').hidden = ship;
+  $('it-name-label').textContent = ship ? 'Type de bateau (sert de nom, ex. Voilier)' : 'Nom';
+  $('it-name').setAttribute('list', ship ? 'ship-types' : '');
+}
 $('it-kind').addEventListener('change', () => {
-  $('it-ship').hidden = $('it-kind').value !== 'bateau';
-  $('it-upg').hidden = $('it-kind').value !== 'amelioration';
+  syncItemKind($('it-kind').value);
   showItemImg();
 });
 $('it-pick').addEventListener('click', () => $('it-file').click());
@@ -2603,7 +2610,7 @@ $('it-noimg').addEventListener('click', () => {
 $('it-save').addEventListener('click', () => {
   const item = {
     name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
-    ship: { type: $('it-stype').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
+    ship: { cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');

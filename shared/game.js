@@ -281,8 +281,8 @@ export function normalizeItem(x) {
     name,
     kind,
     value: int(x.value, 0, 1e12),
-    weight: Math.round(Math.min(1e5, Math.max(0, Number(String(x.weight ?? 0).replace(',', '.')) || 0)) * 10) / 10,
-    ...(kind === 'bateau' && { ship: normalizeShipStats(x.ship || {}) }),
+    weight: kind === 'bateau' ? 0 : Math.round(Math.min(1e5, Math.max(0, Number(String(x.weight ?? 0).replace(',', '.')) || 0)) * 10) / 10,
+    ...(kind === 'bateau' && { ship: { ...normalizeShipStats(x.ship || {}), type: name } }), // le nom est le type
     ...(kind === 'amelioration' && { upgrade: { type: UPGRADES[x.upgrade?.type] ? x.upgrade.type : 'cale', amount: int(x.upgrade?.amount ?? 1, 1, 1e6) } }),
     desc: str(x.desc, 400),
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
@@ -1033,7 +1033,7 @@ export function demoCatalog() {
       'clous-ex': { name: 'Clous (exemple)', kind: 'mat', value: 200, weight: 0.5, desc: 'Objet d’exemple de la démo.', img: null },
       'tonneau-ex': { name: 'Tonneau (exemple)', kind: 'objet', value: 2000, weight: 15, desc: 'Objet d’exemple de la démo.', img: null },
       'sabre-ex': { name: 'Sabre (exemple)', kind: 'arme', value: 8000, weight: 3, desc: 'Une arme d’exemple.', img: null },
-      'caravelle-ex': { name: 'Caravelle (exemple)', kind: 'bateau', value: 150000, weight: 0, ship: { type: 'Caravelle', cannons: 4, capacity: 300, berths: 6, sail: 2 }, desc: 'Petit navire rapide, idéal pour débuter.', img: null },
+      'caravelle-ex': { name: 'Caravelle', kind: 'bateau', value: 150000, weight: 0, ship: { type: 'Caravelle', cannons: 0, capacity: 300, berths: 6, sail: 2 }, desc: 'Petit navire rapide, idéal pour débuter.', img: null },
       'cale-ex': { name: 'Extension de cale (exemple)', kind: 'amelioration', value: 20000, weight: 20, upgrade: { type: 'cale', amount: 200 }, desc: 'Fabriquée par un charpentier.', img: null },
     },
     recipes: {

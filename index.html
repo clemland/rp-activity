@@ -189,10 +189,10 @@
     </div>
     <div class="panel-body">
       <div class="form">
-        <div class="wide"><label for="it-name">Nom</label><input id="it-name" maxlength="60"></div>
+        <div class="wide"><label for="it-name" id="it-name-label">Nom</label><input id="it-name" maxlength="60"></div>
         <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
         <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
-        <div><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
+        <div id="it-weight-box"><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
         <div class="wide it-ship" id="it-upg" hidden>
           <div class="form">
             <div><label for="it-utype">Effet</label><select id="it-utype"></select></div>
@@ -202,13 +202,12 @@
         </div>
         <div class="wide it-ship" id="it-ship" hidden>
           <div class="form">
-            <div><label for="it-stype">Type de bateau</label><input id="it-stype" list="ship-types" maxlength="40"></div>
-            <div><label for="it-cannons">Canons</label><input id="it-cannons" type="number" min="0" inputmode="numeric"></div>
-            <div><label for="it-cap">Capacité de stockage (kg)</label><input id="it-cap" type="number" min="0" inputmode="numeric"></div>
+            <div><label for="it-cap">Cale au départ (kg)</label><input id="it-cap" type="number" min="0" inputmode="numeric"></div>
+            <div><label for="it-sail">Vitesse (niveau de voile)</label><input id="it-sail" type="number" min="1" inputmode="numeric"></div>
             <div><label for="it-berths">Places (personnes)</label><input id="it-berths" type="number" min="1" inputmode="numeric"></div>
-            <div><label for="it-sail">Niveau de voile</label><input id="it-sail" type="number" min="1" inputmode="numeric"></div>
+            <div><label for="it-cannons">Canons au départ</label><input id="it-cannons" type="number" min="0" inputmode="numeric"></div>
           </div>
-          <p class="note" style="margin:4px 0 0">Un objet « Bateau » est un modèle : acheté en boutique, il devient un vrai bateau que le joueur peut nommer.</p>
+          <p class="note" style="margin:4px 0 0">Le nom de l’objet est le type de bateau. Acheté en boutique ou fabriqué, il devient un vrai bateau qui porte ce nom, puis son propriétaire le personnalise.</p>
         </div>
         <div class="wide"><label for="it-desc">Description</label><input id="it-desc" maxlength="400"></div>
       </div>

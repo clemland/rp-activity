@@ -1806,7 +1806,7 @@ function invitesHTML() {
       <span><b>${esc(i.name)}</b><small>${i.members} membre${i.members > 1 ? 's' : ''}${i.byName ? ` · invité par ${esc(i.byName)}` : ''}</small></span>
       <span class="invite-acts"><button class="btn sm" data-join="${esc(i.id)}">Rejoindre</button><button class="btn sm ghost" data-decline="${esc(i.id)}">Refuser</button></span>
     </div>`).join('')}
-    ${CREW ? '<p class="note" style="margin:0">En rejoindre un autre te fera quitter ${G.crewWords(CREW).le}.</p>' : ''}
+    ${CREW ? `<p class="note" style="margin:0">En rejoindre un autre te fera quitter ${G.crewWords(CREW).le}.</p>` : ''}
   </section>`;
 }
 function crewTabHTML() {

@@ -1203,3 +1203,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .upg-box{display:grid;gap:4px;border:2px dashed rgba(23,37,94,.35);border-radius:8px;padding:8px 10px;background:#fffaea}
 .upg-hist summary{cursor:pointer;font-weight:700;font-size:14px}
 .upg-hist ul{margin:4px 0 0;padding-left:18px;font-size:14px}
+
+/* ═══ v31 : contours carrés pour toutes les images ═══ */
+.slot-ico,.face,.mini-face,.flag,.mini-flag,.ship-pic,.t-thumb,.t-media,.val-media,.tf-preview,.img-field .prev,.it-preview,
+.se-face .face,.counter .face,.mj-player .av,.ph-stage,.portrait,.ico.item-img,.ico.item-img img,
+.ship-pic img,.flag img,.t-thumb img,.t-media img,.val-media img,.face img,.mini-face img,.counter .face img{border-radius:0!important}

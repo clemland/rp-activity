@@ -9,7 +9,7 @@ import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipLi
 import { read, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { invitesFor } from './_lib/context.js';
-import { playerAction, crewAction, inviteAction, normalizeCrew, crewCan, slug, fullName } from '../shared/game.js';
+import { playerAction, crewAction, inviteAction, normalizeCrew, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
@@ -27,16 +27,19 @@ export default handler(['POST'], async (req, body) => {
   if (action.type === 'ship.edit' && action.photo) action.photo = await ingest(action.photo, 'bateaux', me.uid);
   if (action.type === 'crew.edit' && action.flag) action.flag = await ingest(action.flag, 'pavillons', me.uid);
 
-  await loadCatalog();
+  // Équipage et bateaux : chargés seulement pour les actions qui en ont besoin.
+  const [, first] = await Promise.all([loadCatalog(), loadPlayer(me.uid)]);
+  let firstTry = true;
   return retry(async () => {
-    const { player, version } = await loadPlayer(me.uid);
+    const { player, version } = firstTry ? first : await loadPlayer(me.uid);
+    firstTry = false;
     const ctx = { channelId, now: Date.now() };
-    const cs = await loadCrewAndShips(player);
-    const reply = (out, extra = {}) => ({
-      ...out, ...extra,
-      crew: publicCrew(extra.crew ?? cs.crew, cs.memberNames),
-      ships: shipList({ ...cs.ships, ...(extra.ships || {}) }),
-    });
+    const needsCrew = action.type.startsWith('crew.') || action.type === 'ship.edit' || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau');
+    const cs = needsCrew ? await loadCrewAndShips(player) : null;
+    const reply = (out, extra = {}) =>
+      cs
+        ? { ...out, ...extra, crew: publicCrew(extra.crew ?? cs.crew, cs.memberNames), ships: shipList({ ...cs.ships, ...(extra.ships || {}) }) }
+        : { ...out, ...extra };
 
     // Recherche de joueurs à inviter (lecture seule)
     if (action.type === 'crew.search') {

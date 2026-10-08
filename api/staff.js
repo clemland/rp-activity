@@ -29,7 +29,7 @@ function freeId(base, taken) {
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
   need(await isStaff(me.uid), 403, 'Réservé au staff.');
-  const catalog = await loadCatalog();
+  const catalog = await loadCatalog({ fresh: true });
 
   switch (body.op) {
     case 'players':

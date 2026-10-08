@@ -15,6 +15,8 @@ import './style.css';
 import * as G from '../shared/game.js';
 import * as API from './api.js';
 import { mediaSrc } from './discord.js';
+/** Adresse d'image prête à afficher (dans Discord, les images ImgBB passent par /ibb). */
+const imgSrc = (u) => esc(mediaSrc(u));
 import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
   openDialog, closeDialog, readAsDataUrl, askConfirm, askText,
@@ -26,7 +28,7 @@ const itemOf = (k) => G.itemOf(k);
 const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231 };
 const itemIco = (k) => {
   const it = itemOf(k);
-  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${esc(it.img)}" alt="" loading="lazy"></span>` : ico(KIND_ICON[it.kind] ?? 237);
+  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy"></span>` : ico(KIND_ICON[it.kind] ?? 237);
 };
 
 /* ═══ État ═══════════════════════════════════════════════════════════════ */
@@ -73,11 +75,19 @@ function applyOut(out, { quiet = false, noUps = false } = {}) {
 
 const OPEN_DENIED = 'Le site ne te reconnaît pas comme staff : /edit profil est refusé. Mets les mêmes OWNER_IDS / STAFF_ROLE_IDS que le bot dans les variables Vercel, puis redéploie.';
 
-/** Action du joueur sur sa fiche. Renvoie le résultat, ou null en cas d'erreur. */
+/**
+ * Action du joueur sur sa fiche. Renvoie le résultat, ou null en cas d'erreur.
+ *
+ * Les actions partent UNE PAR UNE vers le serveur (file d'attente) : enchaîner
+ * vite plusieurs déplacements ne crée plus de conflits. Quand le résultat ne
+ * dépend pas du hasard, l'écran est mis à jour tout de suite (sans attendre) ;
+ * l'état du serveur n'est repris qu'une fois la file vide, pour ne pas
+ * « reculer » pendant que d'autres actions attendent. En cas d'erreur, on se
+ * resynchronise avec le serveur au lieu de revenir à un ancien état.
+ */
+let queue = Promise.resolve(), inFlight = 0, needSync = false;
 async function run(action) {
-  if (VIEW) return null;
-  if (!S) return null;
-  const before = { S, SHOP };
+  if (VIEW || !S) return null;
   let local = null;
   if (OPTIMISTIC.has(action.type)) {
     try {
@@ -91,21 +101,43 @@ async function run(action) {
     }
     applyOut(local);
   }
+  inFlight++;
   setBusy(1);
+  const job = queue.then(() => API.act(action));
+  queue = job.catch(() => {});
   try {
-    const out = await API.act(action);
-    applyOut(out, { quiet: !!local, noUps: !!local });
+    const out = await job;
+    inFlight--;
+    if (inFlight === 0 && !needSync) applyOut(out, { quiet: !!local, noUps: !!local });
+    else if (!local) {
+      // résultat non prévisible (vente, fabrication…) : on montre le message tout de suite
+      if (out.toast) toast(esc(out.toast), out.item ? itemIco(out.item) : out.icon);
+      showLevelUp(out.ups);
+    }
     return out;
   } catch (e) {
-    if (local) {
-      ({ S, SHOP } = before);
-      renderAll();
-    }
+    inFlight--;
     toast(esc(e.message || 'Erreur.'));
+    needSync = true;
     return null;
   } finally {
     setBusy(-1);
+    if (inFlight === 0 && needSync) resync();
   }
+}
+/** Reprend l'état exact du serveur (après une erreur dans la file). */
+async function resync() {
+  needSync = false;
+  try {
+    const st = await API.state(VIEW || undefined);
+    G.setCatalog(st.catalog);
+    S = st.player;
+    SHOP = st.shop;
+    CREW = st.crew;
+    SHIPS = st.ships || [];
+    INVITES = st.invites || [];
+    renderAll();
+  } catch {}
 }
 
 /** Action du staff sur la fiche affichée. */
@@ -152,9 +184,9 @@ function photoHTML(p = S) {
   if (!p.photo) return PORTRAIT;
   const name = esc(G.fullName(p));
   const broken = `onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'ph-broken',textContent:'Image introuvable'}))"`;
-  if (typeof p.photo === 'string') return `<img src="${esc(p.photo)}" alt="Portrait de ${name}" ${broken}>`;
+  if (typeof p.photo === 'string') return `<img src="${imgSrc(p.photo)}" alt="Portrait de ${name}" ${broken}>`;
   const f = p.photo;
-  return `<img class="ph-link" src="${esc(f.url)}" alt="Portrait de ${name}" style="left:${f.l}%;top:${f.t}%;width:${f.w}%" ${broken}>`;
+  return `<img class="ph-link" src="${imgSrc(f.url)}" alt="Portrait de ${name}" style="left:${f.l}%;top:${f.t}%;width:${f.w}%" ${broken}>`;
 }
 function affiliation() {
   const { faction, crew, crewRole, grade } = S.id;
@@ -506,11 +538,11 @@ function renderTech() {
     ${S.techniques.map((t) => `
       <details class="tech">
         <summary>
-          ${t.media ? `<span class="t-thumb"><img src="${esc(t.media)}" alt="" loading="lazy"></span>` : ''}
+          ${t.media ? `<span class="t-thumb"><img src="${imgSrc(t.media)}" alt="" loading="lazy"></span>` : ''}
           <span><span class="t-name">${esc(t.name)}</span>${t.ok ? '' : '<span class="status wait">À valider</span>'}<br><span class="t-meta"><span class="${SRC_CLS[t.src]}">${G.TECH_SOURCES[t.src]}</span></span></span>
           <span class="cost"><span class="chev" aria-hidden="true">▾</span></span>
         </summary>
-        ${t.media ? `<div class="t-media"><img src="${esc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.classList.add('broken');this.remove()"></div>` : ''}
+        ${t.media ? `<div class="t-media"><img src="${imgSrc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.classList.add('broken');this.remove()"></div>` : ''}
         <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
         <div class="t-actions">
           <button class="btn sm ghost" data-edit-tech="${t.id}">Modifier</button><button class="btn sm ghost" data-del-tech="${t.id}">Supprimer</button>
@@ -521,7 +553,7 @@ function renderTech() {
 function showTechMedia() {
   const box = $('tf-preview');
   box.innerHTML = techMedia
-    ? `<img src="${esc(techMedia)}" alt="Aperçu" onerror="this.parentElement.innerHTML='<span class=&quot;note&quot;>Aperçu impossible. Le serveur récupérera l’image à l’enregistrement.</span>'">`
+    ? `<img src="${imgSrc(techMedia)}" alt="Aperçu" onerror="this.parentElement.innerHTML='<span class=&quot;note&quot;>Aperçu impossible. Le serveur récupérera l’image à l’enregistrement.</span>'">`
     : '<span class="note">Aucune image</span>';
   $('tf-media-del').hidden = !techMedia;
 }
@@ -633,6 +665,9 @@ function renderInv() {
       </div>
     </div>`;
   }
+  // Une seule arme équipée sur trois identiques : seule la première case porte la marque.
+  const eqLeft = { ...Object.fromEntries(Object.values(S.equip).filter(Boolean).map((k) => [k, equippedCount(k)])) };
+  const eqMark = (k) => (eqLeft[k] > 0 ? (eqLeft[k]--, true) : false);
   $('v-inv').innerHTML = `
     <div class="sec-head"><h2>Inventaire</h2><span class="pill">${ico(261)}<b>${berry(S.berry)}</b></span></div>
     <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight">${G.kg(G.invWeight(S))}</span></p>
@@ -649,7 +684,8 @@ function renderInv() {
       ${S.inv.map((s, i) => {
         if (!s) return `<div class="cell empty" data-slot="${i}"></div>`;
         const [k, q] = s, it = itemOf(k);
-        return `<button class="cell" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${isEquipped(k) ? ', équipé' : ''}">${itemIco(k)}${isEquipped(k) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+        const eq = eqMark(k);
+        return `<button class="cell" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${eq ? ', équipé' : ''}">${itemIco(k)}${eq ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
       }).join('')}
     </div>
     ${det}`;
@@ -870,10 +906,11 @@ function sellHTML() {
   let last = -1;
   S.inv.forEach((s, i) => s && (last = i));
   const n = Math.max(6, Math.ceil((last + 1) / 6) * 6);
+  const eqLeft = Object.fromEntries(Object.values(S.equip).filter(Boolean).map((k) => [k, equippedCount(k)]));
   const cells = S.inv.slice(0, n).map((s, i) => {
     if (!s) return '<div class="cell empty"></div>';
     const [k, q] = s, it = itemOf(k);
-    return `<button class="cell scell ${!it.value ? 'nosell' : ''} ${sellItem === k ? 'on-counter' : ''}" data-sslot="${i}" aria-label="${esc(it.name)}, quantité ${q}${!it.value ? ', invendable' : ''}">${itemIco(k)}${isEquipped(k) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+    return `<button class="cell scell ${!it.value ? 'nosell' : ''} ${sellItem === k ? 'on-counter' : ''}" data-sslot="${i}" aria-label="${esc(it.name)}, quantité ${q}${!it.value ? ', invendable' : ''}">${itemIco(k)}${eqLeft[k]-- > 0 ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
   }).join('');
   let counter = `<div class="drop-hint">${ico(261)}<b>Glisse un objet ici</b><span>ou clique dessus dans ton inventaire</span></div>`;
   if (sellItem) {
@@ -935,7 +972,7 @@ function renderAdminShops() {
       const open = openShopRow === ch;
       return `<article class="ashop ${open ? 'open' : ''}">
         <button class="ashop-row" data-ashop-toggle="${esc(ch)}" aria-expanded="${open}">
-          <span class="face mini-face">${sh.img ? `<img src="${esc(sh.img)}" alt="">` : `<span aria-hidden="true">${esc(sh.face || '🙂')}</span>`}</span>
+          <span class="face mini-face">${sh.img ? `<img src="${imgSrc(sh.img)}" alt="">` : `<span aria-hidden="true">${esc(sh.face || '🙂')}</span>`}</span>
           <span class="ashop-main"><b>${esc(sh.name)}</b><small>${esc(sh.seller)} · ${items.length} objet${items.length > 1 ? 's' : ''} · rachat ${Math.round(sh.buyRate * 100)} %</small></span>
           <span class="chan-tag">${esc(sh.channel)}</span>
           <span class="chev" aria-hidden="true">▾</span>
@@ -1007,7 +1044,7 @@ function renderShop() {
     : sellHTML();
   el.innerHTML = `
     <div class="counter">
-      <div class="face" id="seller-face">${SHOP.img ? `<img src="${esc(SHOP.img)}" alt="${esc(SHOP.seller)}">` : `<span aria-hidden="true">${esc(SHOP.face || '🙂')}</span>`}</div>
+      <div class="face" id="seller-face">${SHOP.img ? `<img src="${imgSrc(SHOP.img)}" alt="${esc(SHOP.seller)}">` : `<span aria-hidden="true">${esc(SHOP.face || '🙂')}</span>`}</div>
       <div><h2>${esc(SHOP.name)}</h2><p>${esc(SHOP.seller)}</p></div>
       <span class="wallet" id="wallet">Ta bourse : ${berry(S.berry)}</span>
     </div>
@@ -1122,7 +1159,7 @@ function renderShopEdit() {
       <div><label for="se-rate">Rachat (% de la valeur)</label><input id="se-rate" type="number" min="5" max="100" value="${Math.round(d.buyRate * 100)}"></div>
     </div>
     <div class="se-face">
-      <div class="face">${d.img ? `<img src="${esc(d.img)}" alt="">` : `<span>${esc(d.face || '🙂')}</span>`}</div>
+      <div class="face">${d.img ? `<img src="${imgSrc(d.img)}" alt="">` : `<span>${esc(d.face || '🙂')}</span>`}</div>
       <div class="se-face-ctl">
         <b>Portrait du vendeur</b>
         <div class="se-row"><button type="button" class="btn sm" id="se-pick">Choisir une image</button><input type="file" id="se-file" accept="image/*" hidden>
@@ -1407,7 +1444,7 @@ function renderMjTab() {
     <h3 class="ed-h">Techniques à valider ${wait.length ? `<span class="pill">${wait.length}</span>` : ''}</h3>
     ${wait.length ? `<div class="val-list">${wait.map((t) => `
       <article class="val-card">
-        ${t.media ? `<div class="val-media"><img src="${esc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.remove()"></div>` : ''}
+        ${t.media ? `<div class="val-media"><img src="${imgSrc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.remove()"></div>` : ''}
         <div class="val-body">
           <h3>${esc(t.name)} <span class="tag ${SRC_CLS[t.src]}">${G.TECH_SOURCES[t.src]}</span></h3>
           <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
@@ -1694,15 +1731,15 @@ let crewTab = 'crew', crewSearch = '', crewResults = [], searchTimer = null;
 const openRanks = new Set(); // grades dépliés, gardés entre deux affichages
 let cx = { side: null, key: null, qty: 1 }; // objet sélectionné dans la cale ou l'inventaire
 function shipPic(sh) {
-  if (sh.photo) return `<img src="${esc(sh.photo)}" alt="${esc(sh.name)}" loading="lazy">`;
-  if (sh.icon) return `<img src="${esc(sh.icon)}" alt="" loading="lazy">`;
+  if (sh.photo) return `<img src="${imgSrc(sh.photo)}" alt="${esc(sh.name)}" loading="lazy">`;
+  if (sh.icon) return `<img src="${imgSrc(sh.icon)}" alt="" loading="lazy">`;
   return ico(SHIP_ICON);
 }
 function shipCard(sh, { actions = '' } = {}) {
   return `<article class="ship-card">
     <div class="ship-pic">${shipPic(sh)}</div>
     <div>
-      <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${esc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
+      <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
       <div class="ship-stats"><span>${esc(sh.type)}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span></div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${actions}
@@ -1715,7 +1752,7 @@ function invitesHTML() {
   if (!INVITES.length) return '';
   return `<section class="crew-box invites"><h3>Invitations reçues</h3>
     ${INVITES.map((i) => `<div class="invite">
-      <span class="flag mini-flag">${i.flag ? `<img src="${esc(i.flag)}" alt="">` : ico(1)}</span>
+      <span class="flag mini-flag">${i.flag ? `<img src="${imgSrc(i.flag)}" alt="">` : ico(1)}</span>
       <span><b>${esc(i.name)}</b><small>${i.members} membre${i.members > 1 ? 's' : ''}${i.byName ? ` · invité par ${esc(i.byName)}` : ''}</small></span>
       <span class="invite-acts"><button class="btn sm" data-join="${esc(i.id)}">Rejoindre</button><button class="btn sm ghost" data-decline="${esc(i.id)}">Refuser</button></span>
     </div>`).join('')}
@@ -1775,7 +1812,7 @@ function crewTabHTML() {
     ${can('edit') ? `<section class="crew-box">
       <h3>Nom et Jolly Roger</h3>
       <div class="form"><div class="wide"><label for="crew-name">Nom de l’équipage</label><input id="crew-name" value="${esc(c.name)}" maxlength="60"></div></div>
-      <div class="img-field"><div class="prev flag-prev">${c.flag ? `<img src="${esc(c.flag)}" alt="">` : ico(1)}</div>
+      <div class="img-field"><div class="prev flag-prev">${c.flag ? `<img src="${imgSrc(c.flag)}" alt="">` : ico(1)}</div>
         <div class="se-face-ctl">
           <div class="se-row"><button type="button" class="btn sm" id="flag-pick">Choisir une image</button><input type="file" id="flag-file" accept="image/*" hidden>${c.flag ? '<button type="button" class="btn sm ghost" id="flag-none">Retirer</button>' : ''}</div>
           <div class="ph-url-row"><input type="url" id="flag-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="flag-url-go">Utiliser le lien</button></div>
@@ -1840,7 +1877,7 @@ function renderCrew() {
   if (!c && crewTab !== 'ships') crewTab = 'crew';
   const head = c ? `
     <div class="crew-hero">
-      <div class="flag">${c.flag ? `<img src="${esc(c.flag)}" alt="Jolly Roger" onerror="this.replaceWith(document.createTextNode('☠'))">` : ico(1)}</div>
+      <div class="flag">${c.flag ? `<img src="${imgSrc(c.flag)}" alt="Jolly Roger" onerror="this.replaceWith(document.createTextNode('☠'))">` : ico(1)}</div>
       <div>
         <h2>${esc(c.name)}</h2>
         <p class="lede" style="margin:4px 0 0">${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ton grade : <b>${esc(G.rankName(c, S.uid))}</b></p>
@@ -2048,7 +2085,7 @@ function renderShipEdit() {
       <div class="wide"><label for="sh-desc">Description</label><textarea id="sh-desc" maxlength="600" rows="3" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px">${esc(d.desc)}</textarea></div>
     </div>
     <div class="img-field" style="margin-top:12px">
-      <div class="prev">${d.photo ? `<img src="${esc(d.photo)}" alt="">` : ico(SHIP_ICON)}</div>
+      <div class="prev">${d.photo ? `<img src="${imgSrc(d.photo)}" alt="">` : ico(SHIP_ICON)}</div>
       <div class="se-face-ctl">
         <b>Photo du bateau</b>
         <div class="se-row"><button type="button" class="btn sm" id="sh-pick">Choisir une image</button><input type="file" id="sh-file" accept="image/*" hidden>${d.photo ? '<button type="button" class="btn sm ghost" id="sh-nophoto">Retirer</button>' : ''}</div>
@@ -2163,12 +2200,12 @@ function renderFleet() {
     ${fleetTab === 'crews'
       ? crews.length ? `<div class="fleet-list">${crews.map(([id, c]) => `
           <button class="gest-card" data-crew="${esc(id)}">
-            <span class="slot-ico flag-mini">${c.flag ? `<span class="ico item-img"><img src="${esc(c.flag)}" alt=""></span>` : ico(1)}</span>
+            <span class="slot-ico flag-mini">${c.flag ? `<span class="ico item-img"><img src="${imgSrc(c.flag)}" alt=""></span>` : ico(1)}</span>
             <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ${berry(c.bank || 0)}${c.ship && fleet.ships[c.ship] ? ` · ${esc(fleet.ships[c.ship].name)}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun équipage.</p>'
       : ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => `
           <button class="gest-card" data-ship="${esc(id)}">
-            <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${esc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
+            <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${imgSrc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
             <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · ${sh.cannons} canons · ${G.kg(sh.capacity)}<br>${esc(ownerName(sh.owner))}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
   paintStatic(el);
@@ -2209,7 +2246,7 @@ function renderCrewEdit() {
       <div><label for="cr-ship">Bateau de l’équipage</label><select id="cr-ship"><option value="">Aucun</option>${Object.entries(fleet.ships || {}).map(([sid, sh]) => `<option value="${esc(sid)}" ${d.ship === sid ? 'selected' : ''}>${esc(sh.name)} (${esc(sh.type)}, ${G.kg(sh.capacity)})</option>`).join('')}</select></div>
     </div>
     <div class="img-field" style="margin-top:12px">
-      <div class="prev flag-prev">${d.flag ? `<img src="${esc(d.flag)}" alt="">` : ico(1)}</div>
+      <div class="prev flag-prev">${d.flag ? `<img src="${imgSrc(d.flag)}" alt="">` : ico(1)}</div>
       <div class="se-face-ctl">
         <b>Jolly Roger</b>
         <div class="se-row"><button type="button" class="btn sm" id="cr-pick">Choisir une image</button><input type="file" id="cr-file" accept="image/*" hidden>${d.flag ? '<button type="button" class="btn sm ghost" id="cr-noflag">Retirer</button>' : ''}</div>
@@ -2391,7 +2428,7 @@ function openItemEdit(id = null) {
   openDialog('d-item');
 }
 function showItemImg() {
-  $('it-preview').innerHTML = itemDraft.img ? `<img src="${esc(itemDraft.img)}" alt="">` : ico(KIND_ICON[$('it-kind').value] ?? 237);
+  $('it-preview').innerHTML = itemDraft.img ? `<img src="${imgSrc(itemDraft.img)}" alt="">` : ico(KIND_ICON[$('it-kind').value] ?? 237);
   $('it-noimg').hidden = !itemDraft.img;
 }
 $('it-kind').addEventListener('change', () => {

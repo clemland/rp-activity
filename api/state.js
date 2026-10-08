@@ -14,7 +14,7 @@ export default handler(['GET'], async (req) => {
   const me = await userFromRequest(req);
   const staff = await isStaff(me.uid);
   const channel = req.query.channel || null;
-  const [catalog, { shop }, info] = await Promise.all([loadCatalog(), loadShop(channel), channelInfo(channel)]);
+  const [catalog, { shop }, info] = await Promise.all([loadCatalog({ fresh: true }), loadShop(channel), channelInfo(channel)]);
 
   let target = me.uid, open = null, openDenied = false;
   if (req.query.player && req.query.player !== me.uid) {

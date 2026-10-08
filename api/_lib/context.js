@@ -21,10 +21,21 @@ export async function loadShop(channelId) {
   return row ? { shop: normalizeShop(row.data), version: row.version } : { shop: null, version: null };
 }
 
-/** Objets et recettes du staff ; à charger avant d'appliquer une règle du jeu. */
-export async function loadCatalog() {
+/**
+ * Objets et recettes du staff ; à charger avant d'appliquer une règle du jeu.
+ * Gardé 20 s en mémoire pour les actions des joueurs (une modif du staff met
+ * donc jusqu'à 20 s à s'appliquer aux règles) ; le staff et l'affichage lisent
+ * toujours la version fraîche (fresh: true).
+ */
+let catalogCache = null;
+export async function loadCatalog({ fresh = false } = {}) {
+  if (!fresh && catalogCache && Date.now() - catalogCache.at < 20_000) {
+    setCatalog(catalogCache.catalog);
+    return catalogCache.catalog;
+  }
   const [items, recipes] = await Promise.all([readAll('items'), readAll('recipes')]);
   const catalog = { items, recipes };
+  catalogCache = { at: Date.now(), catalog };
   setCatalog(catalog);
   return catalog;
 }
@@ -42,6 +53,7 @@ export const publicPlayer = (p) => p;
  */
 export async function loadCrewAndShips(player) {
   const out = { crew: null, crewVersion: null, ships: {}, shipVersions: {}, memberNames: {} };
+  const shipsQuery = db().from('ships').select('id, data, version'); // lancée tout de suite, en parallèle
   if (player.crewId) {
     const row = await read('crews', player.crewId);
     if (row) {
@@ -52,7 +64,7 @@ export async function loadCrewAndShips(player) {
       for (const uid of uids) out.memberNames[uid] = members[uid] ? fullName(members[uid].data) : 'Fiche supprimée';
     }
   }
-  const { data, error } = await db().from('ships').select('id, data, version');
+  const { data, error } = await shipsQuery;
   if (error) throw error;
   for (const r of data) {
     const o = r.data.owner;

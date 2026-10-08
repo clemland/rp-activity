@@ -2,15 +2,13 @@
  * Connexion à Discord quand le site tourne dans une Activity.
  * Hors Discord (navigateur classique), on passe en mode démo.
  */
-import { DiscordSDK, patchUrlMappings } from '@discord/embedded-app-sdk';
+import { DiscordSDK } from '@discord/embedded-app-sdk';
 
 export const inDiscord = () => new URLSearchParams(location.search).has('frame_id');
 
 export async function connect() {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID;
   if (!clientId) throw new Error('VITE_DISCORD_CLIENT_ID manquant.');
-  // Les images ImgBB passent par l'URL Mapping /ibb (Discord bloque les autres sites).
-  patchUrlMappings([{ prefix: '/ibb', target: 'i.ibb.co' }], { patchFetch: false, patchWebSocket: false, patchXhr: false, patchSrcAttributes: true });
   const sdk = new DiscordSDK(clientId);
   await sdk.ready();
   const { code } = await sdk.commands.authorize({
@@ -31,5 +29,8 @@ export async function connect() {
   return { sdk, token: access_token, channelId: sdk.channelId, guildId: sdk.guildId };
 }
 
-/** Adresse utilisable pour une image : dans Discord, i.ibb.co passe par /ibb. */
+/**
+ * Adresse utilisable pour une image : dans Discord, les autres sites sont bloqués,
+ * donc i.ibb.co passe par l'URL Mapping /ibb (à déclarer dans le Developer Portal).
+ */
 export const mediaSrc = (u) => (inDiscord() && typeof u === 'string' ? u.replace(/^https:\/\/i\.ibb\.co\//, '/ibb/') : u);

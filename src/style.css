@@ -1208,3 +1208,9 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .slot-ico,.face,.mini-face,.flag,.mini-flag,.ship-pic,.t-thumb,.t-media,.val-media,.tf-preview,.img-field .prev,.it-preview,
 .se-face .face,.counter .face,.mj-player .av,.ph-stage,.portrait,.ico.item-img,.ico.item-img img,
 .ship-pic img,.flag img,.t-thumb img,.t-media img,.val-media img,.face img,.mini-face img,.counter .face img{border-radius:0!important}
+
+/* ═══ v32 : photos de bateaux entières, plus petites ═══ */
+.ship-card{grid-template-columns:140px 1fr}
+.ship-pic{aspect-ratio:auto;align-self:start;display:grid;place-items:center;min-height:90px;background:#dfeef8}
+.ship-pic img{width:100%;height:auto;max-height:160px;object-fit:contain;display:block}
+@media (max-width:620px){.ship-card{grid-template-columns:1fr}.ship-pic{max-width:220px}}

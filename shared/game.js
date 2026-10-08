@@ -141,7 +141,17 @@ export function normalize(p) {
       s[1]--;
     }
   }
+  // Chaque arme reçoit son identifiant ; l'ancien équipement (par type d'arme) devient un exemplaire précis.
+  for (const s of p.inv) if (s && ITEMS[s[0]]?.kind === 'arme' && !s[2]) s[2] = newWid();
   p.equip ??= { arme1: null, arme2: null };
+  for (const sl of Object.keys(SLOTS)) {
+    const v = p.equip[sl];
+    if (v && !p.inv.some((s) => s && s[2] === v)) {
+      const taken = new Set(Object.values(p.equip));
+      const inst = p.inv.find((s) => s && s[0] === v && s[2] && !taken.has(s[2]));
+      p.equip[sl] = inst ? inst[2] : null;
+    }
+  }
   p.sellLock ??= {};
   p.craft ??= null;
   delete p.effects;
@@ -152,8 +162,20 @@ export function normalize(p) {
 
 export const fullName = (p) => p?.id?.name || [p?.id?.first, p?.id?.last].filter(Boolean).join(' ') || 'Inconnu';
 export const count = (p, k) => p.inv.reduce((a, s) => a + (s && s[0] === k ? s[1] : 0), 0);
-export const equippedCount = (p, k) => Object.values(p.equip).filter((x) => x === k).length;
-export const isEquipped = (p, k) => Object.values(p.equip).includes(k);
+/*
+ * Armes : chaque exemplaire a son identifiant (3e valeur de la case : [id, 1, wid]).
+ * L'équipement pointe vers un exemplaire précis, qui le suit quand on le déplace.
+ */
+export const newWid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const equippedWids = (p) => new Set(Object.values(p.equip).filter(Boolean));
+export const isSlotEquipped = (p, i) => !!p.inv[i]?.[2] && equippedWids(p).has(p.inv[i][2]);
+/** Nombre d'exemplaires équipés de cet objet. */
+export const equippedCount = (p, k) => p.inv.reduce((a, s) => a + (s && s[0] === k && s[2] && equippedWids(p).has(s[2]) ? 1 : 0), 0);
+export const isEquipped = (p, k) => equippedCount(p, k) > 0;
+/** Quantité utilisable (vendable, déposable…) : sans les armes équipées. */
+export const freeCount = (p, k) => count(p, k) - equippedCount(p, k);
+/** Case d'inventaire de l'arme équipée dans un emplacement (ou -1). */
+export const equipSlotIndex = (p, sl) => (p.equip[sl] ? p.inv.findIndex((s) => s && s[2] === p.equip[sl]) : -1);
 export const isWeapon = (k) => ITEMS[k]?.kind === 'arme';
 export const invWeight = (p) => p.inv.reduce((a, s) => a + (s ? itemWeight(s[0]) * s[1] : 0), 0);
 
@@ -163,7 +185,7 @@ export function addItem(p, k, q = 1) {
     // Les armes ne s'empilent pas : une arme = une case.
     const free = p.inv.reduce((a, x) => a + (x ? 0 : 1), 0);
     if (free < q) return false;
-    for (let n = 0; n < q; n++) p.inv[p.inv.findIndex((x) => !x)] = [k, 1];
+    for (let n = 0; n < q; n++) p.inv[p.inv.findIndex((x) => !x)] = [k, 1, newWid()];
     return true;
   }
   const s = p.inv.find((x) => x && x[0] === k);
@@ -174,7 +196,11 @@ export function addItem(p, k, q = 1) {
   return true;
 }
 export function removeItem(p, k, q = 1) {
-  for (let i = p.inv.length - 1; i >= 0 && q > 0; i--) {
+  // Les exemplaires non équipés partent en premier.
+  const eq = equippedWids(p);
+  const order = p.inv.map((_, i) => i).reverse().sort((a, b) => (eq.has(p.inv[a]?.[2]) ? 1 : 0) - (eq.has(p.inv[b]?.[2]) ? 1 : 0));
+  for (const i of order) {
+    if (q <= 0) break;
     const s = p.inv[i];
     if (!s || s[0] !== k) continue;
     const take = Math.min(q, s[1]);
@@ -184,12 +210,10 @@ export function removeItem(p, k, q = 1) {
   fixEquip(p);
   return q === 0;
 }
-/** On ne peut pas équiper plus d'exemplaires qu'on n'en possède. */
+/** L'équipement ne peut pointer que vers une arme encore dans l'inventaire. */
 export function fixEquip(p) {
-  for (const sl of ['arme2', 'arme1']) {
-    const k = p.equip[sl];
-    if (k && equippedCount(p, k) > count(p, k)) p.equip[sl] = null;
-  }
+  for (const sl of Object.keys(SLOTS)) if (p.equip[sl] && equipSlotIndex(p, sl) < 0) p.equip[sl] = null;
+  if (p.equip.arme1 && p.equip.arme1 === p.equip.arme2) p.equip.arme2 = null;
 }
 /** Ajoute de l'XP ; renvoie le nombre de niveaux gagnés. */
 export function gainXP(p, n) {
@@ -308,40 +332,37 @@ export function playerAction(player, action, ctx = {}) {
     case 'inv.drop': {
       const s = p.inv[a.slot];
       if (!slotOk(a.slot) || !s) fail('Emplacement vide.');
-      if (isEquipped(p, s[0]) && equippedCount(p, s[0]) >= count(p, s[0])) fail('Retire-le d’abord de ton équipement.');
+      if (isSlotEquipped(p, a.slot)) fail('Retire-la d’abord de ton équipement.');
       s[1]--; if (s[1] <= 0) p.inv[a.slot] = null;
       fixEquip(p);
       out.toast = `Jeté par-dessus bord : ${itemOf(s[0]).name}`;
       break;
     }
     case 'equip': {
-      const k = a.key, it = itemOf(k);
-      if (!count(p, k)) fail('Tu n’as pas cet objet.');
-      if (!isWeapon(k)) fail(`${it.name} n’est pas une arme.`);
-      let slot = a.slot;
-      if (slot && !SLOTS[slot]) fail('Emplacement invalide.');
-      if (slot) {
-        if (p.equip[slot] !== k) {
-          const other = slot === 'arme1' ? 'arme2' : 'arme1';
-          if (equippedCount(p, k) >= count(p, k)) { p.equip[other] = p.equip[slot]; p.equip[slot] = k; } // change de main
-          else p.equip[slot] = k;
-        }
-      } else if (isEquipped(p, k) && equippedCount(p, k) >= count(p, k)) {
-        slot = p.equip.arme2 === k ? 'arme2' : 'arme1';
-        p.equip[slot] = null;
-        out.toast = `Retiré : ${it.name}`; out.item = k;
+      // a.slot : case d'inventaire de l'arme choisie ; a.to : emplacement voulu (sinon le premier libre).
+      const i = a.slot, it = p.inv[i];
+      if (!slotOk(i) || !it) fail('Choisis une arme dans ton inventaire.');
+      if (!isWeapon(it[0])) fail(`${itemOf(it[0]).name} n’est pas une arme.`);
+      if (!it[2]) it[2] = newWid();
+      const wid = it[2];
+      let to = a.to;
+      if (to && !SLOTS[to]) fail('Emplacement invalide.');
+      const cur = Object.keys(SLOTS).find((sl) => p.equip[sl] === wid);
+      if (!to && cur) {
+        p.equip[cur] = null; // déjà équipée : on la retire
+        out.toast = `Retiré : ${itemOf(it[0]).name}`; out.item = it[0];
         break;
-      } else {
-        slot = !p.equip.arme1 ? 'arme1' : !p.equip.arme2 ? 'arme2' : null;
-        if (!slot) fail('Tu portes déjà deux armes : retires-en une d’abord.');
-        p.equip[slot] = k;
       }
-      out.toast = `Équipé : ${it.name}`; out.item = k; out.slot = slot;
+      if (!to) to = !p.equip.arme1 ? 'arme1' : !p.equip.arme2 ? 'arme2' : null;
+      if (!to) fail('Tu portes déjà deux armes : retires-en une d’abord.');
+      if (cur && cur !== to) p.equip[cur] = p.equip[to]; // changement de main : on échange
+      p.equip[to] = wid;
+      out.toast = `Équipé : ${itemOf(it[0]).name}`; out.item = it[0]; out.slot = to;
       break;
     }
     case 'unequip': {
       if (!SLOTS[a.slot] || !p.equip[a.slot]) fail('Rien à retirer.');
-      const k = p.equip[a.slot];
+      const k = p.inv[equipSlotIndex(p, a.slot)]?.[0];
       p.equip[a.slot] = null;
       out.toast = `Retiré : ${itemOf(k).name}`; out.item = k;
       break;
@@ -453,7 +474,7 @@ export function playerAction(player, action, ctx = {}) {
       const k = a.key, it = itemOf(k);
       if (!count(p, k)) fail('Tu n’as pas cet objet.');
       if (!it.value) fail(`${it.name} ne se vend pas.`);
-      if (isEquipped(p, k) && equippedCount(p, k) >= count(p, k)) fail('Retire-le d’abord de ton équipement.');
+      if (freeCount(p, k) < 1) fail('Retire-le d’abord de ton équipement.');
       const ch = ctx.channelId || 'demo';
       const locked = !!p.sellLock[ch]?.[k];
       const pct = locked ? 100 : int(a.pct ?? 100, 100, ASK_MAX);
@@ -694,7 +715,7 @@ export function crewAction(player, action, ctx = {}) {
       need('chestIn');
       const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
       if (count(p, k) < q) fail('Tu n’as pas assez de cet objet.');
-      if (isEquipped(p, k) && count(p, k) - q < equippedCount(p, k)) fail('Retire-le d’abord de ton équipement.');
+      if (freeCount(p, k) < q) fail('Retire-le d’abord de ton équipement.');
       const cap = crewCapacity(ship);
       if (chestWeight(crew) + itemWeight(k) * q > cap + 1e-9) fail(`Le coffre est trop chargé (${kg(chestWeight(crew))} / ${kg(cap)}).`);
       removeItem(p, k, q);

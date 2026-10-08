@@ -30,7 +30,8 @@ export async function connect() {
 }
 
 /**
- * Adresse utilisable pour une image : dans Discord, les autres sites sont bloqués,
- * donc i.ibb.co passe par l'URL Mapping /ibb (à déclarer dans le Developer Portal).
+ * Adresse utilisable pour une image. Dans Discord, les images d'autres sites
+ * sont bloquées : celles d'ImgBB passent par notre relais /api/img (mis en cache).
  */
-export const mediaSrc = (u) => (inDiscord() && typeof u === 'string' ? u.replace(/^https:\/\/i\.ibb\.co\//, '/ibb/') : u);
+export const mediaSrc = (u) =>
+  inDiscord() && typeof u === 'string' && /^https:\/\/i\.ibb\.co\//.test(u) ? `/api/img?u=${encodeURIComponent(u)}` : u;

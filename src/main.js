@@ -28,7 +28,7 @@ const itemOf = (k) => G.itemOf(k);
 const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231 };
 const itemIco = (k) => {
   const it = itemOf(k);
-  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy"></span>` : ico(KIND_ICON[it.kind] ?? 237);
+  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy" draggable="false"></span>` : ico(KIND_ICON[it.kind] ?? 237);
 };
 
 /* ═══ État ═══════════════════════════════════════════════════════════════ */
@@ -46,6 +46,7 @@ const fullName = () => G.fullName(S);
 const count = (k) => G.count(S, k);
 const isEquipped = (k) => G.isEquipped(S, k);
 const equippedCount = (k) => G.equippedCount(S, k);
+const slotEquipped = (i) => G.isSlotEquipped(S, i);
 
 /* ═══ Actions : optimistes quand le résultat ne dépend pas du hasard ═════ */
 const OPTIMISTIC = new Set(['stats', 'inv.move', 'inv.drop', 'equip', 'unequip', 'craft.start', 'craft.cancel', 'shop.buy', 'tech.delete', 'photo.remove']);
@@ -655,25 +656,23 @@ function renderInv() {
   if (!selItem) sel = null;
   let det = `<div class="detail empty">Choisis un objet pour voir sa description. Fais-le glisser pour le ranger ailleurs, ou une arme sur un emplacement pour l'équiper.</div>`;
   if (selItem) {
-    const [k, q] = selItem, it = itemOf(k), eq = isEquipped(k);
+    const [k, q] = selItem, it = itemOf(k), eq = slotEquipped(sel);
     det = `<div class="detail" id="inv-detail">
       <div class="slot-ico">${itemIco(k)}</div>
       <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Poids : ${G.kg((it.weight || 0) * q)}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
       <div class="acts">
-        ${G.isWeapon(k) ? `<button class="btn sm" data-equip="${k}">${eq && equippedCount(k) >= count(k) ? 'Retirer' : 'Équiper'}</button>` : ''}
-        <button class="btn sm ghost" data-drop="${sel}" ${eq && equippedCount(k) >= count(k) ? 'disabled title="Retire-le d’abord"' : ''}>Jeter un</button>
+        ${G.isWeapon(k) ? `<button class="btn sm" data-equip="${sel}">${eq ? 'Retirer' : 'Équiper'}</button>` : ''}
+        <button class="btn sm ghost" data-drop="${sel}" ${eq ? 'disabled title="Retire-la d’abord"' : ''}>Jeter un</button>
       </div>
     </div>`;
   }
   // Une seule arme équipée sur trois identiques : seule la première case porte la marque.
-  const eqLeft = { ...Object.fromEntries(Object.values(S.equip).filter(Boolean).map((k) => [k, equippedCount(k)])) };
-  const eqMark = (k) => (eqLeft[k] > 0 ? (eqLeft[k]--, true) : false);
   $('v-inv').innerHTML = `
     <div class="sec-head"><h2>Inventaire</h2><span class="pill">${ico(261)}<b>${berry(S.berry)}</b></span></div>
     <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight">${G.kg(G.invWeight(S))}</span></p>
     <div class="equip">
       ${Object.entries(SLOTS).map(([sl, label]) => {
-        const k = S.equip[sl], it = k && itemOf(k);
+        const idx = G.equipSlotIndex(S, sl), k = idx >= 0 ? S.inv[idx][0] : null, it = k && itemOf(k);
         return `<button class="eslot ${it ? 'filled' : ''}" data-eslot="${sl}" aria-label="${label}${it ? ' : ' + esc(it.name) + ', cliquer pour retirer' : ' vide'}">
           <span class="frame">${it ? itemIco(k) : ''}</span>
           <span><b>${label}</b><span class="n">${it ? esc(it.name) : 'Glisse une arme ici'}</span></span>
@@ -684,15 +683,16 @@ function renderInv() {
       ${S.inv.map((s, i) => {
         if (!s) return `<div class="cell empty" data-slot="${i}"></div>`;
         const [k, q] = s, it = itemOf(k);
-        const eq = eqMark(k);
+        const eq = slotEquipped(i);
         return `<button class="cell" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${eq ? ', équipé' : ''}">${itemIco(k)}${eq ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
       }).join('')}
     </div>
     ${det}`;
 }
-async function equip(k, slot) {
-  const out = await run({ type: 'equip', key: k, slot });
-  if (out?.slot || slot) replay(document.querySelector(`#v-inv [data-eslot="${out?.slot || slot}"]`), 'bought');
+/** Équipe l'arme de cette case (to : emplacement voulu, sinon le premier libre ; re-cliquer la retire). */
+async function equip(slot, to) {
+  const out = await run({ type: 'equip', slot, to });
+  if (out?.slot || to) replay(document.querySelector(`#v-inv [data-eslot="${out?.slot || to}"]`), 'bought');
 }
 let drag = null, justDragged = false;
 $('v-inv').addEventListener('pointerdown', (e) => {
@@ -748,7 +748,7 @@ window.addEventListener('pointerup', () => {
         replay(t, 'shake');
         return toast(`${esc(itemOf(k).name)} n’est pas une arme`);
       }
-      return void equip(k, t.dataset.eslot);
+      return void equip(d.from, t.dataset.eslot);
     }
     const to = +t.dataset.slot;
     if (to === d.from) return;
@@ -782,8 +782,8 @@ $('v-inv').addEventListener('click', (e) => {
     return document.querySelector(`#v-inv [data-slot="${sel}"]`)?.focus();
   }
   if (VIEW) return;
-  const eqk = e.target.closest('[data-equip]')?.dataset.equip;
-  if (eqk) return void equip(eqk);
+  const eqs = e.target.closest('[data-equip]')?.dataset.equip;
+  if (eqs != null) return void equip(Number(eqs));
   const es = e.target.closest('[data-eslot]')?.dataset.eslot;
   if (es && S.equip[es]) return void run({ type: 'unequip', slot: es });
   const drop = e.target.closest('[data-drop]');
@@ -906,15 +906,14 @@ function sellHTML() {
   let last = -1;
   S.inv.forEach((s, i) => s && (last = i));
   const n = Math.max(6, Math.ceil((last + 1) / 6) * 6);
-  const eqLeft = Object.fromEntries(Object.values(S.equip).filter(Boolean).map((k) => [k, equippedCount(k)]));
   const cells = S.inv.slice(0, n).map((s, i) => {
     if (!s) return '<div class="cell empty"></div>';
     const [k, q] = s, it = itemOf(k);
-    return `<button class="cell scell ${!it.value ? 'nosell' : ''} ${sellItem === k ? 'on-counter' : ''}" data-sslot="${i}" aria-label="${esc(it.name)}, quantité ${q}${!it.value ? ', invendable' : ''}">${itemIco(k)}${eqLeft[k]-- > 0 ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+    return `<button class="cell scell ${!it.value ? 'nosell' : ''} ${sellItem === k ? 'on-counter' : ''}" data-sslot="${i}" aria-label="${esc(it.name)}, quantité ${q}${!it.value ? ', invendable' : ''}">${itemIco(k)}${slotEquipped(i) ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
   }).join('');
   let counter = `<div class="drop-hint">${ico(261)}<b>Glisse un objet ici</b><span>ou clique dessus dans ton inventaire</span></div>`;
   if (sellItem) {
-    const k = sellItem, it = itemOf(k), eq = isEquipped(k) && equippedCount(k) >= count(k), a = askBlock(k);
+    const k = sellItem, it = itemOf(k), eq = G.freeCount(S, k) < 1, a = askBlock(k);
     counter = `<div class="offer">
       <div class="offer-head"><div class="slot-ico">${itemIco(k)}</div><div><h3>${esc(it.name)}</h3><p class="note">Tu en as ${count(k)}.</p></div><button class="close sm-close" data-unsell aria-label="Reprendre l’objet">×</button></div>
       <div class="ref">Prix de référence <b>${berry(a.ref)}</b></div>
@@ -1825,8 +1824,10 @@ function cargoHTML() {
   const c = CREW;
   const ship = c.ship ? SHIPS.find((x) => x.id === c.ship) : null;
   const cap = G.crewCapacity(ship), load = G.chestWeight(c);
+  // Côté inventaire : seulement ce qu'on peut déposer (pas les armes équipées).
   const inv = {};
-  S.inv.forEach((s) => s && (inv[s[0]] = (inv[s[0]] || 0) + s[1]));
+  S.inv.forEach((s) => s && (inv[s[0]] = G.freeCount(S, s[0])));
+  for (const k of Object.keys(inv)) if (inv[k] <= 0) delete inv[k];
   const cell = (side, k, q) => `<button class="cell xcell ${cx.side === side && cx.key === k ? 'on' : ''}" data-x-side="${side}" data-x-key="${esc(k)}" title="${esc(itemOf(k).name)}" aria-label="${esc(itemOf(k).name)}, ${q}">${itemIco(k)}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
   const selQ = cx.key ? (cx.side === 'inv' ? inv[cx.key] : c.chest[cx.key]) || 0 : 0;
   if (cx.key && !selQ) cx = { side: null, key: null, qty: 1 };
@@ -2050,8 +2051,7 @@ window.addEventListener('pointerup', () => {
   ghostEnd(d);
   const to = d.over?.dataset.xDrop;
   if (!to || to === d.side) return;
-  const inv = S.inv.reduce((a, s) => a + (s && s[0] === d.k ? s[1] : 0), 0);
-  cargoMove(d.side, d.k, d.side === 'inv' ? inv : CREW.chest[d.k] || 0);
+  cargoMove(d.side, d.k, d.side === 'inv' ? G.freeCount(S, d.k) : CREW.chest[d.k] || 0);
 });
 
 /* ═══ Bateau : édition (joueur : nom, description, photo ; staff : tout) ═══ */
@@ -2668,6 +2668,11 @@ async function refresh() {
     refreshing = false;
   }
 }
+
+/* Le glisser-déposer natif du navigateur (sur les images) prendrait l'image au lieu de l'objet. */
+document.addEventListener('dragstart', (e) => {
+  if (e.target.closest?.('.cell, .xcell, .eslot, .scell, .ico')) e.preventDefault();
+});
 
 /* ═══ Démarrage ══════════════════════════════════════════════════════════ */
 (async () => {

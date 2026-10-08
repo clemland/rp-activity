@@ -356,3 +356,24 @@ test('images sur ImgBB quand la clé est configurée', async () => {
   globalThis.fetch = ancien;
   env.imgbbKey = undefined;
 });
+
+test('relais d’images : seulement ImgBB, réponse mise en cache', async () => {
+  const { default: img } = await import('../api/img.js');
+  const ancien = globalThis.fetch;
+  globalThis.fetch = async (url) => ({ ok: true, status: 200, headers: new Map([['content-type', 'image/png']]), arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+  const appel = async (u) => {
+    let status = 0, body, headers = {};
+    const res = { setHeader: (k, v) => (headers[k] = v), status: (s) => ((status = s), res), send: (b) => ((body = b), res) };
+    await img({ method: 'GET', query: { u } }, res);
+    return { status, body, headers };
+  };
+  let r = await appel('https://i.ibb.co/abc/photo.png');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers['Content-Type'], 'image/png');
+  assert.match(r.headers['Cache-Control'], /s-maxage=31536000/);
+  r = await appel('https://exemple.com/photo.png');
+  assert.equal(r.status, 400, 'pas un relais ouvert à tout internet');
+  r = await appel('https://i.ibb.co.pirate.com/x.png');
+  assert.equal(r.status, 400);
+  globalThis.fetch = ancien;
+});

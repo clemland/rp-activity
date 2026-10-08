@@ -28,13 +28,33 @@ test('anciennes fiches : prénom + nom fusionnés, objets inconnus conservés', 
   assert.equal(G.itemOf('vieux-truc').missing, true);
 });
 
-test('équipement : seulement les armes du catalogue, deux maximum', () => {
+test('équipement : l’arme choisie précisément, deux maximum, échange de main', () => {
   cat();
   let p = G.demoPlayer();
-  assert.throws(() => G.playerAction(p, { type: 'equip', key: 'bois-ex' }), /pas une arme/);
+  const slotOf = (pl, k, n = 0) => pl.inv.map((x, i) => (x && x[0] === k ? i : -1)).filter((i) => i >= 0)[n];
+  assert.throws(() => G.playerAction(p, { type: 'equip', slot: slotOf(p, 'bois-ex') }), /pas une arme/);
+  // ancien équipement (par type) converti vers un exemplaire précis
+  assert.equal(G.isSlotEquipped(p, slotOf(p, 'sabre-ex')), true);
   G.addItem(p, 'sabre-ex', 2);
-  p = G.playerAction(p, { type: 'equip', key: 'sabre-ex' }).player;
-  assert.deepEqual(p.equip, { arme1: 'sabre-ex', arme2: 'sabre-ex' });
+  const s2 = slotOf(p, 'sabre-ex', 2);
+  p = G.playerAction(p, { type: 'equip', slot: s2 }).player;
+  assert.equal(G.isSlotEquipped(p, s2), true, 'c’est bien le 3e sabre qui est équipé');
+  assert.equal(G.isSlotEquipped(p, slotOf(p, 'sabre-ex', 1)), false, 'pas le 2e');
+  assert.throws(() => G.playerAction(p, { type: 'equip', slot: slotOf(p, 'sabre-ex', 1) }), /deux armes/);
+  // l'équipement suit l'arme quand on la déplace
+  p = G.playerAction(p, { type: 'inv.move', from: s2, to: 30 }).player;
+  assert.equal(G.isSlotEquipped(p, 30), true);
+  // vendre ou jeter : on ne touche pas aux armes équipées
+  assert.throws(() => G.playerAction(p, { type: 'inv.drop', slot: 30 }), /Retire/);
+  const v = G.playerAction(p, { type: 'shop.sell', key: 'sabre-ex' }, { shop: G.demoShop() }).player;
+  assert.equal(G.isSlotEquipped(v, 30), true, 'l’exemplaire non équipé est vendu');
+  assert.equal(G.count(v, 'sabre-ex'), 2);
+  // re-cliquer sur une arme équipée la retire ; l'envoyer dans l'autre main échange
+  const r = G.playerAction(p, { type: 'equip', slot: 30 }).player;
+  assert.equal(G.isSlotEquipped(r, 30), false);
+  const h = G.playerAction(p, { type: 'equip', slot: 30, to: 'arme1' }).player;
+  assert.equal(G.equipSlotIndex(h, 'arme1'), 30);
+  assert.equal(G.isSlotEquipped(h, slotOf(h, 'sabre-ex')), true, 'l’autre sabre passe en arme 2');
 });
 
 test('craft : ingrédients consommés, durée, récupération, annulation', () => {
@@ -264,7 +284,8 @@ test('armes : jamais empilées, une case par arme', () => {
   assert.ok(p.inv.every((x) => !x || x[0] !== 'sabre-ex' || x[1] === 1));
   const i = p.inv.findIndex((x) => x && x[0] === 'sabre-ex'), j = p.inv.findIndex((x, n) => n > i && x && x[0] === 'sabre-ex');
   const m = G.playerAction(p, { type: 'inv.move', from: i, to: j }).player;
-  assert.deepEqual([m.inv[i], m.inv[j]], [['sabre-ex', 1], ['sabre-ex', 1]], 'échange, pas d’empilement');
+  assert.deepEqual([m.inv[i][1], m.inv[j][1]], [1, 1], 'échange, pas d’empilement');
+  assert.equal(m.inv[i][2], p.inv[j][2], 'chaque arme garde son identité');
   const vieux = G.normalize({ id: { name: 'X' }, inv: [['sabre-ex', 3]] });
   assert.equal(vieux.inv.filter((x) => x && x[0] === 'sabre-ex').length, 3, 'anciennes piles séparées');
   const plein = G.normalize({ id: { name: 'X' }, inv: Array.from({ length: 32 }, () => ['bois-ex', 1]) });

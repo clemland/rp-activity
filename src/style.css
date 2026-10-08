@@ -1181,3 +1181,4 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .rc-title{display:flex;align-items:center;gap:8px}
 .rc-title .ico{--s:32px}
 #pr-input{margin-top:4px}
+.ico img,.cell img,.xcell img{-webkit-user-drag:none;user-select:none;pointer-events:none}

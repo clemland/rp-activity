@@ -300,11 +300,11 @@ export const rpDay = (now = Date.now()) => new Intl.DateTimeFormat('fr-CA', { ti
  * Si le message fait au moins RP_MIN_CHARS caractères et qu'il lui reste des actions
  * aujourd'hui, il gagne RP_XP. Renvoie { player, counted, xp, count, ups, limit }.
  */
-export function rpMessage(player, { channelId, name = '', length = 0, now = Date.now() } = {}) {
+export function rpMessage(player, { channelId, parentId = null, name = '', length = 0, now = Date.now() } = {}) {
   const p = clone(player);
   const out = { player: p, counted: false, xp: 0, count: 0, ups: 0, limit: false };
   if (length < RP_MIN_CHARS) return out; // trop court : ni XP ni déplacement
-  p.position = { channelId: String(channelId), name: str(name, 100), at: now };
+  p.position = { channelId: String(channelId), parentId: parentId ? String(parentId) : null, name: str(name, 100), at: now };
   const day = rpDay(now);
   if (p.rp?.day !== day) p.rp = { day, count: 0 };
   if (p.rp.count >= RP_DAILY) {
@@ -1092,6 +1092,83 @@ export function inviteAction(player, action, ctx = {}) {
   const previous = p.crewId && p.crewId !== crew.id ? p.crewId : null;
   p.crewId = crew.id;
   return { player: p, crew, previous, toast: `Bienvenue dans ${crew.name} !` };
+}
+
+/* ═══ Carte du monde ═════════════════════════════════════════════════════
+ * Les positions sont en % de la carte (0 à 100), la taille d'une île en % de
+ * la largeur : la carte reste juste quelle que soit la taille de l'image.
+ */
+/** Valeur de trajet par unité de distance (largeur de la carte = 100). */
+export const TRAVEL_PER_UNIT = 1;
+const pct = (v, d = 50) => Math.round(Math.min(100, Math.max(0, Number.isFinite(+v) ? +v : d)) * 100) / 100;
+
+export function normalizeIsland(x = {}) {
+  const name = str(x.name, 60);
+  if (!name) fail('Donne un nom à l’île.');
+  return {
+    name,
+    desc: str(x.desc, 600),
+    img: x.img ? str(x.img, 3_000_000) : null, // PNG transparent
+    x: pct(x.x), y: pct(x.y),
+    size: Math.round(Math.min(60, Math.max(1, Number(x.size) || 8)) * 100) / 100, // % de la largeur de la carte
+    visible: x.visible !== false,
+    accessible: x.accessible !== false,
+    channels: (Array.isArray(x.channels) ? x.channels : [])
+      .filter((c) => c && /^[\w-]{1,30}$/.test(String(c.id)))
+      .map((c) => ({ id: String(c.id), name: str(c.name, 100), kind: c.kind === 'forum' ? 'forum' : 'salon' }))
+      .filter((c, i, a) => a.findIndex((o) => o.id === c.id) === i)
+      .slice(0, 50),
+  };
+}
+export function normalizeMap(m = {}) {
+  const islands = {};
+  for (const [id, isl] of Object.entries(m.islands || {})) {
+    try {
+      islands[id] = normalizeIsland(isl);
+    } catch {}
+  }
+  const routes = {};
+  for (const [k, v] of Object.entries(m.routes || {})) {
+    const [a, b] = k.split('|');
+    if (islands[a] && islands[b] && a !== b && Number.isFinite(+v)) routes[routeKey(a, b)] = int(v, 0, 1e6);
+  }
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, routes }; // ratio = hauteur / largeur du fond
+}
+export const routeKey = (a, b) => [a, b].sort().join('|');
+/** Distance entre deux îles, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
+export function islandDistance(map, a, b) {
+  const A = map.islands[a], B = map.islands[b];
+  if (!A || !B) return null;
+  const dx = A.x - B.x, dy = (A.y - B.y) * map.ratio;
+  return Math.hypot(dx, dy);
+}
+/** Temps de trajet : celui choisi par le staff, sinon calculé selon la distance. */
+export function travelTime(map, a, b) {
+  if (a === b) return 0;
+  const k = routeKey(a, b);
+  if (map.routes[k] != null) return { value: map.routes[k], auto: false };
+  const d = islandDistance(map, a, b);
+  return d == null ? null : { value: Math.max(1, Math.round(d * TRAVEL_PER_UNIT)), auto: true };
+}
+/** Île d'un salon (ou d'un post de forum, via son forum). */
+export function islandOf(map, position) {
+  if (!position) return null;
+  const ids = [position.channelId, position.parentId].filter(Boolean);
+  return Object.keys(map.islands).find((id) => map.islands[id].channels.some((c) => ids.includes(c.id))) || null;
+}
+/**
+ * Carte vue par un joueur : îles visibles, plus celle où il se trouve.
+ * Le staff voit tout (y compris les îles cachées et les réglages).
+ */
+export function mapFor(map0, player, { staff = false } = {}) {
+  const map = normalizeMap(clone(map0));
+  const here = islandOf(map, player?.position);
+  if (staff) return { ...map, here };
+  const islands = Object.fromEntries(Object.entries(map.islands).filter(([id, isl]) => isl.visible || id === here));
+  const ids = Object.keys(islands);
+  const travel = {};
+  if (here) for (const id of ids) if (id !== here) travel[id] = travelTime(map, here, id)?.value ?? null;
+  return { bg: map.bg, ratio: map.ratio, islands, here, travel };
 }
 
 /* ═══ Mode démo (hors Discord) ═══════════════════════════════════════════ */

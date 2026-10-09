@@ -492,3 +492,26 @@ test('messages RP : salons déclarés, XP limitée, la position du joueur fait l
   r = await call('bot', { body: { op: 'rp.channel.remove', channelId: '111111111111111111' }, headers: H });
   assert.deepEqual(r.out.channels, []);
 });
+
+test('carte : fond, îles avec salons vérifiés, déplacement, trajets, vue joueur', async () => {
+  let r = await call('staff', { body: { op: 'map.bg', bg: 'https://i.ibb.co/abc/carte.png', ratio: 0.5 }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('staff', { body: { op: 'map.island.save', island: { name: 'Port-Brisant', x: 10, y: 20, channels: [{ id: '111111111111111111' }] } }, headers: MJ });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.map.islands['port-brisant'].channels[0].name, 'port-brisant', 'nom retrouvé');
+  r = await call('staff', { body: { op: 'map.island.save', island: { name: 'Fantôme', channels: [{ id: '999999999999999999' }] } }, headers: MJ });
+  assert.equal(r.status, 400, 'salon inconnu refusé');
+  await call('staff', { body: { op: 'map.island.save', island: { name: 'Île secrète', x: 80, y: 80, visible: false } }, headers: MJ });
+  r = await call('staff', { body: { op: 'map.island.move', id: 'ile-secrete', x: 70, y: 60 }, headers: MJ });
+  assert.equal(r.out.map.islands['ile-secrete'].x, 70);
+  r = await call('staff', { body: { op: 'map.route', a: 'port-brisant', b: 'ile-secrete', value: 42 }, headers: MJ });
+  assert.equal(r.out.map.routes['ile-secrete|port-brisant'], 42);
+  // u1 est à port-brisant (sa position) : il voit son île, pas l'île secrète
+  r = await call('state', { method: 'GET', query: {}, headers: J });
+  assert.equal(r.out.map.here, 'port-brisant');
+  assert.deepEqual(Object.keys(r.out.map.islands), ['port-brisant']);
+  assert.equal(r.out.map.routes, undefined);
+  // un joueur ne peut pas modifier la carte
+  r = await call('staff', { body: { op: 'map.island.delete', id: 'port-brisant' }, headers: J });
+  assert.equal(r.status, 403);
+});

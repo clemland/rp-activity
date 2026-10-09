@@ -141,6 +141,9 @@ async function resync() {
     SHIPS = st.ships || [];
     INVITES = st.invites || [];
     NAVD = st.nav;
+    CHNAME = st.channelName || '';
+    POSID = st.channelId || null;
+    MAP = st.map || null;
     renderAll();
   } catch {}
 }
@@ -1611,7 +1614,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, admin: ADMIN, marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -2536,6 +2539,325 @@ $('cr-del').addEventListener('click', async () => {
   }
 });
 
+/* ═══ Carte du monde ═════════════════════════════════════════════════════ */
+let MAP = null; // carte vue par le joueur (îles visibles, île où il est, trajets depuis là)
+/**
+ * Visionneuse de carte : zoom (molette, pincement, boutons) et déplacement
+ * (glisser). En mode édition, on fait glisser les îles pour les placer.
+ */
+function mapViewer(root, map, { editable = false, here = null, selected = null, onIsland, onMove } = {}) {
+  const ratio = map.ratio || 0.5625;
+  root.innerHTML = `
+    <div class="mapview" style="aspect-ratio:${1 / ratio}">
+      <div class="map-stage">
+        ${map.bg ? `<img class="map-bg" src="${imgSrc(map.bg)}" alt="" draggable="false">` : '<div class="map-bg map-empty"></div>'}
+        ${Object.entries(map.islands).map(([id, isl]) => `
+          <button class="island ${isl.visible ? '' : 'hidden-isl'} ${isl.accessible ? '' : 'closed-isl'} ${id === here ? 'here' : ''} ${id === selected ? 'sel' : ''}"
+            data-island="${esc(id)}" style="left:${isl.x}%;top:${isl.y}%;width:${isl.size}%" aria-label="${esc(isl.name)}">
+            ${isl.img ? `<img src="${imgSrc(isl.img)}" alt="" draggable="false">` : '<span class="isl-blob"></span>'}
+            <span class="isl-name">${editable && !isl.visible ? '👁 ' : ''}${!isl.accessible ? '⛔ ' : ''}${esc(isl.name)}</span>
+            ${id === here ? '<span class="isl-here">📍 Tu es ici</span>' : ''}
+          </button>`).join('')}
+      </div>
+      <div class="map-ctl"><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
+    </div>`;
+  const view = root.querySelector('.mapview'), stage = root.querySelector('.map-stage');
+  const st = { z: 1, tx: 0, ty: 0 };
+  const apply = () => {
+    const W = view.clientWidth, H = view.clientHeight;
+    st.z = Math.min(8, Math.max(1, st.z));
+    st.tx = Math.min(0, Math.max(W - W * st.z, st.tx));
+    st.ty = Math.min(0, Math.max(H - H * st.z, st.ty));
+    stage.style.transform = `translate(${st.tx}px, ${st.ty}px) scale(${st.z})`;
+    view.style.setProperty('--z', st.z);
+  };
+  const zoomAt = (factor, cx, cy) => {
+    const r = view.getBoundingClientRect(), x = cx - r.left, y = cy - r.top, z0 = st.z;
+    st.z = Math.min(8, Math.max(1, st.z * factor));
+    st.tx = x - ((x - st.tx) * st.z) / z0;
+    st.ty = y - ((y - st.ty) * st.z) / z0;
+    apply();
+  };
+  view.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
+  }, { passive: false });
+  root.querySelector('.map-ctl').addEventListener('click', (e) => {
+    const z = e.target.closest('[data-z]')?.dataset.z;
+    if (z == null) return;
+    const r = view.getBoundingClientRect();
+    if (z === '0') Object.assign(st, { z: 1, tx: 0, ty: 0 });
+    else zoomAt(z === '1' ? 1.4 : 1 / 1.4, r.left + r.width / 2, r.top + r.height / 2);
+    apply();
+  });
+  // Glisser : déplace la carte, ou une île en mode édition. Deux doigts : zoom.
+  const ptrs = new Map();
+  let drag = null, pinch = null;
+  view.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.map-ctl')) return;
+    view.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: st.z };
+      drag = null;
+      return;
+    }
+    const isl = editable ? e.target.closest('[data-island]') : null;
+    drag = { x: e.clientX, y: e.clientY, tx: st.tx, ty: st.ty, isl, moved: false, target: e.target.closest('[data-island]') };
+  });
+  view.addEventListener('pointermove', (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      zoomAt((pinch.z * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)) / st.z, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      return;
+    }
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    drag.moved = true;
+    if (drag.isl) {
+      const r = stage.getBoundingClientRect();
+      drag.isl.style.left = `${Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100))}%`;
+      drag.isl.style.top = `${Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100))}%`;
+      drag.isl.classList.add('dragging');
+    } else {
+      st.tx = drag.tx + dx;
+      st.ty = drag.ty + dy;
+      apply();
+    }
+  });
+  const end = (e) => {
+    ptrs.delete(e.pointerId);
+    if (ptrs.size < 2) pinch = null;
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    if (d.isl && d.moved) {
+      d.isl.classList.remove('dragging');
+      onMove?.(d.isl.dataset.island, parseFloat(d.isl.style.left), parseFloat(d.isl.style.top));
+    } else if (!d.moved && d.target) onIsland?.(d.target.dataset.island);
+  };
+  view.addEventListener('pointerup', end);
+  view.addEventListener('pointercancel', end);
+  new ResizeObserver(apply).observe(view);
+  apply();
+}
+
+/* Vue joueur */
+let mapSel = null;
+function renderMap() {
+  if (!S || ADMIN) return;
+  const m = MAP;
+  const el = $('v-map');
+  if (!m || (!m.bg && !Object.keys(m.islands).length)) {
+    el.innerHTML = `<div class="no-shop">${ico(231)}<h2>Carte du monde</h2><p class="note">La carte n’est pas encore dessinée.</p></div>`;
+    return;
+  }
+  const isl = mapSel && m.islands[mapSel];
+  el.innerHTML = `
+    <div class="sec-head"><div><h2>Carte du monde</h2><p class="lede" style="margin:0">${m.here ? `Tu es sur <b>${esc(m.islands[m.here].name)}</b>.` : 'Ta position n’est sur aucune île de la carte.'} Zoome avec la molette ou deux doigts, fais glisser pour te déplacer.</p></div></div>
+    <div id="map-player"></div>
+    <div class="isl-info" id="isl-info">${isl ? `
+      <div class="isl-head">${isl.img ? `<img src="${imgSrc(isl.img)}" alt="">` : ''}<div><h3>${esc(isl.name)}</h3>
+        <p class="note" style="margin:0">${mapSel === m.here ? '📍 Tu es ici · ' : ''}${isl.accessible ? 'Accessible' : '⛔ Inaccessible'}${mapSel !== m.here && m.travel?.[mapSel] != null ? ` · Trajet depuis ton île : <b>${m.travel[mapSel]}</b>` : ''}</p></div></div>
+      ${isl.desc ? `<p>${esc(isl.desc)}</p>` : ''}
+      ${isl.channels.length ? `<div class="pax">${isl.channels.map((c) => `<span>${c.kind === 'forum' ? '🗂️' : '#'} ${esc(c.name)}</span>`).join('')}</div>` : ''}` : '<p class="note" style="margin:0">Clique sur une île pour en savoir plus.</p>'}</div>`;
+  mapViewer($('map-player'), m, { here: m.here, selected: mapSel, onIsland: (id) => ((mapSel = id), renderMap()) });
+}
+
+/* Éditeur du staff */
+let amap = null, islandDraft = null, islandDraftId = null;
+async function loadAdminMap() {
+  try {
+    amap = (await API.staff('map.get')).map;
+  } catch (err) {
+    toast(esc(err.message));
+    amap = G.normalizeMap({});
+  }
+  renderAdminMap();
+}
+async function mapCall(op, payload) {
+  setBusy(1);
+  try {
+    const out = await API.staff(op, payload);
+    amap = out.map;
+    if (out.toast) toast(esc(out.toast));
+    renderAdminMap();
+    return out;
+  } catch (err) {
+    toast(esc(err.message));
+    return null;
+  } finally {
+    setBusy(-1);
+  }
+}
+function renderAdminMap() {
+  if (!tools()) return;
+  const el = $('v-amap');
+  if (!amap) return void (el.innerHTML = '<p class="note">Chargement de la carte…</p>');
+  const ids = Object.keys(amap.islands);
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Carte</h2><p class="lede" style="margin:0">Fais glisser les îles pour les placer. Clique sur une île pour la modifier.</p></div>
+      <div class="se-row"><button class="btn ghost" id="amap-bg-file">Fond de carte (fichier)</button><button class="btn ghost" id="amap-bg-link">Fond (lien)</button><button class="btn" id="amap-new">+ Île</button></div>
+    </div>
+    <div id="map-admin"></div>
+    ${ids.length ? `<div class="fleet-list" style="margin-top:12px">${ids.map((id) => {
+      const i = amap.islands[id];
+      return `<button class="gest-card" data-isl="${esc(id)}">
+        <span class="slot-ico">${i.img ? `<span class="ico item-img"><img src="${imgSrc(i.img)}" alt=""></span>` : ico(206)}</span>
+        <span><b>${esc(i.name)}</b><small>${i.visible ? 'Visible' : '👁 Cachée'} · ${i.accessible ? 'Accessible' : '⛔ Inaccessible'} · ${i.channels.length} salon${i.channels.length > 1 ? 's' : ''}</small></span>
+      </button>`;
+    }).join('')}</div>` : '<p class="note">Aucune île. Ajoute un fond de carte, puis des îles (PNG transparents).</p>'}`;
+  mapViewer($('map-admin'), amap, { editable: true, onIsland: (id) => openIslandEdit(id), onMove: (id, x, y) => mapCall('map.island.move', { id, x, y }) });
+  paintStatic(el);
+}
+$('v-amap').addEventListener('click', async (e) => {
+  if (e.target.closest('#amap-new')) return openIslandEdit(null);
+  const i = e.target.closest('[data-isl]')?.dataset.isl;
+  if (i) return openIslandEdit(i);
+  if (e.target.closest('#amap-bg-file')) return $('amap-file').click();
+  if (e.target.closest('#amap-bg-link')) {
+    const v = await askText('Colle le lien de l’image du fond de carte.', { title: 'Fond de carte', ok: 'Valider', placeholder: 'https://…', max: 2000 });
+    if (!v) return;
+    if (!/^https?:\/\//.test(v)) return toast('Le lien doit commencer par http:// ou https://');
+    setMapBg(v);
+  }
+});
+/** Fond de carte : on mesure l'image pour garder ses proportions. */
+function setMapBg(src) {
+  const img = new Image();
+  img.onload = () => mapCall('map.bg', { bg: src, ratio: img.naturalHeight / img.naturalWidth });
+  img.onerror = () => mapCall('map.bg', { bg: src });
+  img.src = mediaSrc(src);
+}
+$('amap-file').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f?.type.startsWith('image/')) return;
+  if (f.size > 4 * 1024 * 1024) return toast('Image trop lourde (4 Mo maximum) : utilise plutôt un lien.');
+  setMapBg(await readAsDataUrl(f));
+});
+
+function openIslandEdit(id) {
+  islandDraftId = id;
+  islandDraft = structuredClone(id ? amap.islands[id] : { name: '', desc: '', img: null, x: 50, y: 50, size: 8, visible: true, accessible: true, channels: [] });
+  $('isl-title').textContent = id ? islandDraft.name : 'Nouvelle île';
+  $('isl-del').hidden = !id;
+  $('isl-err').textContent = '';
+  renderIslandEdit();
+  openDialog('d-island');
+}
+function renderIslandEdit() {
+  const d = islandDraft;
+  const others = Object.keys(amap.islands).filter((o) => o !== islandDraftId);
+  $('isl-body').innerHTML = `
+    <div class="form">
+      <div class="wide"><label for="isl-name">Nom de l’île</label><input id="isl-name" value="${esc(d.name)}" maxlength="60"></div>
+      <div class="wide"><label for="isl-desc">Description</label><input id="isl-desc" value="${esc(d.desc)}" maxlength="600"></div>
+      <div><label for="isl-size">Taille sur la carte : <b id="isl-size-v">${d.size}</b> %</label><input id="isl-size" type="range" min="1" max="40" step="0.5" value="${d.size}"></div>
+      <div class="isl-flags">
+        <label class="chk"><input type="checkbox" id="isl-visible" ${d.visible ? 'checked' : ''}> Visible par tous</label>
+        <label class="chk"><input type="checkbox" id="isl-access" ${d.accessible ? 'checked' : ''}> Accessible</label>
+      </div>
+    </div>
+    <div class="img-field" style="margin-top:12px">
+      <div class="prev isl-prev">${d.img ? `<img src="${imgSrc(d.img)}" alt="">` : ico(206)}</div>
+      <div class="se-face-ctl">
+        <b>Image de l’île (PNG transparent)</b>
+        <div class="se-row"><button type="button" class="btn sm" id="isl-pick">Choisir une image</button><input type="file" id="isl-file" accept="image/png,image/webp,image/gif" hidden>${d.img ? '<button type="button" class="btn sm ghost" id="isl-noimg">Retirer</button>' : ''}</div>
+        <div class="ph-url-row"><input type="url" id="isl-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="isl-url-go">Utiliser</button></div>
+      </div>
+    </div>
+    <h3 class="ed-h">Salons de l’île</h3>
+    <div class="pax">${d.channels.map((c, i) => `<span>${c.kind === 'forum' ? '🗂️' : '#'} ${esc(c.name || c.id)} <button class="linklike" data-chdel="${i}" aria-label="Retirer">✕</button></span>`).join('') || '<span class="note">Aucun salon.</span>'}</div>
+    <div class="ph-url-row"><input id="isl-ch" inputmode="numeric" placeholder="ID d’un salon ou d’un forum"><button type="button" class="btn sm" id="isl-ch-add">Ajouter</button></div>
+    <p class="note" style="margin:4px 0 0">Un forum entier peut appartenir à l’île : chacun de ses posts compte alors comme étant sur l’île. Le nom des salons est retrouvé à l’enregistrement.</p>
+    ${islandDraftId && others.length ? `<h3 class="ed-h">Temps de trajet depuis cette île</h3>
+      <div class="routes">${others.map((o) => {
+        const t = G.travelTime(amap, islandDraftId, o);
+        return `<div class="route-row"><span>${esc(amap.islands[o].name)}</span><input type="number" min="0" data-route="${esc(o)}" value="${t && !t.auto ? t.value : ''}" placeholder="auto : ${t?.value ?? '?'}" aria-label="Temps de trajet vers ${esc(amap.islands[o].name)}"><small class="note">${t?.auto ? 'calculé' : 'choisi'}</small></div>`;
+      }).join('')}</div>
+      <p class="note">Vide = calculé selon la distance. Une valeur remplace le calcul (dans les deux sens).</p>` : ''}`;
+}
+function readIslandEdit() {
+  const d = islandDraft;
+  d.name = $('isl-name').value;
+  d.desc = $('isl-desc').value;
+  d.size = +$('isl-size').value;
+  d.visible = $('isl-visible').checked;
+  d.accessible = $('isl-access').checked;
+}
+$('d-island').addEventListener('input', (e) => {
+  if (e.target.id === 'isl-size') $('isl-size-v').textContent = e.target.value;
+});
+$('d-island').addEventListener('change', async (e) => {
+  const o = e.target.dataset?.route;
+  if (o) {
+    const v = e.target.value.trim();
+    const out = await mapCall('map.route', { a: islandDraftId, b: o, value: v === '' ? null : Math.max(0, Math.round(+v)) });
+    if (out) {
+      readIslandEdit();
+      renderIslandEdit();
+    }
+    return;
+  }
+  if (e.target.id === 'isl-file') {
+    const f = e.target.files[0];
+    if (!f?.type.startsWith('image/')) return;
+    if (f.size > 4 * 1024 * 1024) return void ($('isl-err').textContent = 'Image trop lourde (4 Mo maximum).');
+    readIslandEdit();
+    islandDraft.img = await readAsDataUrl(f);
+    renderIslandEdit();
+  }
+});
+$('d-island').addEventListener('click', (e) => {
+  if (e.target.id === 'isl-pick') return $('isl-file').click();
+  if (e.target.id === 'isl-noimg') {
+    readIslandEdit();
+    islandDraft.img = null;
+    return renderIslandEdit();
+  }
+  if (e.target.id === 'isl-url-go') {
+    const v = $('isl-url').value.trim();
+    if (!/^https?:\/\//.test(v)) return void ($('isl-err').textContent = 'Le lien doit commencer par http:// ou https://');
+    readIslandEdit();
+    islandDraft.img = v;
+    return renderIslandEdit();
+  }
+  if (e.target.id === 'isl-ch-add') {
+    const v = $('isl-ch').value.trim();
+    if (!v) return;
+    readIslandEdit();
+    if (!islandDraft.channels.some((c) => c.id === v)) islandDraft.channels.push({ id: v, name: '' });
+    return renderIslandEdit();
+  }
+  const del = e.target.closest('[data-chdel]')?.dataset.chdel;
+  if (del != null) {
+    readIslandEdit();
+    islandDraft.channels.splice(+del, 1);
+    renderIslandEdit();
+  }
+});
+$('isl-save').addEventListener('click', async () => {
+  readIslandEdit();
+  if (!islandDraft.name.trim()) return void ($('isl-err').textContent = 'Donne un nom à l’île.');
+  $('isl-save').disabled = true;
+  $('isl-err').textContent = islandDraft.img?.startsWith('data:') ? 'Envoi de l’image…' : '';
+  const { x, y, ...rest } = islandDraft;
+  const out = await mapCall('map.island.save', { id: islandDraftId, island: islandDraftId ? rest : islandDraft });
+  $('isl-save').disabled = false;
+  if (out) closeDialog($('d-island'));
+  else $('isl-err').textContent = '';
+});
+$('isl-del').addEventListener('click', async () => {
+  if (!(await askConfirm('L’île et ses temps de trajet seront supprimés. Les salons restent des salons RP.', { title: `Supprimer ${islandDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
+  if (await mapCall('map.island.delete', { id: islandDraftId })) closeDialog($('d-island'));
+});
+
 /* ═══ Gestion (staff) : base d'objets et recettes ════════════════════════ */
 let gestTab = 'items', gestQuery = '';
 let itemDraft = null, itemDraftId = null, recipeDraft = null, recipeDraftId = null;
@@ -2839,6 +3161,8 @@ function showScreen(name) {
     }
   });
   if (name === 'ashop') renderAdminShops();
+  if (name === 'map') renderMap();
+  if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();
   if (name === 'ships') renderShipsAdmin();
   if (name === 'marine') renderMarine();
@@ -2879,6 +3203,7 @@ async function refresh() {
     NAVD = st.nav;
     CHNAME = st.channelName || '';
     POSID = st.channelId || null;
+    MAP = st.map || null;
     if (screen === 'crew' && !document.activeElement?.closest('#v-crew')) renderCrew();
     if (screen === 'nav') renderNav();
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
@@ -2913,6 +3238,7 @@ document.addEventListener('dragstart', (e) => {
     NAVD = st.nav;
     CHNAME = st.channelName || '';
     POSID = st.channelId || null;
+    MAP = st.map || null;
   } catch (err) {
     console.error(err);
     $('boot').classList.add('error');

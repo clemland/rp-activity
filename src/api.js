@@ -21,7 +21,19 @@ async function call(method, path, body) {
 }
 
 /* ─── Mode démo : tout reste dans ce navigateur ─── */
-const KEY = 'op_rp_demo_v9';
+/** Petite carte d'exemple : une mer dessinée et trois îles (sans image : formes par défaut). */
+function demoMap() {
+  const sea = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><defs><radialGradient id="g" cx="50%" cy="45%" r="75%"><stop offset="0" stop-color="#3f8ad0"/><stop offset="1" stop-color="#1b4f8e"/></radialGradient></defs><rect width="1600" height="900" fill="url(#g)"/><g fill="none" stroke="#9fd3ef" stroke-opacity=".35" stroke-width="3">${Array.from({ length: 14 }, (_, i) => `<path d="M${(i * 137) % 1500} ${(i * 211) % 850} q30 -18 60 0 t60 0"/>`).join('')}</g></svg>`;
+  return G.normalizeMap({
+    bg: `data:image/svg+xml;base64,${btoa(sea)}`, ratio: 0.5625,
+    islands: {
+      'port-brisant': { name: 'Port-Brisant', desc: 'Petit port marchand, point de départ de bien des équipages.', x: 24, y: 42, size: 10, channels: [{ id: 'demo', name: 'port-brisant' }] },
+      'water-7': { name: 'Water 7', desc: 'La cité des charpentiers.', x: 62, y: 58, size: 12, channels: [{ id: 'forum-w7', name: 'Water 7', kind: 'forum' }] },
+      'ile-cachee': { name: 'Île sans nom', desc: 'Personne ne sait qu’elle existe.', x: 84, y: 18, size: 7, visible: false, accessible: false },
+    },
+  });
+}
+const KEY = 'op_rp_demo_v10';
 let store;
 function loadStore() {
   try {
@@ -37,6 +49,7 @@ function loadStore() {
         sh['brise-lames'].requests = [{ uid: 'pnj-2', at: Date.now() }];
         return sh;
       })(),
+      map: demoMap(),
       crews: {
         'goeland-noir': G.demoCrew(),
         // un autre équipage qui invite le joueur de démo, pour tester les invitations
@@ -87,6 +100,7 @@ function demoHarbor() {
   return { harbor, aboard, requests, names, crewNames };
 }
 const demoState = () => ({
+  map: G.mapFor(store.map, store.player),
   nav: demoHarbor(),
   ...demoCrewShips(),
   me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
@@ -279,6 +293,40 @@ export async function staff(op, payload = {}) {
       delete store.ships[payload.id];
       saveStore();
       return { toast: 'Bateau supprimé' };
+    }
+    if (op === 'map.get') return { map: structuredClone(store.map) };
+    if (op.startsWith('map.')) {
+      const m = store.map;
+      let toast = null, id = payload.id;
+      if (op === 'map.bg') {
+        m.bg = payload.bg;
+        if (payload.ratio > 0) m.ratio = payload.ratio;
+        toast = 'Fond de carte enregistré';
+      }
+      if (op === 'map.island.save') {
+        const old = payload.id && m.islands[payload.id];
+        const channels = (payload.island.channels || []).map((c) => ({ id: String(c.id), name: c.name || `salon-${String(c.id).slice(-4)}` }));
+        const isl = G.normalizeIsland({ ...(old || {}), ...payload.island, channels });
+        if (!old) {
+          id = G.slug(isl.name);
+          for (let n = 2; m.islands[id]; n++) id = `${G.slug(isl.name)}-${n}`;
+        }
+        m.islands[id] = isl;
+        toast = old ? `Île modifiée : ${isl.name}` : `Île ajoutée : ${isl.name}`;
+      }
+      if (op === 'map.island.move') m.islands[payload.id] = G.normalizeIsland({ ...m.islands[payload.id], x: payload.x, y: payload.y });
+      if (op === 'map.island.delete') {
+        toast = `Île supprimée : ${m.islands[payload.id].name}`;
+        delete m.islands[payload.id];
+      }
+      if (op === 'map.route') {
+        const k = G.routeKey(payload.a, payload.b);
+        if (payload.value === null) delete m.routes[k];
+        else m.routes[k] = payload.value;
+      }
+      store.map = G.normalizeMap(m);
+      saveStore();
+      return { map: structuredClone(store.map), id, toast };
     }
     if (op === 'shops') return { shops: structuredClone(Object.fromEntries(Object.entries(store.shops).filter(([, v]) => v))) };
     if (op === 'shop.save') {

@@ -7,9 +7,9 @@
  */
 import { handler, need } from './_lib/http.js';
 import { userFromRequest, isStaff } from './_lib/discord.js';
-import { findPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList, invitesFor, loadHarbor } from './_lib/context.js';
+import { findPlayer, loadShop, loadCatalog, loadMap, loadCrewAndShips, publicCrew, shipList, invitesFor, loadHarbor } from './_lib/context.js';
 import { read, remove, write } from './_lib/db.js';
-import { paySalary } from '../shared/game.js';
+import { paySalary, mapFor } from '../shared/game.js';
 
 export default handler(['GET'], async (req) => {
   const me = await userFromRequest(req);
@@ -52,6 +52,7 @@ export default handler(['GET'], async (req) => {
     me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied, salary,
     crew: cs ? publicCrew(cs.crew, cs.memberNames) : null, ships: cs ? shipList(cs.ships) : [],
     invites: found ? await invitesFor(target) : [],
-    nav: found ? await loadHarbor(found.player, cs.crew, channel) : null, ...info,
+    nav: found ? await loadHarbor(found.player, cs.crew, channel) : null,
+    map: mapFor((await loadMap()).map, found?.player ?? null), ...info,
   };
 });

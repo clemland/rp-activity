@@ -462,3 +462,33 @@ test('ancienne fiche avec plus d’XP que le nouveau seuil : convertie en niveau
   assert.equal(p.xp, 140);
   assert.equal(p.statPts, 10);
 });
+
+test('carte : îles, salons, île du joueur (forum compris), temps de trajet auto ou choisi', () => {
+  const map = G.normalizeMap({
+    ratio: 0.5,
+    islands: {
+      a: { name: 'Port-Brisant', x: 10, y: 20, channels: [{ id: 'c1', name: 'port' }] },
+      b: { name: 'Water 7', x: 40, y: 60, channels: [{ id: 'forum9', name: 'Water 7', kind: 'forum' }] },
+      c: { name: 'Île cachée', x: 90, y: 90, visible: false, accessible: false },
+      x: { name: '' }, // invalide : ignorée
+    },
+    routes: { 'b|a': 7, 'a|zz': 3 },
+  });
+  assert.deepEqual(Object.keys(map.islands), ['a', 'b', 'c']);
+  assert.equal(G.islandOf(map, { channelId: 'c1' }), 'a');
+  assert.equal(G.islandOf(map, { channelId: 'post-42', parentId: 'forum9' }), 'b', 'post de forum');
+  assert.equal(G.islandOf(map, { channelId: 'ailleurs' }), null);
+  assert.deepEqual(G.travelTime(map, 'a', 'b'), { value: 7, auto: false }, 'valeur choisie par le staff');
+  const auto = G.travelTime(map, 'a', 'c'); // dx 80, dy 70 × 0,5 = 35 → 87,3
+  assert.deepEqual(auto, { value: 87, auto: true });
+  assert.equal(map.routes['a|zz'], undefined);
+  // vue joueur : pas l'île cachée, sauf s'il s'y trouve
+  const vue = G.mapFor(map, { position: { channelId: 'c1' } });
+  assert.deepEqual(Object.keys(vue.islands), ['a', 'b']);
+  assert.equal(vue.here, 'a');
+  assert.equal(vue.travel.b, 7);
+  assert.equal(vue.routes, undefined, 'pas de réglages côté joueur');
+  const surCachee = G.mapFor({ ...map, islands: { ...map.islands, c: { ...map.islands.c, channels: [{ id: 'c3' }] } } }, { position: { channelId: 'c3' } });
+  assert.ok(surCachee.islands.c, 'il voit l’île cachée où il se trouve');
+  assert.equal(Object.keys(G.mapFor(map, null, { staff: true }).islands).length, 3);
+});

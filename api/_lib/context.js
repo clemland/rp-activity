@@ -1,5 +1,5 @@
 /** Chargement commun : fiche, boutique du salon, catalogue d'objets et de recettes. */
-import { normalize, normalizeShop, normalizeCrew, normalizeShip, setCatalog, fullName, canManageShip } from '../../shared/game.js';
+import { normalize, normalizeShop, normalizeCrew, normalizeShip, normalizeMap, setCatalog, fullName, canManageShip } from '../../shared/game.js';
 import { read, readAll, readMany, db } from './db.js';
 import { channelName } from './discord.js';
 import { HttpError } from './http.js';
@@ -121,4 +121,10 @@ export async function loadHarbor(player, crew, channelId) {
   // Les demandes des autres ne regardent que le propriétaire : on ne garde que la sienne.
   const hide = (sh) => ({ ...sh, requests: canManageShip(player, sh, crew) ? sh.requests : sh.requests.filter((r) => r.uid === player.uid) });
   return { harbor: harbor.map(hide), aboard: aboard ? hide(aboard) : null, requests, names, crewNames, crewKinds };
+}
+
+/** Carte du monde (fond, îles, temps de trajet), stockée dans meta. */
+export async function loadMap() {
+  const row = await read('meta', 'map');
+  return { map: normalizeMap(row?.data || {}), version: row?.version ?? null };
 }

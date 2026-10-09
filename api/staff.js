@@ -9,6 +9,8 @@
  *  - crews / crew.save { id?, crew } / crew.delete { id }  : équipages (membres, capitaine, banque, coffre, bateau)
  *  - ships / ship.save { id?, ship } / ship.delete { id }  : bateaux (créés par le staff ou achetés)
  *  - ship.upgrade { id, type, amount }                     : améliorer un bateau (cale, canons, voile)
+ *  - map.get / map.bg { bg, ratio } / map.island.save { id?, island } / map.island.move { id, x, y }
+ *    map.island.delete { id } / map.route { a, b, value|null } : carte du monde
  *  - item.save { id?, item } / item.delete { id }        : base d'objets
  *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
  */
@@ -17,8 +19,8 @@ import { userFromRequest, isStaff, channelById } from './_lib/discord.js';
 import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
-import { loadCatalog } from './_lib/context.js';
-import { upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import { loadCatalog, loadMap } from './_lib/context.js';
+import { normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -209,6 +211,74 @@ export default handler(['POST'], async (req, body) => {
       }
       await remove('ships', body.id);
       return { toast: `Bateau supprimé : ${row.data.name}` };
+    }
+
+    case 'map.get':
+      return { map: (await loadMap()).map };
+
+    case 'map.bg':
+    case 'map.island.save':
+    case 'map.island.move':
+    case 'map.island.delete':
+    case 'map.route': {
+      // Images d'abord (hors de la boucle de réessai)
+      let bg, img;
+      if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
+      if (body.op === 'map.island.save' && body.island?.img) img = await ingest(body.island.img, 'iles', slug(body.island.name || 'ile'));
+      // Salons de l'île : on vérifie chaque ID et on retrouve son nom (et si c'est un forum)
+      let channels;
+      if (body.op === 'map.island.save') {
+        channels = [];
+        for (const c of body.island?.channels || []) {
+          const id = String(c.id || c).trim();
+          if (!id) continue;
+          const ch = await channelById(id);
+          need(ch, 400, `Salon introuvable : ${id}. Vérifie l’ID.`);
+          need(!env.guildId || !ch.guildId || ch.guildId === env.guildId, 400, `Le salon ${ch.name} n’est pas sur le serveur principal.`);
+          channels.push({ id, name: ch.name, kind: ch.forum ? 'forum' : 'salon' });
+        }
+      }
+      return retry(async () => {
+        const { map, version } = await loadMap();
+        let toast = 'Carte mise à jour', id = body.id;
+        if (body.op === 'map.bg') {
+          map.bg = bg;
+          if (Number(body.ratio) > 0) map.ratio = Number(body.ratio);
+          toast = bg ? 'Fond de carte enregistré' : 'Fond de carte retiré';
+        }
+        if (body.op === 'map.island.save') {
+          const old = body.id && map.islands[body.id];
+          const isl = normalizeIsland({ ...(old || {}), ...body.island, img: img ?? (body.island.img === null ? null : old?.img ?? null), channels });
+          // Un salon n'appartient qu'à une île : on le retire des autres
+          for (const [oid, o] of Object.entries(map.islands)) if (oid !== body.id) o.channels = o.channels.filter((c) => !isl.channels.some((n) => n.id === c.id));
+          if (!old) {
+            id = slug(isl.name);
+            for (let n = 2; map.islands[id]; n++) id = `${slug(isl.name)}-${n}`;
+          }
+          map.islands[id] = isl;
+          toast = old ? `Île modifiée : ${isl.name}` : `Île ajoutée : ${isl.name}`;
+        }
+        if (body.op === 'map.island.move') {
+          need(map.islands[body.id], 404, 'Île introuvable.');
+          map.islands[body.id] = normalizeIsland({ ...map.islands[body.id], x: body.x, y: body.y });
+          toast = null;
+        }
+        if (body.op === 'map.island.delete') {
+          need(map.islands[body.id], 404, 'Île introuvable.');
+          toast = `Île supprimée : ${map.islands[body.id].name}`;
+          delete map.islands[body.id];
+        }
+        if (body.op === 'map.route') {
+          need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Trajet invalide.');
+          const k = routeKey(body.a, body.b);
+          if (body.value === null || body.value === '' || body.value === undefined) delete map.routes[k];
+          else map.routes[k] = Math.max(0, Math.round(Number(body.value) || 0));
+          toast = null;
+        }
+        const clean = normalizeMap(map);
+        await write('meta', 'map', clean, version);
+        return { map: clean, id, toast };
+      });
     }
 
     case 'shops':

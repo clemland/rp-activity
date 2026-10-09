@@ -1222,3 +1222,31 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .rp-dots i.on{background:var(--gold)}
 .h-rp small{margin:0}
 .h-rp{margin-bottom:8px}
+
+/* ═══ v33 : carte du monde ═══════════════════════════ */
+.mapview{position:relative;width:100%;max-height:72vh;overflow:hidden;border:3px solid var(--ink);background:#2a5f9e;touch-action:none;user-select:none;cursor:grab;margin-top:10px}
+.mapview:active{cursor:grabbing}
+.map-stage{position:absolute;inset:0;transform-origin:0 0}
+.map-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;pointer-events:none}
+.map-empty{background:repeating-linear-gradient(45deg,#2a5f9e 0 18px,#2d66a8 18px 36px)}
+.island{position:absolute;transform:translate(-50%,-50%);background:none;border:none;padding:0;cursor:pointer;display:grid;justify-items:center;gap:2px}
+.island img{width:100%;height:auto;display:block;pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35))}
+.isl-blob{display:block;width:100%;aspect-ratio:1.4;background:radial-gradient(ellipse at 50% 55%,#e8d38a 0 45%,#6aa74f 46% 62%,transparent 63%)}
+.isl-name{position:absolute;top:100%;left:50%;transform:translateX(-50%) scale(calc(1 / var(--z, 1)));transform-origin:top center;white-space:nowrap;font-weight:800;font-size:13px;color:#fff;text-shadow:0 1px 2px #000,0 0 6px #000;pointer-events:none}
+.isl-here{position:absolute;bottom:100%;left:50%;transform:translateX(-50%) scale(calc(1 / var(--z, 1)));transform-origin:bottom center;white-space:nowrap;font-weight:800;font-size:12px;background:var(--gold);color:var(--ink);border:2px solid var(--ink);padding:1px 7px;pointer-events:none}
+.island.hidden-isl{opacity:.55}
+.island.closed-isl img{filter:grayscale(.7) drop-shadow(0 3px 4px rgba(0,0,0,.35))}
+.island.sel img,.island.sel .isl-blob{outline:3px solid var(--gold);outline-offset:2px}
+.island.dragging{opacity:.8;z-index:5}
+.map-ctl{position:absolute;right:8px;top:8px;display:grid;gap:4px;z-index:6}
+.map-ctl .sq{background:#fffaea}
+.isl-info{margin-top:12px;border:3px solid var(--ink);background:#fbf0d2;padding:10px 14px;display:grid;gap:6px}
+.isl-head{display:flex;gap:12px;align-items:center}
+.isl-head img{width:64px;height:auto;max-height:64px;object-fit:contain}
+.isl-head h3{margin:0;font-size:20px}
+.isl-flags{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.isl-prev{background:#2a5f9e!important}
+.isl-prev img{object-fit:contain!important}
+.routes{display:grid;gap:4px}
+.route-row{display:grid;grid-template-columns:1fr 110px 70px;gap:8px;align-items:center}
+.route-row input{font:inherit;font-size:15px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);padding:3px 6px;min-width:0}

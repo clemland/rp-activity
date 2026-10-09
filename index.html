@@ -17,8 +17,10 @@
     <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
     <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
     <button class="scr" role="tab" data-screen="crew" aria-controls="s-crew"><span class="ico" data-i="1"></span><span>Équipage</span></button>
+    <button class="scr" role="tab" data-screen="map" aria-controls="s-map"><span class="ico" data-i="231"></span><span>Carte</span></button>
     <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
     <button class="scr" role="tab" data-screen="ashop" aria-controls="s-ashop" id="scr-ashop" hidden><span class="ico" data-i="265"></span><span>Boutiques</span></button>
+    <button class="scr" role="tab" data-screen="amap" aria-controls="s-amap" id="scr-amap" hidden><span class="ico" data-i="231"></span><span>Carte</span></button>
     <button class="scr" role="tab" data-screen="marine" aria-controls="s-marine" id="scr-marine" hidden><span class="ico" data-i="160"></span><span>Marine</span></button>
     <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
     <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
@@ -102,6 +104,15 @@
 
 <main class="screen" id="s-ships" role="tabpanel" hidden>
   <section class="sheet" id="v-ships"></section>
+</main>
+
+<main class="screen" id="s-map" role="tabpanel" hidden>
+  <section class="sheet" id="v-map"></section>
+</main>
+
+<main class="screen" id="s-amap" role="tabpanel" hidden>
+  <section class="sheet" id="v-amap"></section>
+  <input type="file" id="amap-file" accept="image/*" hidden>
 </main>
 
 <main class="screen" id="s-ashop" role="tabpanel" hidden>
@@ -323,6 +334,25 @@
         <button type="button" class="btn ghost" id="cr-del" hidden>Supprimer</button>
         <button type="button" class="btn ghost" data-close>Annuler</button>
         <button type="button" class="btn" id="cr-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-island" aria-labelledby="isl-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="isl-title">Île</h2><p>Image, salons, visibilité, accès et temps de trajet.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="isl-body"></div>
+      <p class="err" id="isl-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="isl-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="isl-save">Enregistrer</button>
       </div>
     </div>
   </div>

@@ -19,7 +19,7 @@ import { mediaSrc } from './discord.js';
 const imgSrc = (u) => esc(mediaSrc(u));
 import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
-  openDialog, closeDialog, readAsDataUrl, askConfirm, askText,
+  openDialog, closeDialog, readAsDataUrl, readImage, askConfirm, askText,
 } from './ui.js';
 
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
@@ -342,7 +342,7 @@ async function readFile(file) {
   if (!file) return;
   if (!file.type.startsWith('image/')) return void ($('ph-err').textContent = 'Ce fichier n’est pas une image.');
   if (file.size > 15 * 1024 * 1024) return void ($('ph-err').textContent = 'Image trop lourde (15 Mo maximum).');
-  loadCrop(await readAsDataUrl(file));
+  loadCrop(await readImage(file, { max: 2400 }));
 }
 function openPhoto() {
   if (VIEW) return;
@@ -608,7 +608,7 @@ $('tf-file').addEventListener('change', async (e) => {
   if (!f) return;
   if (!f.type.startsWith('image/')) return void ($('tech-err').textContent = 'Ce fichier n’est pas une image.');
   if (f.size > 2 * 1024 * 1024) return void ($('tech-err').textContent = 'Fichier trop lourd (2 Mo maximum). Pour un gros GIF, utilise plutôt un lien.');
-  techMedia = await readAsDataUrl(f);
+  techMedia = await readImage(f);
   $('tf-url').value = '';
   $('tech-err').textContent = '';
   showTechMedia();
@@ -1994,8 +1994,8 @@ $('v-crew').addEventListener('change', async (e) => {
   if (e.target.id === 'flag-file') {
     const f = e.target.files[0];
     if (!f?.type.startsWith('image/')) return;
-    if (f.size > 4 * 1024 * 1024) return toast('Image trop lourde (4 Mo maximum).');
-    run({ type: 'crew.edit', flag: await readAsDataUrl(f) });
+    if (f.size > 20 * 1024 * 1024) return toast('Image trop lourde (20 Mo maximum).');
+    run({ type: 'crew.edit', flag: await readImage(f, { max: 1024 }) });
   }
 });
 $('v-crew').addEventListener('click', async (e) => {
@@ -2211,9 +2211,9 @@ $('d-ship').addEventListener('change', async (e) => {
   if (e.target.id === 'sh-file') {
     const f = e.target.files[0];
     if (!f?.type.startsWith('image/')) return;
-    if (f.size > 4 * 1024 * 1024) return void ($('sh-err').textContent = 'Image trop lourde (4 Mo maximum).');
+    if (f.size > 20 * 1024 * 1024) return void ($('sh-err').textContent = 'Image trop lourde (20 Mo maximum).');
     readShipEdit();
-    shipDraft.photo = await readAsDataUrl(f);
+    shipDraft.photo = await readImage(f, { max: 1600 });
     renderShipEdit();
   }
 });
@@ -2490,9 +2490,9 @@ $('d-crew').addEventListener('change', async (e) => {
   if (e.target.id === 'cr-file') {
     const f = e.target.files[0];
     if (!f?.type.startsWith('image/')) return;
-    if (f.size > 4 * 1024 * 1024) return void ($('cr-err').textContent = 'Image trop lourde (4 Mo maximum).');
+    if (f.size > 20 * 1024 * 1024) return void ($('cr-err').textContent = 'Image trop lourde (20 Mo maximum).');
     readCrewEdit();
-    crewDraft.flag = await readAsDataUrl(f);
+    crewDraft.flag = await readImage(f, { max: 1024 });
     renderCrewEdit();
   }
 });
@@ -2764,8 +2764,8 @@ $('amap-file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f?.type.startsWith('image/')) return;
-  if (f.size > 4 * 1024 * 1024) return toast('Image trop lourde (4 Mo maximum) : utilise plutôt un lien.');
-  setMapBg(await readAsDataUrl(f));
+  if (f.size > 20 * 1024 * 1024) return toast('Image trop lourde (20 Mo maximum).');
+  setMapBg(await readImage(f, { max: 3000 }));
 });
 
 function openIslandEdit(id) {
@@ -2834,9 +2834,9 @@ $('d-island').addEventListener('change', async (e) => {
   if (e.target.id === 'isl-file') {
     const f = e.target.files[0];
     if (!f?.type.startsWith('image/')) return;
-    if (f.size > 4 * 1024 * 1024) return void ($('isl-err').textContent = 'Image trop lourde (4 Mo maximum).');
+    if (f.size > 20 * 1024 * 1024) return void ($('isl-err').textContent = 'Image trop lourde (20 Mo maximum).');
     readIslandEdit();
-    islandDraft.img = await readAsDataUrl(f);
+    islandDraft.img = await readImage(f, { max: 1200 });
     renderIslandEdit();
   }
 });
@@ -3003,8 +3003,8 @@ $('it-file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f?.type.startsWith('image/')) return;
-  if (f.size > 2 * 1024 * 1024) return void ($('it-err').textContent = 'Image trop lourde (2 Mo maximum).');
-  itemDraft.img = await readAsDataUrl(f);
+  if (f.size > 20 * 1024 * 1024) return void ($('it-err').textContent = 'Image trop lourde (20 Mo maximum).');
+  itemDraft.img = await readImage(f, { max: 512 });
   showItemImg();
 });
 $('it-url-go').addEventListener('click', () => {

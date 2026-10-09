@@ -515,3 +515,16 @@ test('carte : fond, îles avec salons vérifiés, déplacement, trajets, vue jou
   r = await call('staff', { body: { op: 'map.island.delete', id: 'port-brisant' }, headers: J });
   assert.equal(r.status, 403);
 });
+
+test('ImgBB : image trop lourde pour le relais → version allégée', async () => {
+  const { env } = await import('../api/_lib/env.js');
+  env.imgbbKey = 'cle';
+  const ancien = globalThis.fetch;
+  globalThis.fetch = async (url, o) => (String(url).startsWith('https://api.imgbb.com/')
+    ? { ok: true, json: async () => ({ success: true, data: { url: 'https://i.ibb.co/x/enorme.png', size: 9_000_000, medium: { url: 'https://i.ibb.co/y/enorme-medium.png' } } }) }
+    : ancien(url, o));
+  const r = await call('action', { body: { action: { type: 'photo.set', photo: 'https://exemple.com/enorme.png' } }, headers: J });
+  assert.equal(r.out.player.photo, 'https://i.ibb.co/y/enorme-medium.png');
+  globalThis.fetch = ancien;
+  env.imgbbKey = undefined;
+});

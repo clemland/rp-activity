@@ -171,3 +171,37 @@ export function askText(message, { title = 'Saisie', ok = 'Valider', placeholder
     input.focus();
   });
 }
+
+/**
+ * Lit une image en la réduisant si elle est trop grande (côté le plus long ≤ max)
+ * ou trop lourde (> 3 Mo), en gardant la transparence. Les GIF ne sont pas touchés
+ * (on perdrait l'animation). Renvoie une data URL prête à envoyer.
+ */
+export async function readImage(file, { max = 2048, maxBytes = 3 * 1024 * 1024 } = {}) {
+  const raw = await readAsDataUrl(file);
+  if (file.type === 'image/gif') return raw;
+  const img = await new Promise((ok) => {
+    const i = new Image();
+    i.onload = () => ok(i);
+    i.onerror = () => ok(null);
+    i.src = raw;
+  });
+  if (!img) return raw;
+  const big = Math.max(img.naturalWidth, img.naturalHeight);
+  if (big <= max && file.size <= maxBytes) return raw;
+  let scale = Math.min(1, max / big), out = raw;
+  for (let tries = 0; tries < 6; tries++) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    // WebP garde la transparence et pèse peu ; si le navigateur ne sait pas en faire, PNG.
+    out = c.toDataURL('image/webp', 0.9);
+    if (!out.startsWith('data:image/webp')) out = c.toDataURL('image/png');
+    if (out.length * 0.75 <= maxBytes) return out;
+    scale *= 0.75;
+  }
+  return out;
+}

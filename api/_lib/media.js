@@ -39,6 +39,7 @@ function fromDataUrl(s) {
 }
 
 const IBB = /^https:\/\/i\.ibb\.co\//;
+const RELAY_MAX = 4 * 1024 * 1024; // au-delà, le relais /api/img ne peut pas la renvoyer
 
 /** Envoi sur ImgBB : data URL (base64) ou lien, qu'ImgBB va chercher lui-même. */
 async function toImgbb(input, name) {
@@ -62,6 +63,12 @@ async function toImgbb(input, name) {
   const j = await r?.json().catch(() => null);
   if (!r?.ok || !j?.success || !j.data?.url) {
     throw new HttpError(400, `ImgBB n’a pas accepté l’image${j?.error?.message ? ` : ${j.error.message}` : ''}.`);
+  }
+  // Trop lourde pour le relais d'images de Discord (~4 Mo) : on prend la version allégée d'ImgBB.
+  if (Number(j.data.size) > RELAY_MAX) {
+    const lighter = j.data.medium?.url || j.data.thumb?.url;
+    if (!lighter) throw new HttpError(400, 'Image trop lourde (plus de 4 Mo) : réduis-la avant de l’envoyer.');
+    return lighter;
   }
   return j.data.url;
 }

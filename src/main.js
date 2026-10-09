@@ -224,6 +224,10 @@ function renderHero() {
   $('h-aff').hidden = !aff;
   const pos = $('h-pos');
   if (pos) pos.innerHTML = S.position ? `📍 <b>#${esc(S.position.name || S.position.channelId)}</b>` : '📍 Nulle part pour l’instant : écris un message RP dans un salon RP.';
+  // Actions RP récompensées aujourd'hui (le compteur repart à minuit, heure de Paris)
+  const done = S.rp?.day === G.rpDay() ? S.rp.count : 0;
+  $('h-rp').innerHTML = `<span class="rp-l">RP aujourd’hui</span><span class="rp-dots" aria-hidden="true">${Array.from({ length: G.RP_DAILY }, (_, i) => `<i class="${i < done ? 'on' : ''}"></i>`).join('')}</span><b>${done} / ${G.RP_DAILY}</b>${done >= G.RP_DAILY ? '<small class="note">limite atteinte, retour à minuit</small>' : `<small class="note">+${G.RP_XP} XP par message de ${G.RP_MIN_CHARS} caractères</small>`}`;
+  $('h-rp').setAttribute('aria-label', `Actions RP récompensées aujourd’hui : ${done} sur ${G.RP_DAILY}`);
   const job = S.job.id ? JOBS[S.job.id] : { name: 'Aucun', pic: null };
   $('h-traits').innerHTML = [
     ['Race', S.id.race, 121],

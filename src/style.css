@@ -1250,3 +1250,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .routes{display:grid;gap:4px}
 .route-row{display:grid;grid-template-columns:1fr 110px 70px;gap:8px;align-items:center}
 .route-row input{font:inherit;font-size:15px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);padding:3px 6px;min-width:0}
+
+/* ═══ v34 : carte aux vraies proportions, noms selon le zoom ═══ */
+.mapview{max-height:none;margin-left:auto;margin-right:auto}
+.map-bg{object-fit:contain}
+.mapview:not(.labels-on) .island:not(.sel) .isl-name{display:none}

@@ -2545,10 +2545,13 @@ let MAP = null; // carte vue par le joueur (îles visibles, île où il est, tra
  * Visionneuse de carte : zoom (molette, pincement, boutons) et déplacement
  * (glisser). En mode édition, on fait glisser les îles pour les placer.
  */
-function mapViewer(root, map, { editable = false, here = null, selected = null, onIsland, onMove } = {}) {
-  const ratio = map.ratio || 0.5625;
+const LABEL_ZOOM = 1.8; // en dessous, les noms des îles sont cachés (sauf l'île choisie)
+function mapViewer(root, map, { editable = false, here = null, selected = null, onIsland, onMove, onRatio } = {}) {
+  let ratio = map.ratio || 0.5625;
+  // La carte garde ses proportions : largeur limitée pour tenir dans 72 % de la hauteur d'écran.
+  const size = (r) => `aspect-ratio:${1 / r};width:min(100%, calc(72vh / ${r}))`;
   root.innerHTML = `
-    <div class="mapview" style="aspect-ratio:${1 / ratio}">
+    <div class="mapview" style="${size(ratio)}">
       <div class="map-stage">
         ${map.bg ? `<img class="map-bg" src="${imgSrc(map.bg)}" alt="" draggable="false">` : '<div class="map-bg map-empty"></div>'}
         ${Object.entries(map.islands).map(([id, isl]) => `
@@ -2570,7 +2573,24 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
     st.ty = Math.min(0, Math.max(H - H * st.z, st.ty));
     stage.style.transform = `translate(${st.tx}px, ${st.ty}px) scale(${st.z})`;
     view.style.setProperty('--z', st.z);
+    view.classList.toggle('labels-on', st.z >= LABEL_ZOOM);
   };
+  // Proportions réelles de l'image (celles enregistrées peuvent être fausses)
+  const bg = root.querySelector('img.map-bg');
+  if (bg) {
+    const fit = () => {
+      if (!bg.naturalWidth) return;
+      const r = bg.naturalHeight / bg.naturalWidth;
+      if (Math.abs(r - ratio) > 0.005) {
+        ratio = r;
+        view.setAttribute('style', size(r));
+        apply();
+        onRatio?.(r);
+      }
+    };
+    if (bg.complete) fit();
+    else bg.addEventListener('load', fit, { once: true });
+  }
   const zoomAt = (factor, cx, cy) => {
     const r = view.getBoundingClientRect(), x = cx - r.left, y = cy - r.top, z0 = st.z;
     st.z = Math.min(8, Math.max(1, st.z * factor));
@@ -2712,7 +2732,13 @@ function renderAdminMap() {
         <span><b>${esc(i.name)}</b><small>${i.visible ? 'Visible' : '👁 Cachée'} · ${i.accessible ? 'Accessible' : '⛔ Inaccessible'} · ${i.channels.length} salon${i.channels.length > 1 ? 's' : ''}</small></span>
       </button>`;
     }).join('')}</div>` : '<p class="note">Aucune île. Ajoute un fond de carte, puis des îles (PNG transparents).</p>'}`;
-  mapViewer($('map-admin'), amap, { editable: true, onIsland: (id) => openIslandEdit(id), onMove: (id, x, y) => mapCall('map.island.move', { id, x, y }) });
+  mapViewer($('map-admin'), amap, {
+    editable: true,
+    onIsland: (id) => openIslandEdit(id),
+    onMove: (id, x, y) => mapCall('map.island.move', { id, x, y }),
+    // proportions enregistrées fausses : on corrige (les temps de trajet en dépendent)
+    onRatio: (r) => mapCall('map.bg', { bg: amap.bg, ratio: r }),
+  });
   paintStatic(el);
 }
 $('v-amap').addEventListener('click', async (e) => {

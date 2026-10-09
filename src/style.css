@@ -1214,3 +1214,4 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ship-pic{aspect-ratio:auto;align-self:start;display:grid;place-items:center;min-height:90px;background:#dfeef8}
 .ship-pic img{width:100%;height:auto;max-height:160px;object-fit:contain;display:block}
 @media (max-width:620px){.ship-card{grid-template-columns:1fr}.ship-pic{max-width:220px}}
+.h-pos{font-size:14px;color:var(--muted);margin-top:2px}

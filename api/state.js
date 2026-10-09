@@ -7,15 +7,14 @@
  */
 import { handler, need } from './_lib/http.js';
 import { userFromRequest, isStaff } from './_lib/discord.js';
-import { findPlayer, loadShop, loadCatalog, channelInfo, loadCrewAndShips, publicCrew, shipList, invitesFor, loadHarbor } from './_lib/context.js';
+import { findPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList, invitesFor, loadHarbor } from './_lib/context.js';
 import { read, remove, write } from './_lib/db.js';
 import { paySalary } from '../shared/game.js';
 
 export default handler(['GET'], async (req) => {
   const me = await userFromRequest(req);
   const staff = await isStaff(me.uid);
-  const channel = req.query.channel || null;
-  const [catalog, { shop }, info] = await Promise.all([loadCatalog({ fresh: true }), loadShop(channel), channelInfo(channel)]);
+  const catalog = await loadCatalog({ fresh: true });
 
   let target = me.uid, open = null, openDenied = false;
   if (req.query.player && req.query.player !== me.uid) {
@@ -43,6 +42,11 @@ export default handler(['GET'], async (req) => {
       await write('players', me.uid, found.player, found.version).catch(() => {}); // une autre requête l'a fait : sans gravité
     }
   }
+  // Boutique et port : ceux de la POSITION du joueur (dernier salon RP où il a écrit).
+  const pos = found?.player.position || null;
+  const channel = pos?.channelId || null;
+  const { shop } = await loadShop(channel);
+  const info = { channelId: channel, channelName: pos?.name || '', position: pos };
   const cs = found ? await loadCrewAndShips(found.player) : null;
   return {
     me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied, salary,

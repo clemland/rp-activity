@@ -35,7 +35,8 @@ const itemIco = (k) => {
 let ME = null; // { uid, name, staff }
 let S = null; // fiche affichée
 let SHOP = null; // boutique du salon (ou null)
-let CHNAME = ''; // nom du salon
+let CHNAME = ''; // nom du salon où est le joueur
+let POSID = null; // position du joueur : dernier salon RP où il a écrit (boutique et port en dépendent)
 let CREW = null; // équipage du joueur affiché
 let SHIPS = []; // ses bateaux et ceux de son équipage
 let NAVD = null; // port du salon : bateaux à quai, bateau à bord, demandes d'embarquement
@@ -94,7 +95,7 @@ async function run(action) {
   let local = null;
   if (OPTIMISTIC.has(action.type)) {
     try {
-      local = G.playerAction(S, action, { shop: SHOP, channelId: API.channelId });
+      local = G.playerAction(S, action, { shop: SHOP, channelId: POSID });
     } catch (e) {
       if (e instanceof G.GameError) {
         toast(esc(e.message));
@@ -221,6 +222,8 @@ function renderHero() {
   const aff = affiliation();
   $('h-aff').innerHTML = aff;
   $('h-aff').hidden = !aff;
+  const pos = $('h-pos');
+  if (pos) pos.innerHTML = S.position ? `📍 <b>#${esc(S.position.name || S.position.channelId)}</b>` : '📍 Nulle part pour l’instant : écris un message RP dans un salon RP.';
   const job = S.job.id ? JOBS[S.job.id] : { name: 'Aucun', pic: null };
   $('h-traits').innerHTML = [
     ['Race', S.id.race, 121],
@@ -240,14 +243,15 @@ function renderHero() {
   }
   shown.bounty = bt ? S.id.bounty : null;
 
-  const need = XP_NEED(S.level), lvEl = $('id-lv');
+  const need = S.level >= G.MAX_LEVEL ? 1 : XP_NEED(S.level), lvEl = $('id-lv');
   if (shown.level != null && shown.level !== S.level) replay(lvEl.parentElement, 'bump');
   shown.level = S.level;
   lvEl.textContent = S.level;
   $('xp-gauge').querySelector('i').style.width = `${(S.xp / need) * 100}%`;
   $('xp-gauge').setAttribute('aria-valuenow', S.xp);
   $('xp-gauge').setAttribute('aria-valuemax', need);
-  $('xp-cap').textContent = `${S.xp} / ${need}`;
+  $('xp-cap').textContent = S.level >= G.MAX_LEVEL ? 'Niveau maximal' : `${S.xp} / ${need}`;
+  if (S.level >= G.MAX_LEVEL) $('xp-gauge').querySelector('i').style.width = '100%';
 
   const pEl = $('purse');
   if (shown.berry == null || shown.berryOf !== S.uid) pEl.innerHTML = berry(S.berry);
@@ -917,8 +921,8 @@ function renderNav() {
       <h2>Navigation</h2>
       ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ''} <button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button></div>` : ''}
       ${n.requests.length ? `<div class="crew-box"><h3>Demandes d’embarquement</h3>${n.requests.map((r) => `<div class="member-row"><span class="m-name"><b>${navName(r.uid)}</b> veut monter sur <b>${esc(r.shipName)}</b></span><span></span><span class="m-acts"><button class="btn sm" data-req-yes="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Accepter</button><button class="btn sm ghost" data-req-no="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Refuser</button></span></div>`).join('')}</div>` : ''}
-      <h3 class="ed-h">À quai${CHNAME ? ` dans #${esc(CHNAME)}` : ' ici'}</h3>
-      ${harbor ? `<div class="ships">${harbor}</div>` : '<p class="note">Aucun bateau à quai dans ce salon.</p>'}
+      <h3 class="ed-h">${POSID ? `À quai à #${esc(CHNAME || POSID)}` : 'À quai'}</h3>
+      ${!POSID ? '<p class="note">Tu n’es nulle part pour l’instant : écris un message RP (400 caractères ou plus) dans un salon RP pour t’y trouver.</p>' : harbor ? `<div class="ships">${harbor}</div>` : '<p class="note">Aucun bateau à quai ici.</p>'}
       <p class="note">La navigation en mer arrive bientôt : le niveau de voile servira de vitesse.</p>
     </section>`;
   paintStatic($('v-nav'));
@@ -939,7 +943,7 @@ $('v-nav').addEventListener('click', async (e) => {
 let shopMode = 'buy';
 const asks = {};
 let sellItem = null, sdrag = null, sJust = false;
-const locked = (k) => !!S.sellLock?.[API.channelId]?.[k];
+const locked = (k) => !!S.sellLock?.[POSID]?.[k];
 function askBlock(k) {
   const pct = locked(k) ? 100 : (asks[k] ?? 100), ref = G.refPrice(SHOP, k);
   return { pct, ref, price: Math.round((ref * pct) / 100), ch: G.sellChance(SHOP, pct) };
@@ -1047,7 +1051,7 @@ $('v-ashop').addEventListener('click', async (e) => {
     setBusy(1);
     try {
       const out = await API.staff('shop.delete', { channelId: del });
-      if (del === API.channelId) SHOP = null;
+      if (del === POSID) SHOP = null;
       openShopRow = null;
       toast(esc(out.toast));
       await loadAdminShops();
@@ -1062,8 +1066,12 @@ function renderShop() {
   if (ADMIN) return;
   if (!S) return;
   const el = $('v-shop');
+  if (!POSID) {
+    el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Tu n’es nulle part</h2><p class="note">La boutique est celle de l’endroit où tu te trouves : le dernier salon RP où tu as écrit un message RP (400 caractères ou plus).</p></div>`;
+    return;
+  }
   if (!SHOP) {
-    el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Pas de boutique ici</h2><p class="note">Aucun marchand ne tient boutique dans ce salon${CHNAME ? ` (#${esc(CHNAME)})` : ''}.</p>
+    el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Pas de boutique ici</h2><p class="note">Aucun marchand ne tient boutique là où tu te trouves${CHNAME ? ` (#${esc(CHNAME)})` : ''}.</p>
       ${tools() ? '<button class="btn" id="shop-create">Ouvrir une boutique dans ce salon</button>' : ''}</div>`;
     return;
   }
@@ -1292,8 +1300,8 @@ $('se-save').addEventListener('click', async () => {
   $('se-save').disabled = true;
   try {
     const out = await API.staff('shop.save', { channelId: shopDraftCh, from: shopEditCh, shop: shopDraft });
-    if (out.channelId === API.channelId) SHOP = out.shop;
-    else if (shopEditCh === API.channelId) SHOP = null;
+    if (out.channelId === POSID) SHOP = out.shop;
+    else if (shopEditCh === POSID) SHOP = null;
     openShopRow = out.channelId;
     closeDialog($('d-shopedit'));
     await loadAdminShops();
@@ -2865,6 +2873,8 @@ async function refresh() {
     SHIPS = st.ships || [];
     INVITES = st.invites || [];
     NAVD = st.nav;
+    CHNAME = st.channelName || '';
+    POSID = st.channelId || null;
     if (screen === 'crew' && !document.activeElement?.closest('#v-crew')) renderCrew();
     if (screen === 'nav') renderNav();
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
@@ -2898,6 +2908,7 @@ document.addEventListener('dragstart', (e) => {
     INVITES = st.invites || [];
     NAVD = st.nav;
     CHNAME = st.channelName || '';
+    POSID = st.channelId || null;
   } catch (err) {
     console.error(err);
     $('boot').classList.add('error');

@@ -21,7 +21,7 @@ async function call(method, path, body) {
 }
 
 /* ─── Mode démo : tout reste dans ce navigateur ─── */
-const KEY = 'op_rp_demo_v8';
+const KEY = 'op_rp_demo_v9';
 let store;
 function loadStore() {
   try {
@@ -91,7 +91,7 @@ const demoState = () => ({
   ...demoCrewShips(),
   me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
   player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
-  channelId: 'demo', channelName: 'port-brisant',
+  channelId: store.player.position?.channelId ?? null, channelName: store.player.position?.name ?? '', position: store.player.position ?? null,
 });
 
 /* ─── Interface commune ─── */

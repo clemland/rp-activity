@@ -148,7 +148,12 @@ test('boutique avec les objets du staff', async () => {
   assert.deepEqual(r.out.shop.items, [['coffre', 100, 2]], 'objets inconnus retirés');
   assert.equal(r.out.shop.channel, '#port-brisant', 'nom retrouvé à partir de l’ID');
   await call('staff', { body: { op: 'act', target: 'u1', action: { type: 'edit', patch: { berry: 1000 } } }, headers: MJ });
-  r = await call('action', { body: { channelId: C1, action: { type: 'shop.buy', key: 'coffre' } }, headers: J });
+  // u1 n'a encore écrit nulle part : pas de boutique
+  r = await call('action', { body: { action: { type: 'shop.buy', key: 'coffre' } }, headers: J });
+  assert.equal(r.status, 400);
+  // il écrit un message RP dans ce salon : c'est sa position
+  await call('bot', { body: { op: 'rp.message', userId: 'u1', channelId: C1, name: 'port-brisant', length: 500 }, headers: BOT });
+  r = await call('action', { body: { action: { type: 'shop.buy', key: 'coffre' } }, headers: J });
   assert.equal(r.status, 200, JSON.stringify(r.out));
   assert.equal(r.out.player.berry, 900);
 });
@@ -454,4 +459,36 @@ test('staff : améliorer un bateau existant (et corriger), historique noté', as
   assert.equal(r.out.ship.upgrades.length, 3);
   r = await call('staff', { body: { op: 'ship.upgrade', id: 'le-garde-cote', type: 'canons', amount: 2 }, headers: J });
   assert.equal(r.status, 403);
+});
+
+test('messages RP : salons déclarés, XP limitée, la position du joueur fait la boutique', async () => {
+  const H = { 'x-bot-secret': 'secret' };
+  let r = await call('bot', { body: { op: 'rp.channel.add', channelId: '111111111111111111', name: 'port-brisant', kind: 'salon', by: 'u2' }, headers: H });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  r = await call('bot', { body: { op: 'rp.channels' }, headers: H });
+  assert.deepEqual(r.out.channels.map((c) => c.id), ['111111111111111111']);
+  // pas de fiche : rien
+  r = await call('bot', { body: { op: 'rp.message', userId: 'inconnu', channelId: '111111111111111111', length: 900 }, headers: H });
+  assert.equal(r.out.noProfile, true);
+  // u1 écrit : +20 XP, position = port-brisant (où il y a une boutique)
+  const avant = tables.players.get('u1').data;
+  const xpAvant = avant.xp, niv = avant.level;
+  r = await call('bot', { body: { op: 'rp.message', userId: 'u1', channelId: '111111111111111111', name: 'port-brisant', length: 500 }, headers: H });
+  assert.equal(r.status, 200, JSON.stringify(r.out));
+  assert.equal(r.out.counted, true);
+  assert.equal(r.out.xp, 20);
+  assert.ok(tables.players.get('u1').data.xp !== xpAvant || tables.players.get('u1').data.level > niv);
+  r = await call('state', { method: 'GET', query: { channel: 'ailleurs' }, headers: J });
+  assert.equal(r.out.channelId, '111111111111111111', 'la position, pas le salon de la commande');
+  assert.equal(r.out.shop.name, 'Chantier');
+  // message court : ni XP ni déplacement
+  r = await call('bot', { body: { op: 'rp.message', userId: 'u1', channelId: '222222222222222222', length: 100 }, headers: H });
+  assert.equal(r.out.counted, false);
+  assert.equal(tables.players.get('u1').data.position.channelId, '111111111111111111');
+  // 5 par jour
+  for (let i = 0; i < 4; i++) await call('bot', { body: { op: 'rp.message', userId: 'u1', channelId: '111111111111111111', length: 500 }, headers: H });
+  r = await call('bot', { body: { op: 'rp.message', userId: 'u1', channelId: '111111111111111111', length: 500 }, headers: H });
+  assert.equal(r.out.limit, true);
+  r = await call('bot', { body: { op: 'rp.channel.remove', channelId: '111111111111111111' }, headers: H });
+  assert.deepEqual(r.out.channels, []);
 });

@@ -1,5 +1,7 @@
 /**
- * POST /api/action { channelId, action }
+ * POST /api/action { action }
+ * Le salon utilisé (boutique, port) est la POSITION du joueur : le dernier
+ * salon RP où il a écrit, pas celui où l'Activity est ouverte.
  * Une action du joueur sur SA fiche (stats, inventaire, fabrication, boutique...).
  * Toutes les règles sont appliquées ici, côté serveur.
  */
@@ -14,7 +16,7 @@ import { playerAction, crewAction, inviteAction, shipAction, normalizeCrew, norm
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
   const action = body.action || {};
-  const channelId = body.channelId || null;
+  let channelId = null; // position du joueur, connue une fois sa fiche chargée
   need(typeof action.type === 'string', 400, 'Action manquante.');
 
   // Images : on les envoie dans le stockage avant d'appliquer l'action.
@@ -33,6 +35,7 @@ export default handler(['POST'], async (req, body) => {
   return retry(async () => {
     const { player, version } = firstTry ? first : await loadPlayer(me.uid);
     firstTry = false;
+    channelId = player.position?.channelId || null;
     const ctx = { channelId, now: Date.now() };
     const needsCrew = action.type.startsWith('crew.') || action.type.startsWith('ship.') || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau') || action.type === 'craft.collect';
     const cs = needsCrew ? await loadCrewAndShips(player) : null;
@@ -137,12 +140,12 @@ export default handler(['POST'], async (req, body) => {
 
     let shopV = null;
     if (action.type.startsWith('shop.')) {
-      need(channelId, 400, 'Salon inconnu.');
+      need(channelId, 400, 'Tu n’es nulle part : écris d’abord un message RP dans un salon RP.');
       const s = await loadShop(channelId);
       ctx.shop = s.shop;
       shopV = s.version;
     }
-    if (action.type === 'craft.collect' && channelId) ctx.channelName = await channelName(channelId);
+    if (action.type === 'craft.collect' && channelId) ctx.channelName = player.position?.name || (await channelName(channelId));
     const out = playerAction(player, action, ctx);
     if (out.shop) await write('shops', channelId, out.shop, shopV);
     const extra = {};

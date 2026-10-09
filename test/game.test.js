@@ -127,13 +127,13 @@ test('durées lisibles', () => {
 test('staff : XP précise, positive ou négative, et redescente de niveau', () => {
   cat();
   const p = G.newPlayer('1', { name: 'X', race: 'Mink', classe: 'Tireur' });
-  let r = G.staffAction(p, { type: 'xp', amount: 250 }); // 100 pour le niv 2, 140 pour le niv 3, reste 10
+  let r = G.staffAction(p, { type: 'xp', amount: 250 }); // 50 + 60 + 70, reste 70
+  assert.equal(r.player.level, 4);
+  assert.equal(r.player.xp, 70);
+  assert.equal(r.ups, 3);
+  r = G.staffAction(r.player, { type: 'xp', amount: -80 }); // 70 - 80 → niv 3 avec 70 - 10 = 60
   assert.equal(r.player.level, 3);
-  assert.equal(r.player.xp, 10);
-  assert.equal(r.ups, 2);
-  r = G.staffAction(r.player, { type: 'xp', amount: -20 }); // 10 - 20 → niv 2 avec 140 - 10 = 130
-  assert.equal(r.player.level, 2);
-  assert.equal(r.player.xp, 130);
+  assert.equal(r.player.xp, 60);
   r = G.staffAction(r.player, { type: 'xp', amount: -99999 });
   assert.equal(r.player.level, 1);
   assert.equal(r.player.xp, 0);
@@ -145,10 +145,10 @@ test('staff : niveaux précis, avec ou sans points de stats ; berrys ±', () => 
   const p = G.newPlayer('1', { name: 'X', race: 'Mink', classe: 'Tireur' });
   let r = G.staffAction(p, { type: 'levels', amount: 5 });
   assert.equal(r.player.level, 6);
-  assert.equal(r.player.statPts, 15);
+  assert.equal(r.player.statPts, 25);
   r = G.staffAction(r.player, { type: 'levels', amount: 2, points: false });
   assert.equal(r.player.level, 8);
-  assert.equal(r.player.statPts, 15);
+  assert.equal(r.player.statPts, 25);
   r = G.staffAction(r.player, { type: 'levels', amount: -100 });
   assert.equal(r.player.level, 1);
   r = G.staffAction(r.player, { type: 'berry', amount: 5000 });
@@ -415,4 +415,50 @@ test('flottes : pas de banque, cale ouverte à tous, mots adaptés', () => {
   assert.equal(G.count(r.player, 'bois-ex'), 1);
   assert.throws(() => G.crewAction(G.normalize({ uid: 'x', id: { name: 'X' } }), { type: 'crew.chest.withdraw', key: 'bois-ex' }, { crew: flotte }), /cette flotte/);
   assert.equal(G.crewWords(flotte).chef, 'commandant');
+});
+
+test('niveaux : 50 XP puis +10 par niveau, 5 points, niveau 100 maximum', () => {
+  cat();
+  assert.equal(G.XP_NEED(1), 50);
+  assert.equal(G.XP_NEED(2), 60);
+  assert.equal(G.XP_NEED(99), 1030);
+  const p = G.newPlayer('1', { name: 'X', race: 'Mink', classe: 'Tireur' });
+  G.gainXP(p, 110); // 50 + 60
+  assert.equal(p.level, 3);
+  assert.equal(p.statPts, 10);
+  G.gainXP(p, 10_000_000);
+  assert.equal(p.level, 100);
+  assert.equal(p.xp, 0);
+  assert.equal(G.gainXP(p, 500), 0);
+});
+
+test('message RP : 400 caractères, 20 XP, 5 fois par jour (Paris), position mise à jour', () => {
+  cat();
+  let p = G.newPlayer('1', { name: 'X', race: 'Mink', classe: 'Tireur' });
+  const midi = Date.UTC(2026, 9, 10, 10, 0); // 12 h à Paris
+  let r = G.rpMessage(p, { channelId: 'c1', name: 'port', length: 399, now: midi });
+  assert.equal(r.counted, false);
+  assert.equal(r.player.position, null, 'trop court : on ne bouge pas');
+  for (let i = 1; i <= 5; i++) {
+    r = G.rpMessage(p, { channelId: 'c1', name: 'port', length: 450, now: midi + i });
+    assert.equal(r.counted, true);
+    assert.equal(r.count, i);
+    p = r.player;
+  }
+  assert.equal(p.level, 2, '100 XP : niveau 2 (50) avec 50 XP');
+  r = G.rpMessage(p, { channelId: 'c2', name: 'ile', length: 900, now: midi + 10 });
+  assert.equal(r.counted, false);
+  assert.equal(r.limit, true);
+  assert.equal(r.player.position.channelId, 'c2', 'la position change quand même');
+  // minuit à Paris (22 h UTC en été) : le compteur repart
+  r = G.rpMessage(r.player, { channelId: 'c2', length: 900, now: Date.UTC(2026, 9, 10, 22, 30) });
+  assert.equal(r.counted, true);
+  assert.equal(r.count, 1);
+});
+
+test('ancienne fiche avec plus d’XP que le nouveau seuil : convertie en niveaux', () => {
+  const p = G.normalize({ id: { name: 'X' }, level: 12, xp: 470, statPts: 0 });
+  assert.equal(p.level, 14); // 160 + 170, reste 140 (< 180)
+  assert.equal(p.xp, 140);
+  assert.equal(p.statPts, 10);
 });

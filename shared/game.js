@@ -11,8 +11,16 @@
 /* ═══ Réglages ═══════════════════════════════════════════════════════════ */
 export const BAG = 32; // emplacements d'inventaire
 export const STAT_MAX = 100;
-export const XP_NEED = (lv) => 100 + 40 * (lv - 1); // XP pour passer au niveau suivant
-export const LEVEL_STAT_POINTS = 3; // points de stats gagnés à chaque niveau
+export const MAX_LEVEL = 100;
+/** XP pour passer du niveau lv au suivant : 50 au départ, puis +10 par niveau (1 030 pour le 99 → 100). */
+export const XP_NEED = (lv) => 50 + 10 * (lv - 1);
+export const LEVEL_STAT_POINTS = 5; // points de stats gagnés à chaque niveau
+
+/* Messages RP : dans un salon RP, un message assez long rapporte de l'XP, quelques fois par jour. */
+export const RP_MIN_CHARS = 400;
+export const RP_XP = 20;
+export const RP_DAILY = 5;
+export const RP_TZ = 'Europe/Paris'; // le compteur repart à minuit, heure de Paris
 export const ASK_MAX = 160; // % maximum demandé à la vente
 export const JOB_LEVELS = ['Apprenti', 'Confirmé', 'Maître'];
 export const CRAFT_MAX_SECONDS = 30 * 24 * 3600; // 30 jours
@@ -145,6 +153,16 @@ export function normalize(p) {
   p.techniques ??= [];
   for (const t of p.techniques) if (!TECH_SOURCES[t.src]) t.src = 'combat';
   p.crewId ??= null;
+  p.position ??= null; // dernier salon RP où il a écrit
+  // Courbe d'XP changée : le surplus d'une ancienne fiche devient des niveaux (avec leurs points).
+  if (typeof p.level === 'number' && typeof p.xp === 'number') {
+    p.level = Math.min(MAX_LEVEL, Math.max(1, p.level));
+    while (p.level < MAX_LEVEL && p.xp >= XP_NEED(p.level)) {
+      p.xp -= XP_NEED(p.level); p.level++; p.statPts = (p.statPts || 0) + LEVEL_STAT_POINTS;
+    }
+    if (p.level >= MAX_LEVEL) p.xp = 0;
+  }
+  p.rp ??= null; // { day, count } : actions RP du jour
   if (OLD_GRADES[p.id.grade]) p.id.grade = OLD_GRADES[p.id.grade];
   if (!GRADES.includes(p.id.grade)) p.id.grade = GRADES[0];
   p.inv ??= [];
@@ -261,12 +279,45 @@ export const nextPay = (p) => (p.id?.faction === 'Marine' && p.salaryAt ? p.sala
 /** Ajoute de l'XP ; renvoie le nombre de niveaux gagnés. */
 export function gainXP(p, n) {
   if (!n) return 0;
+  if (p.level >= MAX_LEVEL) {
+    p.xp = 0; // niveau maximal atteint
+    return 0;
+  }
   p.xp += n;
   let ups = 0;
-  while (p.xp >= XP_NEED(p.level)) {
+  while (p.level < MAX_LEVEL && p.xp >= XP_NEED(p.level)) {
     p.xp -= XP_NEED(p.level); p.level++; p.statPts += LEVEL_STAT_POINTS; ups++;
   }
+  if (p.level >= MAX_LEVEL) p.xp = 0;
   return ups;
+}
+
+/** Jour (AAAA-MM-JJ) à Paris, pour le compteur quotidien des messages RP. */
+export const rpDay = (now = Date.now()) => new Intl.DateTimeFormat('fr-CA', { timeZone: RP_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
+
+/**
+ * Un joueur écrit dans un salon RP. Sa position devient ce salon (ou ce post de forum).
+ * Si le message fait au moins RP_MIN_CHARS caractères et qu'il lui reste des actions
+ * aujourd'hui, il gagne RP_XP. Renvoie { player, counted, xp, count, ups, limit }.
+ */
+export function rpMessage(player, { channelId, name = '', length = 0, now = Date.now() } = {}) {
+  const p = clone(player);
+  const out = { player: p, counted: false, xp: 0, count: 0, ups: 0, limit: false };
+  if (length < RP_MIN_CHARS) return out; // trop court : ni XP ni déplacement
+  p.position = { channelId: String(channelId), name: str(name, 100), at: now };
+  const day = rpDay(now);
+  if (p.rp?.day !== day) p.rp = { day, count: 0 };
+  if (p.rp.count >= RP_DAILY) {
+    out.limit = true;
+    out.count = p.rp.count;
+    return out;
+  }
+  p.rp.count++;
+  out.counted = true;
+  out.xp = p.level >= MAX_LEVEL ? 0 : RP_XP;
+  out.count = p.rp.count;
+  out.ups = gainXP(p, out.xp);
+  return out;
 }
 
 /* ═══ Catalogue : validation des objets et recettes du staff ═════════════ */
@@ -576,7 +627,7 @@ export function staffAction(player, action) {
       }
       if ('volonte' in x) p.volonte = int(x.volonte, 0, 5);
       if (x.haki) for (const h of HAKI) if (h.key in x.haki) { const v = int(x.haki[h.key], 0, 5); p.haki[h.key] = h.key === 'rois' && v === 0 ? null : v; }
-      if ('level' in x) p.level = int(x.level, 1, 999);
+      if ('level' in x) p.level = int(x.level, 1, MAX_LEVEL);
       if ('xp' in x) p.xp = int(x.xp, 0, XP_NEED(p.level) - 1);
       if ('berry' in x) p.berry = int(x.berry, 0, 1e12);
       if ('statPts' in x) p.statPts = int(x.statPts, 0, 999);
@@ -609,10 +660,10 @@ export function staffAction(player, action) {
     }
     case 'levels': {
       // Ajoute ou retire des niveaux ; par défaut, les niveaux gagnés donnent leurs points de stats.
-      const n = int(a.amount, -998, 998);
+      const n = int(a.amount, -MAX_LEVEL, MAX_LEVEL);
       if (!n) fail('Indique un nombre de niveaux.');
       const before = p.level;
-      p.level = Math.min(999, Math.max(1, p.level + n));
+      p.level = Math.min(MAX_LEVEL, Math.max(1, p.level + n));
       const gained = p.level - before;
       if (gained > 0 && a.points !== false) p.statPts += gained * LEVEL_STAT_POINTS;
       p.xp = Math.min(p.xp, XP_NEED(p.level) - 1);
@@ -1065,13 +1116,14 @@ export function demoPlayer() {
   return normalize({
     uid: 'demo', photo: null,
     id: { name: 'Elio Varenne', epithet: 'Le Brise-Lames', faction: 'Pirate', crew: 'Équipage du Goéland Noir', crewRole: 'Capitaine', grade: '3ème Classe', race: 'Humain', classe: 'Sabreur', bounty: 87000000 },
-    level: 12, xp: 470, statPts: 3, berry: 412500,
+    level: 12, xp: 90, statPts: 3, berry: 412500,
     stats: { force: 24, rapidite: 31, resistance: 20, sdc: 27 }, volonte: 2,
     haki: { observation: 2, armement: 1, rois: null },
     fruit: { name: 'Shio Shio no Mi', type: 'Paramecia', stars: 2, desc: "Fait naître, durcit et façonne le sel." },
     job: { id: 'charpentier', lvl: 1 },
     techniques: [{ id: 1, name: 'Mur de sel', src: 'fruit', ok: true, media: null, desc: 'Une paroi de sel cristallisé jaillit devant lui.' }],
     crewId: 'goeland-noir',
+    position: { channelId: 'demo', name: 'port-brisant', at: 0 },
     inv: [['sabre-ex', 1], ['bois-ex', 4], ['clous-ex', 2]],
     equip: { arme1: 'sabre-ex', arme2: null },
   });

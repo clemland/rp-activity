@@ -697,9 +697,12 @@ export function staffAction(player, action) {
 }
 
 /* ═══ Bateaux ════════════════════════════════════════════════════════════ */
-/** Caractéristiques enregistrées à la création : type, canons, capacité (kg). */
+/** Espace RP d'un bateau sur Discord : un post dans le forum commun, un forum à lui, ou rien. */
+export const SHIP_SPACES = { post: 'Un post dans le forum des bateaux', forum: 'Un forum à lui', none: 'Aucun' };
+/** Caractéristiques enregistrées à la création : type, canons, capacité (kg), espace RP. */
 export function normalizeShipStats(x) {
   return {
+    space: SHIP_SPACES[x.space] ? x.space : 'post',
     type: str(x.type, 40) || 'Navire',
     cannons: int(x.cannons, 0, 500),
     capacity: Math.round(Math.min(1e7, Math.max(0, Number(x.capacity) || 0))),
@@ -727,7 +730,15 @@ export function normalizeShip(s) {
   s.passengers = [...new Set((s.passengers || []).map(String))].slice(0, s.berths);
   s.requests = (s.requests || []).filter((r) => r?.uid && !s.passengers.includes(String(r.uid))).slice(-50);
   s.upgrades ??= [];
+  // Salon RP du bateau sur Discord (créé avec /bateau salon)
+  s.channel = s.channel?.id ? { id: String(s.channel.id), kind: s.channel.kind === 'forum' ? 'forum' : 'post', name: str(s.channel.name, 100) } : null;
   return s;
+}
+/** Peut-il créer et gérer les salons de ce bateau ? Propriétaire, ou membre autorisé de l'équipage / la flotte. */
+export function canManageShipChannels(p, ship, crew) {
+  if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
+  if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'shipChannels');
+  return false;
 }
 export function canEditShip(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
@@ -846,6 +857,7 @@ export const CREW_PERMS = {
   kick: 'Exclure des membres',
   ranks: 'Attribuer les grades',
   ship: 'Choisir le bateau',
+  shipChannels: 'Gérer les salons des bateaux',
   edit: 'Modifier le nom et le Jolly Roger',
 };
 export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas supprimable

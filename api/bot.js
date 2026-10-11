@@ -1,22 +1,50 @@
 /**
  * POST /api/bot { op, ... } : appels du bot Discord (protégés par BOT_API_SECRET).
- * Le bot vérifie lui-même que l'auteur de la commande fait partie du staff.
+ * Le bot vérifie lui-même que l'auteur d'une commande staff fait partie du staff.
  *  - register { userId, name, race, job, classe, by } : /register, crée la fiche d'un joueur
- *  - open { userId, mode, target? }                  : /panel admin (mode « admin ») ou /edit profil (mode « edit », fiche « target »)
- *  - delete { userId, by }                           : /delete profil, supprime la fiche d'un joueur
- *  - rp.channels                                     : salons RP (et forums) déclarés
- *  - rp.channel.add { channelId, name, kind, by } / rp.channel.remove { channelId } : /rp ajouter, /rp retirer
- *  - rp.message { userId, channelId, parentId, name, length } : un message dans un salon RP (XP, position)
+ *  - open { userId, mode, target? }                  : /panel admin ou /edit profil
+ *  - delete { userId, by }                           : /delete profil
+ *  - rp.channels / rp.channel.add / rp.channel.remove : salons RP
+ *  - rp.message { userId, channelId, parentId, name, length } : un message dans un salon RP
+ *  - ships.config / ships.config.set { forumId?, categoryId? } : /bateau config
+ *  - ships.mine { userId }                           : bateaux dont il gère les salons (/bateau salon, /bateau post)
+ *  - ship.channel.set { userId, shipId, channelId, kind, name } : enregistre le salon créé pour un bateau
  */
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
-import { read, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, rpMessage, RP_DAILY } from '../shared/game.js';
+import { read, readAll, write, remove, retry } from './_lib/db.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY } from '../shared/game.js';
 
 const RP_KEY = 'rp:channels';
+const SHIPS_KEY = 'ships:config';
+
 async function rpChannels() {
   const row = await read('meta', RP_KEY);
   return { list: row?.data.list || [], version: row?.version ?? null };
+}
+/** Modifie la liste des salons RP (avec réessai en cas d'écriture simultanée). */
+const rpSet = (fn) =>
+  retry(async () => {
+    const { list, version } = await rpChannels();
+    const next = fn(list);
+    await write('meta', RP_KEY, { list: next }, version);
+    return next;
+  });
+
+/** Bateaux dont ce joueur peut gérer les salons : les siens, et ceux de son équipage s'il en a le droit. */
+async function shipsOf(userId) {
+  const row = await read('players', userId);
+  need(row, 404, 'Tu n’as pas de fiche : demande à un MJ de t’enregistrer avec /register.');
+  const player = normalize(row.data);
+  let crew = null;
+  if (player.crewId) {
+    const c = await read('crews', player.crewId);
+    if (c) crew = { id: player.crewId, ...normalizeCrew(c.data) };
+  }
+  return Object.entries(await readAll('ships'))
+    .map(([id, s]) => ({ id, ...normalizeShip(s) }))
+    .filter((s) => canManageShipChannels(player, s, crew))
+    .map((s) => ({ ...s, ownerLabel: s.owner?.kind === 'crew' ? crew?.name : fullName(player) }));
 }
 
 export default handler(['POST'], async (req, body) => {
@@ -59,15 +87,14 @@ export default handler(['POST'], async (req, body) => {
     case 'rp.channel.add':
     case 'rp.channel.remove': {
       need(body.channelId, 400, 'Salon manquant.');
-      return retry(async () => {
-        const { list, version } = await rpChannels();
-        const rest = list.filter((c) => c.id !== body.channelId);
-        const next = body.op === 'rp.channel.add'
-          ? [...rest, { id: String(body.channelId), name: String(body.name || '').slice(0, 100), kind: body.kind === 'forum' ? 'forum' : 'salon', by: body.by || null, at: Date.now() }]
+      const id = String(body.channelId);
+      const next = await rpSet((list) => {
+        const rest = list.filter((c) => c.id !== id);
+        return body.op === 'rp.channel.add'
+          ? [...rest, { id, name: String(body.name || '').slice(0, 100), kind: body.kind === 'forum' ? 'forum' : 'salon', by: body.by || null, at: Date.now() }]
           : rest;
-        await write('meta', RP_KEY, { list: next }, version);
-        return { channels: next, changed: next.length !== list.length || body.op === 'rp.channel.add' };
       });
+      return { channels: next };
     }
 
     case 'rp.message': {
@@ -80,6 +107,46 @@ export default handler(['POST'], async (req, body) => {
         if (r.player.position?.channelId !== fresh.data.position?.channelId || r.counted) await write('players', body.userId, r.player, fresh.version);
         return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player) };
       });
+    }
+
+    case 'ships.config':
+      return { config: (await read('meta', SHIPS_KEY))?.data || {} };
+
+    case 'ships.config.set':
+      return retry(async () => {
+        const row = await read('meta', SHIPS_KEY);
+        const config = { ...(row?.data || {}) };
+        if (body.forumId !== undefined) config.forumId = body.forumId || null;
+        if (body.categoryId !== undefined) config.categoryId = body.categoryId || null;
+        await write('meta', SHIPS_KEY, config, row?.version ?? null);
+        return { config };
+      });
+
+    case 'ships.mine': {
+      need(body.userId, 400, 'Joueur manquant.');
+      const [ships, cfg] = await Promise.all([shipsOf(body.userId), read('meta', SHIPS_KEY)]);
+      return { ships, config: cfg?.data || {} };
+    }
+
+    case 'ship.channel.set': {
+      need(body.userId && body.shipId && body.channelId, 400, 'Demande incomplète.');
+      const mine = await shipsOf(body.userId);
+      need(mine.some((s) => s.id === body.shipId), 403, 'Tu ne gères pas les salons de ce bateau.');
+      const kind = body.kind === 'forum' ? 'forum' : 'post';
+      const ship = await retry(async () => {
+        const r = await read('ships', body.shipId);
+        need(r, 404, 'Bateau introuvable.');
+        const s = normalizeShip(r.data);
+        s.channel = { id: String(body.channelId), kind, name: String(body.name || s.name).slice(0, 100) };
+        await write('ships', body.shipId, s, r.version);
+        return s;
+      });
+      // Le salon du bateau devient un salon RP (un forum : chacun de ses posts compte)
+      await rpSet((list) => [
+        ...list.filter((c) => c.id !== ship.channel.id),
+        { id: ship.channel.id, name: ship.channel.name, kind: kind === 'forum' ? 'forum' : 'salon', by: body.userId, at: Date.now() },
+      ]);
+      return { ship: { id: body.shipId, ...ship } };
     }
 
     default:

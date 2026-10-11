@@ -492,3 +492,15 @@ test('carte : îles, salons, île du joueur (forum compris), temps de trajet aut
   assert.ok(surCachee.islands.c, 'il voit l’île cachée où il se trouve');
   assert.equal(Object.keys(G.mapFor(map, null, { staff: true }).islands).length, 3);
 });
+
+test('bateaux : espace RP (post, forum, aucun) et droit de gérer leurs salons', () => {
+  cat();
+  assert.equal(G.normalizeItem({ name: 'Galion', kind: 'bateau', ship: { space: 'forum' } }).ship.space, 'forum');
+  assert.equal(G.normalizeItem({ name: 'Barque', kind: 'bateau', ship: { space: 'bizarre' } }).ship.space, 'post');
+  const crew = G.demoCrew(), ships = G.demoShips();
+  const cap = G.demoPlayer(), membre = G.normalize({ uid: 'pnj-1', id: { name: 'M' } });
+  assert.equal(G.canManageShipChannels(cap, ships['brise-lames'], crew), true, 'le capitaine');
+  assert.equal(G.canManageShipChannels(membre, ships['brise-lames'], crew), false, 'pas sans la permission');
+  const avec = G.crewAction(cap, { type: 'crew.rank.save', id: G.DEFAULT_RANK, name: 'Matelot', perms: { shipChannels: true } }, { crew }).crew;
+  assert.equal(G.canManageShipChannels(membre, ships['brise-lames'], avec), true);
+});

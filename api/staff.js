@@ -166,7 +166,7 @@ export default handler(['POST'], async (req, body) => {
       if (!existing) {
         // Un nouveau bateau vient toujours d'un modèle créé dans Gestion (catégorie Bateau).
         need(input.model && catalog.items[input.model]?.kind === 'bateau', 400, 'Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
-        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail']) delete input[k]; // les chiffres viennent du modèle
+        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail', 'space']) delete input[k]; // tout vient du modèle
       }
       const id = existing || freeId(input.name || catalog.items[input.model].name, ships);
       const old = ships[id] || null;

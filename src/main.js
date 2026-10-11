@@ -1803,7 +1803,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div class="ship-pic">${shipPic(sh)}</div>
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
-      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}</div>
+      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${extra}
       ${actions}
@@ -2163,7 +2163,8 @@ function renderShipEdit() {
         <div><label for="sh-cannons">Canons</label><input id="sh-cannons" type="number" min="0" value="${d.cannons}"></div>
         <div><label for="sh-cap">Cale (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
         <div><label for="sh-berths">Places (personnes)</label><input id="sh-berths" type="number" min="1" value="${d.berths ?? 4}"></div>
-        <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>`}
+        <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
+        <div><label for="sh-space">Espace RP sur Discord</label><select id="sh-space">${Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (d.space || 'post') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`}
         <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
           <optgroup label="Flottes de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Équipages">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind !== 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
@@ -2195,6 +2196,7 @@ function readShipEdit() {
     d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
     d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
     d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
+    d.space = $('sh-space').value;
   }
   d.positionId = $('sh-pos').value.trim();
   const o = $('sh-owner').value;
@@ -2969,6 +2971,7 @@ function openItemEdit(id = null) {
   $('it-cap').value = sh.capacity;
   $('it-berths').value = sh.berths ?? 4;
   $('it-sail').value = sh.sail ?? 1;
+  $('it-space').innerHTML = Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (sh.space || 'post') ? 'selected' : ''}>${l}</option>`).join('');
   syncItemKind(itemDraft.kind);
   const up = itemDraft.upgrade || { type: 'cale', amount: 100 };
   $('it-utype').innerHTML = Object.entries(G.UPGRADES).map(([k, u]) => `<option value="${k}" ${k === up.type ? 'selected' : ''}>${u.name} (+ ${u.unit})</option>`).join('');
@@ -3020,7 +3023,7 @@ $('it-noimg').addEventListener('click', () => {
 $('it-save').addEventListener('click', () => {
   const item = {
     name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
-    ship: { cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
+    ship: { space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');

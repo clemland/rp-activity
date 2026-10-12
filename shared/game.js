@@ -1112,31 +1112,36 @@ export function inviteAction(player, action, ctx = {}) {
 }
 
 /* ═══ Carte du monde ═════════════════════════════════════════════════════
- * Les positions sont en % de la carte (0 à 100), la taille d'une île en % de
- * la largeur : la carte reste juste quelle que soit la taille de l'image.
+ * Positions en % de la carte (0 à 100), taille d'une île en % de la largeur.
+ * On ne voyage pas en ligne droite : on suit les routes maritimes tracées par
+ * le staff, d'île en île ou par des points de passage invisibles pour les
+ * joueurs (entrée de Reverse Mountain, traversée de la Calm Belt...).
  */
 /** Valeur de trajet par unité de distance (largeur de la carte = 100). */
 export const TRAVEL_PER_UNIT = 1;
 const pct = (v, d = 50) => Math.round(Math.min(100, Math.max(0, Number.isFinite(+v) ? +v : d)) * 100) / 100;
 
 export function normalizeIsland(x = {}) {
-  const name = str(x.name, 60);
+  const wp = x.kind === 'waypoint'; // point de passage : invisible pour les joueurs
+  const name = str(x.name, 60) || (wp ? 'Passage' : '');
   if (!name) fail('Donne un nom à l’île.');
   return {
+    kind: wp ? 'waypoint' : 'island',
     name,
-    desc: str(x.desc, 600),
-    img: x.img ? str(x.img, 3_000_000) : null, // PNG transparent
+    desc: wp ? '' : str(x.desc, 600),
+    img: !wp && x.img ? str(x.img, 3_000_000) : null, // PNG transparent
     x: pct(x.x), y: pct(x.y),
     size: Math.round(Math.min(60, Math.max(1, Number(x.size) || 8)) * 100) / 100, // % de la largeur de la carte
-    visible: x.visible !== false,
+    visible: wp ? false : x.visible !== false,
     accessible: x.accessible !== false,
-    channels: (Array.isArray(x.channels) ? x.channels : [])
+    channels: wp ? [] : (Array.isArray(x.channels) ? x.channels : [])
       .filter((c) => c && /^[\w-]{1,30}$/.test(String(c.id)))
       .map((c) => ({ id: String(c.id), name: str(c.name, 100), kind: c.kind === 'forum' ? 'forum' : 'salon' }))
       .filter((c, i, a) => a.findIndex((o) => o.id === c.id) === i)
       .slice(0, 50),
   };
 }
+export const routeKey = (a, b) => [a, b].sort().join('|');
 export function normalizeMap(m = {}) {
   const islands = {};
   for (const [id, isl] of Object.entries(m.islands || {})) {
@@ -1144,28 +1149,64 @@ export function normalizeMap(m = {}) {
       islands[id] = normalizeIsland(isl);
     } catch {}
   }
-  const routes = {};
-  for (const [k, v] of Object.entries(m.routes || {})) {
-    const [a, b] = k.split('|');
-    if (islands[a] && islands[b] && a !== b && Number.isFinite(+v)) routes[routeKey(a, b)] = int(v, 0, 1e6);
-  }
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, routes }; // ratio = hauteur / largeur du fond
+  // Routes : { "a|b": temps choisi, ou null = selon la longueur }
+  const links = {};
+  const add = (k, v) => {
+    const [a, b] = String(k).split('|');
+    if (!islands[a] || !islands[b] || a === b) return;
+    links[routeKey(a, b)] = v == null || v === '' || !Number.isFinite(+v) ? null : int(v, 0, 1e6);
+  };
+  for (const [k, v] of Object.entries(m.routes || {})) add(k, v); // anciens temps choisis : deviennent des routes
+  for (const [k, v] of Object.entries(m.links || {})) add(k, v);
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links }; // ratio = hauteur / largeur du fond
 }
-export const routeKey = (a, b) => [a, b].sort().join('|');
-/** Distance entre deux îles, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
+/** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {
   const A = map.islands[a], B = map.islands[b];
   if (!A || !B) return null;
   const dx = A.x - B.x, dy = (A.y - B.y) * map.ratio;
   return Math.hypot(dx, dy);
 }
-/** Temps de trajet : celui choisi par le staff, sinon calculé selon la distance. */
+/** Temps d'un tronçon de route : celui choisi par le staff, sinon selon sa longueur. null = pas de route. */
+export function linkTime(map, a, b) {
+  const v = map.links[routeKey(a, b)];
+  if (v === undefined) return null;
+  return v != null ? v : Math.max(1, Math.round(islandDistance(map, a, b) * TRAVEL_PER_UNIT));
+}
+/** Points reliés à a par une route : [{ id, value, auto }]. */
+export function neighbors(map, a) {
+  return Object.entries(map.links).flatMap(([k, v]) => {
+    const [x, y] = k.split('|');
+    const o = x === a ? y : y === a ? x : null;
+    return o ? [{ id: o, value: linkTime(map, a, o), auto: v == null }] : [];
+  });
+}
+/**
+ * Trajet le plus court de a à b en suivant les routes. On ne passe jamais par
+ * une île inaccessible (on peut en partir ou y arriver). Renvoie { value, path } ou null.
+ */
 export function travelTime(map, a, b) {
-  if (a === b) return 0;
-  const k = routeKey(a, b);
-  if (map.routes[k] != null) return { value: map.routes[k], auto: false };
-  const d = islandDistance(map, a, b);
-  return d == null ? null : { value: Math.max(1, Math.round(d * TRAVEL_PER_UNIT)), auto: true };
+  if (!map.islands[a] || !map.islands[b]) return null;
+  if (a === b) return { value: 0, path: [a] };
+  const dist = { [a]: 0 }, prev = {}, done = new Set();
+  for (;;) {
+    let u = null;
+    for (const [id, d] of Object.entries(dist)) if (!done.has(id) && (u === null || d < dist[u])) u = id;
+    if (u === null) return null; // aucune route
+    if (u === b) break;
+    done.add(u);
+    if (u !== a && !map.islands[u].accessible) continue; // on ne traverse pas une île fermée
+    for (const n of neighbors(map, u)) {
+      const d = dist[u] + n.value;
+      if (dist[n.id] === undefined || d < dist[n.id]) {
+        dist[n.id] = d;
+        prev[n.id] = u;
+      }
+    }
+  }
+  const path = [b];
+  while (path[0] !== a) path.unshift(prev[path[0]]);
+  return { value: dist[b], path };
 }
 /** Île d'un salon (ou d'un post de forum, via son forum). */
 export function islandOf(map, position) {
@@ -1174,17 +1215,25 @@ export function islandOf(map, position) {
   return Object.keys(map.islands).find((id) => map.islands[id].channels.some((c) => ids.includes(c.id))) || null;
 }
 /**
- * Carte vue par un joueur : îles visibles, plus celle où il se trouve.
- * Le staff voit tout (y compris les îles cachées et les réglages).
+ * Carte vue par un joueur : îles visibles, plus celle où il se trouve. Pas de
+ * points de passage ni de routes. Pour chaque île : le trajet depuis la sienne
+ * ({ value, via: noms des îles visibles traversées }) ou null s'il n'y a pas de route.
+ * Le staff voit tout.
  */
 export function mapFor(map0, player, { staff = false } = {}) {
   const map = normalizeMap(clone(map0));
   const here = islandOf(map, player?.position);
   if (staff) return { ...map, here };
-  const islands = Object.fromEntries(Object.entries(map.islands).filter(([id, isl]) => isl.visible || id === here));
-  const ids = Object.keys(islands);
+  const ids = Object.keys(map.islands).filter((id) => map.islands[id].kind === 'island' && (map.islands[id].visible || id === here));
+  const islands = Object.fromEntries(ids.map((id) => [id, map.islands[id]]));
   const travel = {};
-  if (here) for (const id of ids) if (id !== here) travel[id] = travelTime(map, here, id)?.value ?? null;
+  if (here) {
+    for (const id of ids) {
+      if (id === here) continue;
+      const t = travelTime(map, here, id);
+      travel[id] = t ? { value: t.value, via: t.path.slice(1, -1).filter((s) => islands[s]).map((s) => islands[s].name) } : null;
+    }
+  }
   return { bg: map.bg, ratio: map.ratio, islands, here, travel };
 }
 

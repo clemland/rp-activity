@@ -220,7 +220,8 @@ export default handler(['POST'], async (req, body) => {
     case 'map.island.save':
     case 'map.island.move':
     case 'map.island.delete':
-    case 'map.route': {
+    case 'map.link':
+    case 'map.unlink': {
       // Images d'abord (hors de la boucle de réessai)
       let bg, img;
       if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
@@ -256,7 +257,8 @@ export default handler(['POST'], async (req, body) => {
             for (let n = 2; map.islands[id]; n++) id = `${slug(isl.name)}-${n}`;
           }
           map.islands[id] = isl;
-          toast = old ? `Île modifiée : ${isl.name}` : `Île ajoutée : ${isl.name}`;
+          const what = isl.kind === 'waypoint' ? 'Point de passage' : 'Île';
+          toast = old ? `${what} modifié${isl.kind === 'waypoint' ? '' : 'e'} : ${isl.name}` : `${what} ajouté${isl.kind === 'waypoint' ? '' : 'e'} : ${isl.name}`;
         }
         if (body.op === 'map.island.move') {
           need(map.islands[body.id], 404, 'Île introuvable.');
@@ -265,14 +267,14 @@ export default handler(['POST'], async (req, body) => {
         }
         if (body.op === 'map.island.delete') {
           need(map.islands[body.id], 404, 'Île introuvable.');
-          toast = `Île supprimée : ${map.islands[body.id].name}`;
-          delete map.islands[body.id];
+          toast = `Supprimé : ${map.islands[body.id].name}`;
+          delete map.islands[body.id]; // ses routes disparaissent avec elle
         }
-        if (body.op === 'map.route') {
-          need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Trajet invalide.');
+        if (body.op === 'map.link' || body.op === 'map.unlink') {
+          need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Route invalide.');
           const k = routeKey(body.a, body.b);
-          if (body.value === null || body.value === '' || body.value === undefined) delete map.routes[k];
-          else map.routes[k] = Math.max(0, Math.round(Number(body.value) || 0));
+          if (body.op === 'map.unlink') delete map.links[k];
+          else map.links[k] = body.value === null || body.value === '' || body.value === undefined ? null : Math.max(0, Math.round(Number(body.value) || 0));
           toast = null;
         }
         const clean = normalizeMap(map);

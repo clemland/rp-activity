@@ -113,7 +113,7 @@ export function duree(sec) {
 
 /* ═══ Personnage ═════════════════════════════════════════════════════════ */
 /** Fiche créée par le staff avec /register. */
-export function newPlayer(uid, { name, race, job, classe } = {}) {
+export function newPlayer(uid, { name, race, job, classe, faction, grade } = {}) {
   const n = str(name, 60);
   if (!n) fail('Il faut un nom.');
   const r = inList(RACES, race);
@@ -122,9 +122,14 @@ export function newPlayer(uid, { name, race, job, classe } = {}) {
   if (!c) fail(`Classe inconnue. Choix : ${CLASSES.join(', ')}.`);
   const j = !job || norm(job) === 'aucun' ? null : Object.keys(JOBS).find((k) => k === job || norm(JOBS[k].name) === norm(job));
   if (job && norm(job) !== 'aucun' && !j) fail(`Métier inconnu. Choix : ${Object.values(JOBS).map((x) => x.name).join(', ')} ou aucun.`);
+  const f = faction ? inList(FACTIONS, faction) : 'Pirate';
+  if (!f) fail(`Faction inconnue. Choix : ${FACTIONS.join(', ')}.`);
+  // Le grade ne sert qu'aux Marines (3ème Classe par défaut)
+  const g = f === 'Marine' && grade ? inList(GRADES, grade) : GRADES[0];
+  if (!g) fail(`Grade inconnu. Choix : ${GRADES.join(', ')}.`);
   return normalize({
     uid,
-    id: { name: n, epithet: '', faction: 'Pirate', crew: '', crewRole: '', grade: GRADES[0], race: r, classe: c, bounty: 0 },
+    id: { name: n, epithet: '', faction: f, crew: '', crewRole: '', grade: g, race: r, classe: c, bounty: 0 },
     level: 1, xp: 0, statPts: 0, berry: 0,
     stats: { force: 10, rapidite: 10, resistance: 10, sdc: 10 },
     volonte: 0, haki: { observation: 0, armement: 0, rois: null }, fruit: null,

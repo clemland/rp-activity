@@ -272,7 +272,8 @@ export default handler(['POST'], async (req, body) => {
           toast = `Supprimé : ${map.islands[body.id].name}`;
           delete map.islands[body.id]; // ses routes disparaissent avec elle
         }
-        if (body.op === 'map.link' || body.op === 'map.unlink') {
+                if (body.op === 'map.link' || body.op === 'map.unlink' || body.op === 'map.dir') {
+          map.oneway ??= {};
           need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Route invalide.');
           const k = routeKey(body.a, body.b);
           if (body.op === 'map.unlink') {

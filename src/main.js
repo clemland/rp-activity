@@ -2555,7 +2555,7 @@ const viewState = {}; // zoom et position de chaque carte, gardés entre deux af
 function mapViewer(root, map, { editable = false, here = null, selected = null, linkFrom = null, showLinks = false, onIsland, onMove, onRatio, onLink } = {}) {
   let ratio = map.ratio || 0.5625;
   // La carte garde ses proportions : largeur limitée pour tenir dans 72 % de la hauteur d'écran.
-  const size = (r) => `aspect-ratio:${1 / r};width:min(100%, calc(72vh / ${r}))`;
+    const size = (r) => `--r:${r};aspect-ratio:${1 / r}`;
   const nodes = map.islands;
   const links = showLinks ? Object.keys(map.links || {}).filter((k) => k.split('|').every((x) => nodes[x])) : [];
   const islandBtn = ([id, isl]) => isl.kind === 'waypoint'
@@ -2578,7 +2578,7 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
         }).join('')}</svg>` : ''}
         ${Object.entries(nodes).map(islandBtn).join('')}
       </div>
-      <div class="map-ctl"><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
+            <div class="map-ctl"><button class="sq" data-z="full" aria-label="Plein écran">⛶</button><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
     </div>`;
   const view = root.querySelector('.mapview'), stage = root.querySelector('.map-stage');
   const st = (viewState[root.id] ??= { z: 1, tx: 0, ty: 0 });
@@ -2618,9 +2618,19 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
     e.preventDefault();
     zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
   }, { passive: false });
+    // Plein écran : gardé entre deux affichages (on peut placer des îles sans en sortir)
+  const fullBtn = root.querySelector('[data-z="full"]');
+  const setBig = (on) => {
+    st.big = on;
+    view.classList.toggle('big', on);
+    fullBtn.textContent = on ? '✕' : '⛶';
+    fullBtn.setAttribute('aria-label', on ? 'Quitter le plein écran' : 'Plein écran');
+  };
+  setBig(!!st.big);
   root.querySelector('.map-ctl').addEventListener('click', (e) => {
     const z = e.target.closest('[data-z]')?.dataset.z;
     if (z == null) return;
+    if (z === 'full') return setBig(!st.big);
     const r = view.getBoundingClientRect();
     if (z === '0') Object.assign(st, { z: 1, tx: 0, ty: 0 });
     else zoomAt(z === '1' ? 1.4 : 1 / 1.4, r.left + r.width / 2, r.top + r.height / 2);

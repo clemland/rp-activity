@@ -1024,23 +1024,51 @@ export async function readImage(file, { max = 2048, maxBytes = 3 * 1024 * 1024 }
 <file path="api/bot.js">
 /**
  * POST /api/bot { op, ... } : appels du bot Discord (protégés par BOT_API_SECRET).
- * Le bot vérifie lui-même que l'auteur de la commande fait partie du staff.
+ * Le bot vérifie lui-même que l'auteur d'une commande staff fait partie du staff.
  *  - register { userId, name, race, job, classe, by } : /register, crée la fiche d'un joueur
- *  - open { userId, mode, target? }                  : /panel admin (mode « admin ») ou /edit profil (mode « edit », fiche « target »)
- *  - delete { userId, by }                           : /delete profil, supprime la fiche d'un joueur
- *  - rp.channels                                     : salons RP (et forums) déclarés
- *  - rp.channel.add { channelId, name, kind, by } / rp.channel.remove { channelId } : /rp ajouter, /rp retirer
- *  - rp.message { userId, channelId, parentId, name, length } : un message dans un salon RP (XP, position)
+ *  - open { userId, mode, target? }                  : /panel admin ou /edit profil
+ *  - delete { userId, by }                           : /delete profil
+ *  - rp.channels / rp.channel.add / rp.channel.remove : salons RP
+ *  - rp.message { userId, channelId, parentId, name, length } : un message dans un salon RP
+ *  - ships.config / ships.config.set { forumId?, categoryId? } : /bateau config
+ *  - ships.mine { userId }                           : bateaux dont il gère les salons (/bateau salon, /bateau post)
+ *  - ship.channel.set { userId, shipId, channelId, kind, name } : enregistre le salon créé pour un bateau
  */
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
-import { read, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, rpMessage, RP_DAILY } from '../shared/game.js';
+import { read, readAll, write, remove, retry } from './_lib/db.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY } from '../shared/game.js';
 
 const RP_KEY = 'rp:channels';
+const SHIPS_KEY = 'ships:config';
+
 async function rpChannels() {
   const row = await read('meta', RP_KEY);
   return { list: row?.data.list || [], version: row?.version ?? null };
+}
+/** Modifie la liste des salons RP (avec réessai en cas d'écriture simultanée). */
+const rpSet = (fn) =>
+  retry(async () => {
+    const { list, version } = await rpChannels();
+    const next = fn(list);
+    await write('meta', RP_KEY, { list: next }, version);
+    return next;
+  });
+
+/** Bateaux dont ce joueur peut gérer les salons : les siens, et ceux de son équipage s'il en a le droit. */
+async function shipsOf(userId) {
+  const row = await read('players', userId);
+  need(row, 404, 'Tu n’as pas de fiche : demande à un MJ de t’enregistrer avec /register.');
+  const player = normalize(row.data);
+  let crew = null;
+  if (player.crewId) {
+    const c = await read('crews', player.crewId);
+    if (c) crew = { id: player.crewId, ...normalizeCrew(c.data) };
+  }
+  return Object.entries(await readAll('ships'))
+    .map(([id, s]) => ({ id, ...normalizeShip(s) }))
+    .filter((s) => canManageShipChannels(player, s, crew))
+    .map((s) => ({ ...s, ownerLabel: s.owner?.kind === 'crew' ? crew?.name : fullName(player) }));
 }
 
 export default handler(['POST'], async (req, body) => {
@@ -1083,15 +1111,14 @@ export default handler(['POST'], async (req, body) => {
     case 'rp.channel.add':
     case 'rp.channel.remove': {
       need(body.channelId, 400, 'Salon manquant.');
-      return retry(async () => {
-        const { list, version } = await rpChannels();
-        const rest = list.filter((c) => c.id !== body.channelId);
-        const next = body.op === 'rp.channel.add'
-          ? [...rest, { id: String(body.channelId), name: String(body.name || '').slice(0, 100), kind: body.kind === 'forum' ? 'forum' : 'salon', by: body.by || null, at: Date.now() }]
+      const id = String(body.channelId);
+      const next = await rpSet((list) => {
+        const rest = list.filter((c) => c.id !== id);
+        return body.op === 'rp.channel.add'
+          ? [...rest, { id, name: String(body.name || '').slice(0, 100), kind: body.kind === 'forum' ? 'forum' : 'salon', by: body.by || null, at: Date.now() }]
           : rest;
-        await write('meta', RP_KEY, { list: next }, version);
-        return { channels: next, changed: next.length !== list.length || body.op === 'rp.channel.add' };
       });
+      return { channels: next };
     }
 
     case 'rp.message': {
@@ -1104,6 +1131,46 @@ export default handler(['POST'], async (req, body) => {
         if (r.player.position?.channelId !== fresh.data.position?.channelId || r.counted) await write('players', body.userId, r.player, fresh.version);
         return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player) };
       });
+    }
+
+    case 'ships.config':
+      return { config: (await read('meta', SHIPS_KEY))?.data || {} };
+
+    case 'ships.config.set':
+      return retry(async () => {
+        const row = await read('meta', SHIPS_KEY);
+        const config = { ...(row?.data || {}) };
+        if (body.forumId !== undefined) config.forumId = body.forumId || null;
+        if (body.categoryId !== undefined) config.categoryId = body.categoryId || null;
+        await write('meta', SHIPS_KEY, config, row?.version ?? null);
+        return { config };
+      });
+
+    case 'ships.mine': {
+      need(body.userId, 400, 'Joueur manquant.');
+      const [ships, cfg] = await Promise.all([shipsOf(body.userId), read('meta', SHIPS_KEY)]);
+      return { ships, config: cfg?.data || {} };
+    }
+
+    case 'ship.channel.set': {
+      need(body.userId && body.shipId && body.channelId, 400, 'Demande incomplète.');
+      const mine = await shipsOf(body.userId);
+      need(mine.some((s) => s.id === body.shipId), 403, 'Tu ne gères pas les salons de ce bateau.');
+      const kind = body.kind === 'forum' ? 'forum' : 'post';
+      const ship = await retry(async () => {
+        const r = await read('ships', body.shipId);
+        need(r, 404, 'Bateau introuvable.');
+        const s = normalizeShip(r.data);
+        s.channel = { id: String(body.channelId), kind, name: String(body.name || s.name).slice(0, 100) };
+        await write('ships', body.shipId, s, r.version);
+        return s;
+      });
+      // Le salon du bateau devient un salon RP (un forum : chacun de ses posts compte)
+      await rpSet((list) => [
+        ...list.filter((c) => c.id !== ship.channel.id),
+        { id: ship.channel.id, name: ship.channel.name, kind: kind === 'forum' ? 'forum' : 'salon', by: body.userId, at: Date.now() },
+      ]);
+      return { ship: { id: body.shipId, ...ship } };
     }
 
     default:
@@ -1479,366 +1546,357 @@ export default handler(['GET'], async (req) => {
 });
 </file>
 
-<file path="api/staff.js">
+<file path="src/api.js">
 /**
- * POST /api/staff { op, ... } : outils réservés au staff.
- *  - players                              : liste des fiches
- *  - act { target, action }                : modifier la fiche d'un joueur
- *  - bulk { targets, action }              : la même action sur plusieurs joueurs (XP, niveaux, berrys, objets)
- *  - shops                                    : toutes les boutiques
- *  - shop.save { channelId, from?, shop }      : enregistre la boutique du salon channelId (déplacée depuis « from » si l'ID a changé)
- *  - shop.delete { channelId }
- *  - crews / crew.save { id?, crew } / crew.delete { id }  : équipages (membres, capitaine, banque, coffre, bateau)
- *  - ships / ship.save { id?, ship } / ship.delete { id }  : bateaux (créés par le staff ou achetés)
- *  - ship.upgrade { id, type, amount }                     : améliorer un bateau (cale, canons, voile)
- *  - map.get / map.bg { bg, ratio } / map.island.save { id?, island } / map.island.move { id, x, y }
- *    map.island.delete { id } / map.route { a, b, value|null } : carte du monde
- *  - item.save { id?, item } / item.delete { id }        : base d'objets
- *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
+ * Accès aux données. Dans Discord : l'API Vercel. Hors Discord : un mode démo
+ * qui applique les mêmes règles (shared/game.js) dans le navigateur.
  */
-import { handler, need } from './_lib/http.js';
-import { userFromRequest, isStaff, channelById } from './_lib/discord.js';
-import { env } from './_lib/env.js';
-import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
-import { ingest } from './_lib/media.js';
-import { loadCatalog, loadMap } from './_lib/context.js';
-import { normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import * as G from '../shared/game.js';
+import { inDiscord, connect } from './discord.js';
 
-/** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
-function freeId(base, taken) {
-  let id = slug(base), n = 2;
-  while (taken[id]) id = `${slug(base)}-${n++}`;
-  return id;
+let token = null;
+export let mode = 'demo';
+export let channelId = null;
+
+async function call(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Erreur du serveur.');
+  return data;
 }
 
-export default handler(['POST'], async (req, body) => {
-  const me = await userFromRequest(req);
-  need(await isStaff(me.uid), 403, 'Réservé au staff.');
-  const catalog = await loadCatalog({ fresh: true });
+/* ─── Mode démo : tout reste dans ce navigateur ─── */
+/** Petite carte d'exemple : une mer dessinée et trois îles (sans image : formes par défaut). */
+function demoMap() {
+  const sea = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><defs><radialGradient id="g" cx="50%" cy="45%" r="75%"><stop offset="0" stop-color="#3f8ad0"/><stop offset="1" stop-color="#1b4f8e"/></radialGradient></defs><rect width="1600" height="900" fill="url(#g)"/><g fill="none" stroke="#9fd3ef" stroke-opacity=".35" stroke-width="3">${Array.from({ length: 14 }, (_, i) => `<path d="M${(i * 137) % 1500} ${(i * 211) % 850} q30 -18 60 0 t60 0"/>`).join('')}</g></svg>`;
+  return G.normalizeMap({
+    bg: `data:image/svg+xml;base64,${btoa(sea)}`, ratio: 0.5625,
+    islands: {
+      'port-brisant': { name: 'Port-Brisant', desc: 'Petit port marchand, point de départ de bien des équipages.', x: 24, y: 42, size: 10, channels: [{ id: 'demo', name: 'port-brisant' }] },
+      'water-7': { name: 'Water 7', desc: 'La cité des charpentiers.', x: 62, y: 58, size: 12, channels: [{ id: 'forum-w7', name: 'Water 7', kind: 'forum' }] },
+      'ile-cachee': { name: 'Île sans nom', desc: 'Personne ne sait qu’elle existe.', x: 84, y: 18, size: 7, visible: false, accessible: false },
+    },
+  });
+}
+const KEY = 'op_rp_demo_v10';
+let store;
+function loadStore() {
+  try {
+    store = JSON.parse(localStorage.getItem(KEY));
+  } catch {}
+  if (!store?.player) {
+    G.setCatalog(G.demoCatalog());
+    store = {
+      player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(),
+      // une demande d'embarquement sur le bateau de l'équipage, pour tester
+      ships: (() => {
+        const sh = G.demoShips();
+        sh['brise-lames'].requests = [{ uid: 'pnj-2', at: Date.now() }];
+        return sh;
+      })(),
+      map: demoMap(),
+      crews: {
+        'goeland-noir': G.demoCrew(),
+        // un autre équipage qui invite le joueur de démo, pour tester les invitations
+        'les-albatros': G.normalizeCrew({ name: 'Les Albatros', members: ['pnj-3'], captain: 'pnj-3', invites: [{ uid: 'demo', by: 'pnj-3', at: Date.now() }] }),
+      },
+    };
+  }
+  if (!store.shops) store.shops = { demo: store.shop ?? null };
+  store.crews ??= {};
+  store.ships ??= {};
+  delete store.shop;
+  G.setCatalog(store.catalog);
+  G.normalize(store.player);
+}
+const saveStore = () => {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(store));
+  } catch {}
+};
+export function resetDemo() {
+  localStorage.removeItem(KEY);
+  loadStore();
+}
+/** Équipage du joueur de démo et bateaux visibles, comme le renvoie l'API. */
+const DEMO_NAMES = { demo: null, 'pnj-1': 'Matelot (démo)', 'pnj-2': 'Recrue (démo)', 'pnj-3': 'Capitaine Albatros (démo)' };
+const demoName = (u) => (u === 'demo' ? G.fullName(store.player) : DEMO_NAMES[u] || 'Joueur (démo)');
+function demoCrewShips() {
+  const p = store.player;
+  const c = p.crewId ? G.normalizeCrew(store.crews[p.crewId]) : null;
+  const crew = c ? { id: p.crewId, ...c, memberNames: Object.fromEntries([...c.members, ...c.invites.map((i) => i.uid)].map((u) => [u, demoName(u)])) } : null;
+  const ships = Object.entries(store.ships)
+    .filter(([, s]) => (s.owner?.kind === 'player' && s.owner.id === p.uid) || (s.owner?.kind === 'crew' && crew && s.owner.id === crew.id))
+    .map(([id, s]) => ({ id, ...s }));
+  const invites = Object.entries(store.crews).map(([id, raw]) => [id, G.normalizeCrew(raw)]).filter(([, cc]) => cc.invites.some((i) => i.uid === 'demo'))
+    .map(([id, cc]) => ({ id, name: cc.name, flag: cc.flag, members: cc.members.length, by: cc.invites.find((i) => i.uid === 'demo').by, byName: demoName(cc.invites.find((i) => i.uid === 'demo').by) }));
+  return { crew: structuredClone(crew), ships: structuredClone(ships), invites };
+}
+/** Port du salon de démo, comme le renvoie l'API. */
+function demoHarbor() {
+  const p = store.player;
+  const crew = demoCrewShips().crew;
+  const all = Object.entries(store.ships).map(([id, sh]) => ({ id, ...G.normalizeShip(structuredClone(sh)) }));
+  const harbor = all.filter((sh) => sh.position?.channelId === 'demo');
+  const aboard = all.find((sh) => sh.passengers.includes(p.uid)) || null;
+  const requests = all.filter((sh) => G.canManageShip(p, sh, crew)).flatMap((sh) => sh.requests.map((r) => ({ shipId: sh.id, shipName: sh.name, uid: r.uid, at: r.at })));
+  const names = Object.fromEntries(['demo', 'pnj-1', 'pnj-2', 'pnj-3'].map((u) => [u, demoName(u)]));
+  const crewNames = Object.fromEntries(Object.entries(store.crews).map(([id, c]) => [id, c.name]));
+  return { harbor, aboard, requests, names, crewNames };
+}
+const demoState = () => ({
+  map: G.mapFor(store.map, store.player),
+  nav: demoHarbor(),
+  ...demoCrewShips(),
+  me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
+  player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
+  channelId: store.player.position?.channelId ?? null, channelName: store.player.position?.name ?? '', position: store.player.position ?? null,
+});
 
-  switch (body.op) {
-    case 'players':
-      return { players: await listPlayers() };
+/* ─── Interface commune ─── */
+export async function boot() {
+  if (inDiscord()) {
+    const c = await connect();
+    token = c.token;
+    channelId = c.channelId;
+    mode = 'discord';
+    return state();
+  }
+  loadStore();
+  channelId = 'demo';
+  return demoState();
+}
 
-    case 'act': {
-      need(typeof body.target === 'string', 400, 'Joueur manquant.');
-      return retry(async () => {
-        const row = await read('players', body.target);
-        need(row, 404, 'Ce joueur n’a pas de fiche.');
-        const out = staffAction(normalize(row.data), body.action);
-        await write('players', body.target, out.player, row.version);
-        return out;
-      });
+/** État complet ; le staff peut demander la fiche d'un autre joueur. */
+export async function state(playerId) {
+  if (mode === 'demo') return demoState();
+  const q = new URLSearchParams({ channel: channelId || '' });
+  if (playerId) q.set('player', playerId);
+  return call('GET', `/api/state?${q}`);
+}
+
+/** Action du joueur sur sa propre fiche. */
+export async function act(action) {
+  if (mode === 'demo') {
+    G.setCatalog(store.catalog);
+    if (action.type === 'crew.search') {
+      const q = (action.q || '').toLowerCase();
+      return { results: [{ uid: 'pnj-2', name: demoName('pnj-2'), crew: null }].filter((x) => x.name.toLowerCase().includes(q)) };
     }
+    if (action.type === 'crew.join' || action.type === 'crew.decline') {
+      const out = G.inviteAction(store.player, action, { crew: { id: action.crewId, ...store.crews[action.crewId] } });
+      const { id, ...data } = out.crew;
+      store.crews[action.crewId] = data;
+      if (out.previous && store.crews[out.previous]) {
+        const o = G.normalizeCrew(store.crews[out.previous]);
+        if (o.captain === 'demo' && o.members.length > 1) throw new Error(`Tu es capitaine de ${o.name} : cède d’abord ta place.`);
+        o.members = o.members.filter((u) => u !== 'demo');
+        store.crews[out.previous] = G.normalizeCrew(o);
+      }
+      store.player = out.player;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
+    }
+    if (action.type.startsWith('crew.')) {
+      const { crew } = demoCrewShips();
+      if (!crew) throw new Error('Tu n’as pas d’équipage.');
+      const out = G.crewAction(store.player, action, { crew, ships: Object.fromEntries(Object.entries(store.ships).map(([id, s]) => [id, { id, ...s }])) });
+      const { id, memberNames, ...data } = out.crew;
+      store.crews[id] = data;
+      for (const [sid, sh] of Object.entries(out.ships || {})) {
+        const { id: _i, ...rest } = sh;
+        store.ships[sid] = rest;
+      }
+      store.player = out.player;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
+    }
+    if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
+      const { crew } = demoCrewShips();
+      const out = G.shipAction(store.player, store.ships[action.shipId], action, { crew, channelId: 'demo' });
+      const { id: _i, ...data } = out.ship;
+      store.ships[action.shipId] = data;
+      const boarder = out.boarded ? 'demo' : out.accepted;
+      if (boarder) for (const [sid, sh] of Object.entries(store.ships)) if (sid !== action.shipId) sh.passengers = (sh.passengers || []).filter((u) => u !== boarder);
+      store.player = out.player;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
+    }
+    if (action.type === 'ship.edit') {
+      const { crew } = demoCrewShips();
+      const out = G.playerAction(store.player, action, { ship: store.ships[action.shipId], crew });
+      store.ships[action.shipId] = out.ship;
+      saveStore();
+      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
+    }
+    const out = G.playerAction(store.player, action, { shop: store.shops.demo, channelId: 'demo' });
+    store.player = out.player;
+    if (out.shop) store.shops.demo = out.shop;
+    if (out.newShip) {
+      let id = G.slug(out.newShip.name);
+      for (let n = 2; store.ships[id]; n++) id = `${G.slug(out.newShip.name)}-${n}`;
+      store.ships[id] = out.newShip;
+      out.toast = `${out.newShip.name} est à toi ! Donne-lui un nom dans « Équipage ».`;
+    }
+    saveStore();
+    return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
+  }
+  return call('POST', '/api/action', { channelId, action });
+}
 
-    case 'bulk': {
-      const targets = [...new Set(Array.isArray(body.targets) ? body.targets : [])].filter((t) => typeof t === 'string');
-      need(targets.length, 400, 'Aucun joueur sélectionné.');
-      need(targets.length <= 500, 400, '500 joueurs maximum à la fois.');
-      need(['xp', 'levels', 'berry', 'give', 'take'].includes(body.action?.type), 400, 'Action non disponible en groupe.');
+/** Outils du staff. */
+export async function staff(op, payload = {}) {
+  if (mode === 'demo') {
+    if (op === 'players') return { players: [{ uid: 'demo', ident: store.player.id, level: store.player.level, photo: store.player.photo, job: store.player.job.id, crewId: store.player.crewId }] };
+    if (op === 'act') {
+      const out = G.staffAction(store.player, payload.action);
+      store.player = out.player;
+      saveStore();
+      return structuredClone(out);
+    }
+    if (op === 'bulk') {
       let ok = 0;
       const failed = [];
-      // Une fiche à la fois : si l'une échoue (inventaire plein...), les autres passent quand même.
-      for (const uid of targets) {
+      for (const uid of payload.targets) {
         try {
-          await retry(async () => {
-            const row = await read('players', uid);
-            need(row, 404, 'pas de fiche');
-            const out = staffAction(normalize(row.data), body.action);
-            await write('players', uid, out.player, row.version);
-          });
+          if (uid !== 'demo') throw new Error('pas de fiche');
+          store.player = G.staffAction(store.player, payload.action).player;
           ok++;
         } catch (err) {
           failed.push({ uid, error: err.message });
         }
       }
-      console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
-      return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
+      saveStore();
+      return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}` };
     }
-
-    case 'crews':
-      return { crews: await readAll('crews'), ships: await readAll('ships') };
-
-    case 'crew.save': {
-      const input = body.crew || {};
-      const crews = await readAll('crews');
-      const id = body.id && crews[body.id] ? body.id : freeId(input.name || 'equipage', crews);
-      const old = crews[id] ? normalizeCrew(structuredClone(crews[id])) : null;
-      const crew = normalizeCrew({ ...(old || {}), ...input, chest: input.chest ?? old?.chest ?? {} });
-      if (input.flag !== undefined) crew.flag = input.flag ? await ingest(input.flag, 'pavillons', id) : null;
-      // Bateau d'équipage : il doit exister, et devient la propriété de l'équipage.
-      if (crew.ship) {
-        const ship = await read('ships', crew.ship);
-        need(ship, 404, 'Bateau introuvable.');
-        if (ship.data.owner?.kind !== 'crew' || ship.data.owner.id !== id) {
-          await write('ships', crew.ship, { ...ship.data, owner: { kind: 'crew', id } }, ship.version);
-        }
+    if (op === 'item.save' || op === 'recipe.save') {
+      const items = op === 'item.save', table = items ? store.catalog.items : store.catalog.recipes;
+      G.setCatalog(store.catalog);
+      const data = items ? G.normalizeItem(payload.item) : G.normalizeRecipe(payload.recipe);
+      const label = items ? data.name : G.recipeLabel(data);
+      let id = payload.id && table[payload.id] ? payload.id : G.slug(label);
+      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(label)}-${n}`;
+      const isNew = !table[id];
+      table[id] = data;
+      saveStore();
+      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${label}` };
+    }
+    if (op === 'item.delete' || op === 'recipe.delete') {
+      const items = op === 'item.delete';
+      if (items) {
+        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map(G.recipeLabel);
+        if (used.length) throw new Error(`Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
       }
-      // Un joueur n'est que dans un équipage : on met à jour les fiches concernées.
-      const before = new Set(old?.members || []), after = new Set(crew.members);
-      for (const uid of after) {
-        if (before.has(uid)) continue;
-        await retry(async () => {
-          const row = await read('players', uid);
-          need(row, 404, `Le joueur ${uid} n’a pas de fiche.`);
-          need(crew.kind !== 'flotte' || row.data.id?.faction === 'Marine', 400, `${row.data.id?.name || uid} n’est pas Marine : il ne peut pas rejoindre une flotte.`);
-          const prev = row.data.crewId;
-          if (prev && prev !== id && crews[prev]) {
-            const other = await read('crews', prev);
-            if (other) {
-              const o = normalizeCrew(other.data);
-              o.members = o.members.filter((m) => m !== uid);
-              await write('crews', prev, normalizeCrew(o), other.version);
-            }
-          }
-          await write('players', uid, { ...row.data, crewId: id }, row.version);
-        });
-      }
-      for (const uid of before) {
-        if (after.has(uid)) continue;
-        await retry(async () => {
-          const row = await read('players', uid);
-          if (row && row.data.crewId === id) await write('players', uid, { ...row.data, crewId: null }, row.version);
-        });
-      }
-      await retry(async () => {
-        const row = await read('crews', id);
-        await write('crews', id, crew, row?.version ?? null);
-      });
+      delete (items ? store.catalog.items : store.catalog.recipes)[payload.id];
+      saveStore();
+      return { catalog: structuredClone(store.catalog), toast: items ? 'Objet supprimé' : 'Recette supprimée' };
+    }
+    if (op === 'crews') return { crews: structuredClone(store.crews), ships: structuredClone(store.ships) };
+    if (op === 'crew.save') {
+      const id = payload.id && store.crews[payload.id] ? payload.id : G.slug(payload.crew.name);
+      const old = store.crews[id];
+      const crew = G.normalizeCrew({ ...(old || {}), ...payload.crew, chest: old?.chest ?? {} });
+      if (crew.members.includes('demo')) store.player.crewId = id;
+      else if (store.player.crewId === id) store.player.crewId = null;
+      if (crew.ship && store.ships[crew.ship]) store.ships[crew.ship].owner = { kind: 'crew', id };
+      store.crews[id] = crew;
+      saveStore();
       return { id, crew, toast: `${crew.kind === 'flotte' ? 'Flotte' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
     }
-
-    case 'crew.delete': {
-      const row = await read('crews', body.id);
-      need(row, 404, 'Équipage introuvable.');
-      for (const uid of row.data.members || []) {
-        await retry(async () => {
-          const p = await read('players', uid);
-          if (p && p.data.crewId === body.id) await write('players', uid, { ...p.data, crewId: null }, p.version);
-        });
-      }
-      const ships = await readAll('ships');
-      for (const [sid, sh] of Object.entries(ships)) {
-        if (sh.owner?.kind === 'crew' && sh.owner.id === body.id) {
-          const r = await read('ships', sid);
-          await write('ships', sid, { ...r.data, owner: null }, r.version);
-        }
-      }
-      await remove('crews', body.id);
-      return { toast: `Équipage supprimé : ${row.data.name}. Ses bateaux sont maintenant sans propriétaire.` };
+    if (op === 'crew.delete') {
+      if (store.player.crewId === payload.id) store.player.crewId = null;
+      for (const sh of Object.values(store.ships)) if (sh.owner?.kind === 'crew' && sh.owner.id === payload.id) sh.owner = null;
+      delete store.crews[payload.id];
+      saveStore();
+      return { toast: 'Équipage supprimé' };
     }
-
-    case 'ships':
-      return { ships: await readAll('ships') };
-
-    case 'ship.save': {
-      const input = { ...(body.ship || {}) };
-      // Position : le salon où le bateau est à quai, donné par son ID.
-      if ('positionId' in input) {
-        const pid = String(input.positionId || '').trim();
-        if (pid) {
-          const ch = await channelById(pid);
-          need(ch, 400, 'Salon introuvable pour la position : vérifie l’ID du salon.');
-          input.position = { channelId: pid, name: ch.name };
-        } else input.position = null;
-        delete input.positionId;
-      }
-      const ships = await readAll('ships');
-      const existing = body.id && ships[body.id] ? body.id : null;
+    if (op === 'ship.save') {
+      const { id: _i, positionId, ...input } = payload.ship;
+      const existing = payload.id && store.ships[payload.id] ? payload.id : null;
       if (!existing) {
-        // Un nouveau bateau vient toujours d'un modèle créé dans Gestion (catégorie Bateau).
-        need(input.model && catalog.items[input.model]?.kind === 'bateau', 400, 'Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
-        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail']) delete input[k]; // les chiffres viennent du modèle
+        if (store.catalog.items[input.model]?.kind !== 'bateau') throw new Error('Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
+        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail']) delete input[k];
       }
-      const id = existing || freeId(input.name || catalog.items[input.model].name, ships);
-      const old = ships[id] || null;
-      const ship = old ? normalizeShip({ ...old, ...input }) : newShip(input);
-      if (input.photo !== undefined) ship.photo = input.photo ? await ingest(input.photo, 'bateaux', id) : null;
-      // Si le bateau quitte un équipage, celui-ci n'a plus de bateau attitré.
-      if (old?.owner?.kind === 'crew' && (ship.owner?.kind !== 'crew' || ship.owner.id !== old.owner.id)) {
-        const c = await read('crews', old.owner.id);
-        if (c && c.data.ship === id) await write('crews', old.owner.id, { ...c.data, ship: null }, c.version);
+      if (positionId !== undefined) input.position = positionId ? { channelId: positionId, name: positionId === 'demo' ? 'port-brisant' : `salon-${positionId.slice(-4)}` } : null;
+      G.setCatalog(store.catalog);
+      let id = existing || G.slug(input.name || store.catalog.items[input.model].name);
+      if (!existing) for (let n = 2; store.ships[id]; n++) id = `${G.slug(input.name || 'bateau')}-${n}`;
+      const ship = existing ? G.normalizeShip({ ...store.ships[id], ...input }) : G.newShip(input);
+      if (ship.owner?.kind === 'crew' && store.crews[ship.owner.id] && !store.crews[ship.owner.id].ship) store.crews[ship.owner.id].ship = id;
+      store.ships[id] = ship;
+      saveStore();
+      return { id, ship, toast: `Bateau enregistré : ${ship.name}` };
+    }
+    if (op === 'ship.upgrade') {
+      const ship = G.upgradeShip(G.normalizeShip(store.ships[payload.id]), payload.type, payload.amount, { by: 'mj-demo' });
+      store.ships[payload.id] = ship;
+      saveStore();
+      return { id: payload.id, ship: structuredClone(ship), toast: `${ship.name} amélioré` };
+    }
+    if (op === 'ship.delete') {
+      for (const c of Object.values(store.crews)) if (c.ship === payload.id) c.ship = null;
+      delete store.ships[payload.id];
+      saveStore();
+      return { toast: 'Bateau supprimé' };
+    }
+    if (op === 'map.get') return { map: structuredClone(store.map) };
+    if (op.startsWith('map.')) {
+      const m = store.map;
+      let toast = null, id = payload.id;
+      if (op === 'map.bg') {
+        m.bg = payload.bg;
+        if (payload.ratio > 0) m.ratio = payload.ratio;
+        toast = 'Fond de carte enregistré';
       }
-      await retry(async () => {
-        const row = await read('ships', id);
-        await write('ships', id, ship, row?.version ?? null);
-      });
-      // Donné à un équipage ou une flotte sans bateau attitré : il le devient.
-      if (ship.owner?.kind === 'crew') {
-        await retry(async () => {
-          const c = await read('crews', ship.owner.id);
-          if (c && !c.data.ship) await write('crews', ship.owner.id, { ...c.data, ship: id }, c.version);
-        });
+      if (op === 'map.island.save') {
+        const old = payload.id && m.islands[payload.id];
+        const channels = (payload.island.channels || []).map((c) => ({ id: String(c.id), name: c.name || `salon-${String(c.id).slice(-4)}` }));
+        const isl = G.normalizeIsland({ ...(old || {}), ...payload.island, channels });
+        if (!old) {
+          id = G.slug(isl.name);
+          for (let n = 2; m.islands[id]; n++) id = `${G.slug(isl.name)}-${n}`;
+        }
+        m.islands[id] = isl;
+        toast = old ? `Île modifiée : ${isl.name}` : `Île ajoutée : ${isl.name}`;
       }
-      return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}` };
-    }
-
-    case 'ship.upgrade': {
-      return retry(async () => {
-        const row = await read('ships', body.id);
-        need(row, 404, 'Bateau introuvable.');
-        const ship = upgradeShip(normalizeShip(row.data), body.type, body.amount, { by: me.uid });
-        await write('ships', body.id, ship, row.version);
-        const n = Number(body.amount);
-        return { id: body.id, ship, toast: `${ship.name} : ${n > 0 ? '+' : ''}${n} ${body.type === 'cale' ? 'kg de cale' : body.type === 'canons' ? 'canon(s)' : 'niveau(x) de voile'}` };
-      });
-    }
-
-    case 'ship.delete': {
-      const row = await read('ships', body.id);
-      need(row, 404, 'Bateau introuvable.');
-      if (row.data.owner?.kind === 'crew') {
-        const c = await read('crews', row.data.owner.id);
-        if (c && c.data.ship === body.id) await write('crews', row.data.owner.id, { ...c.data, ship: null }, c.version);
+      if (op === 'map.island.move') m.islands[payload.id] = G.normalizeIsland({ ...m.islands[payload.id], x: payload.x, y: payload.y });
+      if (op === 'map.island.delete') {
+        toast = `Île supprimée : ${m.islands[payload.id].name}`;
+        delete m.islands[payload.id];
       }
-      await remove('ships', body.id);
-      return { toast: `Bateau supprimé : ${row.data.name}` };
-    }
-
-    case 'map.get':
-      return { map: (await loadMap()).map };
-
-    case 'map.bg':
-    case 'map.island.save':
-    case 'map.island.move':
-    case 'map.island.delete':
-    case 'map.route': {
-      // Images d'abord (hors de la boucle de réessai)
-      let bg, img;
-      if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
-      if (body.op === 'map.island.save' && body.island?.img) img = await ingest(body.island.img, 'iles', slug(body.island.name || 'ile'));
-      // Salons de l'île : on vérifie chaque ID et on retrouve son nom (et si c'est un forum)
-      let channels;
-      if (body.op === 'map.island.save') {
-        channels = [];
-        for (const c of body.island?.channels || []) {
-          const id = String(c.id || c).trim();
-          if (!id) continue;
-          const ch = await channelById(id);
-          need(ch, 400, `Salon introuvable : ${id}. Vérifie l’ID.`);
-          need(!env.guildId || !ch.guildId || ch.guildId === env.guildId, 400, `Le salon ${ch.name} n’est pas sur le serveur principal.`);
-          channels.push({ id, name: ch.name, kind: ch.forum ? 'forum' : 'salon' });
-        }
+      if (op === 'map.route') {
+        const k = G.routeKey(payload.a, payload.b);
+        if (payload.value === null) delete m.routes[k];
+        else m.routes[k] = payload.value;
       }
-      return retry(async () => {
-        const { map, version } = await loadMap();
-        let toast = 'Carte mise à jour', id = body.id;
-        if (body.op === 'map.bg') {
-          map.bg = bg;
-          if (Number(body.ratio) > 0) map.ratio = Number(body.ratio);
-          toast = bg ? 'Fond de carte enregistré' : 'Fond de carte retiré';
-        }
-        if (body.op === 'map.island.save') {
-          const old = body.id && map.islands[body.id];
-          const isl = normalizeIsland({ ...(old || {}), ...body.island, img: img ?? (body.island.img === null ? null : old?.img ?? null), channels });
-          // Un salon n'appartient qu'à une île : on le retire des autres
-          for (const [oid, o] of Object.entries(map.islands)) if (oid !== body.id) o.channels = o.channels.filter((c) => !isl.channels.some((n) => n.id === c.id));
-          if (!old) {
-            id = slug(isl.name);
-            for (let n = 2; map.islands[id]; n++) id = `${slug(isl.name)}-${n}`;
-          }
-          map.islands[id] = isl;
-          toast = old ? `Île modifiée : ${isl.name}` : `Île ajoutée : ${isl.name}`;
-        }
-        if (body.op === 'map.island.move') {
-          need(map.islands[body.id], 404, 'Île introuvable.');
-          map.islands[body.id] = normalizeIsland({ ...map.islands[body.id], x: body.x, y: body.y });
-          toast = null;
-        }
-        if (body.op === 'map.island.delete') {
-          need(map.islands[body.id], 404, 'Île introuvable.');
-          toast = `Île supprimée : ${map.islands[body.id].name}`;
-          delete map.islands[body.id];
-        }
-        if (body.op === 'map.route') {
-          need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Trajet invalide.');
-          const k = routeKey(body.a, body.b);
-          if (body.value === null || body.value === '' || body.value === undefined) delete map.routes[k];
-          else map.routes[k] = Math.max(0, Math.round(Number(body.value) || 0));
-          toast = null;
-        }
-        const clean = normalizeMap(map);
-        await write('meta', 'map', clean, version);
-        return { map: clean, id, toast };
-      });
+      store.map = G.normalizeMap(m);
+      saveStore();
+      return { map: structuredClone(store.map), id, toast };
     }
-
-    case 'shops':
-      return { shops: await readAll('shops') };
-
-    case 'shop.save': {
-      need(body.channelId && body.shop, 400, 'Boutique manquante.');
-      const channelId = String(body.channelId).trim();
-      // On retrouve le vrai salon à partir de son ID : pas besoin de taper son nom.
-      const ch = await channelById(channelId);
-      need(ch, 400, 'Salon introuvable : vérifie l’ID (clic droit sur le salon > Copier l’identifiant) et que le bot voit ce salon.');
-      need(!env.guildId || !ch.guildId || ch.guildId === env.guildId, 400, 'Ce salon n’est pas sur le serveur principal.');
-      const shop = normalizeShop({ ...body.shop });
-      shop.items = shop.items.filter(([k]) => ITEMS[k]);
-      need(new Set(shop.items.map((x) => x[0])).size === shop.items.length, 400, 'Un même objet apparaît deux fois.');
-      shop.name = String(shop.name || 'Comptoir').slice(0, 60);
-      shop.seller = String(shop.seller || 'Le marchand').slice(0, 40);
-      shop.face = String(shop.face || '').slice(0, 8);
-      shop.channel = `#${ch.name}`;
-      shop.img = shop.img ? await ingest(shop.img, 'vendeurs', channelId) : null;
-      const from = body.from && body.from !== channelId ? String(body.from) : null;
-      if (from) need(!(await read('shops', channelId)), 409, `Il y a déjà une boutique dans #${ch.name}.`);
-      return retry(async () => {
-        const row = await read('shops', channelId);
-        await write('shops', channelId, shop, row?.version ?? null);
-        if (from) await remove('shops', from);
-        return { channelId, shop, toast: from ? `Boutique déplacée vers #${ch.name}` : `Boutique de #${ch.name} enregistrée` };
-      });
+    if (op === 'shops') return { shops: structuredClone(Object.fromEntries(Object.entries(store.shops).filter(([, v]) => v))) };
+    if (op === 'shop.save') {
+      const id = String(payload.channelId);
+      if (payload.from && payload.from !== id && store.shops[id]) throw new Error('Il y a déjà une boutique dans ce salon.');
+      const shop = G.normalizeShop(structuredClone(payload.shop));
+      shop.channel = id === 'demo' ? '#port-brisant' : `#salon-${id.slice(-4)}`;
+      store.shops[id] = shop;
+      if (payload.from && payload.from !== id) delete store.shops[payload.from];
+      saveStore();
+      return { channelId: id, shop: structuredClone(shop), toast: 'Boutique enregistrée' };
     }
-
-    case 'shop.delete':
-      need(body.channelId, 400, 'Salon manquant.');
-      await remove('shops', body.channelId);
+    if (op === 'shop.delete') {
+      delete store.shops[payload.channelId];
+      saveStore();
       return { shop: null, toast: 'Boutique fermée' };
-
-    case 'item.save': {
-      const item = normalizeItem(body.item || {});
-      const id = body.id && catalog.items[body.id] ? body.id : freeId(item.name, catalog.items);
-      item.img = item.img ? await ingest(item.img, 'objets', id) : null;
-      return retry(async () => {
-        const row = await read('items', id);
-        await write('items', id, item, row?.version ?? null);
-        catalog.items[id] = item;
-        return { id, catalog, toast: row ? `Objet modifié : ${item.name}` : `Objet créé : ${item.name}` };
-      });
     }
-
-    case 'item.delete': {
-      need(catalog.items[body.id], 404, 'Objet introuvable.');
-      const used = Object.values(catalog.recipes).filter((r) => r.needs[body.id] || r.gives[body.id]).map(recipeLabel);
-      need(!used.length, 400, `Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
-      await remove('items', body.id);
-      delete catalog.items[body.id];
-      return { catalog, toast: 'Objet supprimé. Les joueurs qui le possèdent le verront comme « Objet supprimé ».' };
-    }
-
-    case 'recipe.save': {
-      const recipe = normalizeRecipe(body.recipe || {});
-      const id = body.id && catalog.recipes[body.id] ? body.id : freeId(recipeLabel(recipe), catalog.recipes);
-      return retry(async () => {
-        const row = await read('recipes', id);
-        await write('recipes', id, recipe, row?.version ?? null);
-        catalog.recipes[id] = recipe;
-        return { id, catalog, toast: row ? `Recette modifiée : ${recipeLabel(recipe)}` : `Recette créée : ${recipeLabel(recipe)}` };
-      });
-    }
-
-    case 'recipe.delete': {
-      need(catalog.recipes[body.id], 404, 'Recette introuvable.');
-      await remove('recipes', body.id);
-      delete catalog.recipes[body.id];
-      return { catalog, toast: 'Recette supprimée' };
-    }
-
-    default:
-      need(false, 400, 'Opération inconnue.');
+    throw new Error(`Opération inconnue en démo : ${op}`);
   }
-});
+  return call('POST', '/api/staff', { op, channelId, ...payload });
+}
 </file>
 
 <file path="test/game.test.js">
@@ -2336,6 +2394,807 @@ test('carte : îles, salons, île du joueur (forum compris), temps de trajet aut
   assert.ok(surCachee.islands.c, 'il voit l’île cachée où il se trouve');
   assert.equal(Object.keys(G.mapFor(map, null, { staff: true }).islands).length, 3);
 });
+
+test('bateaux : espace RP (post, forum, aucun) et droit de gérer leurs salons', () => {
+  cat();
+  assert.equal(G.normalizeItem({ name: 'Galion', kind: 'bateau', ship: { space: 'forum' } }).ship.space, 'forum');
+  assert.equal(G.normalizeItem({ name: 'Barque', kind: 'bateau', ship: { space: 'bizarre' } }).ship.space, 'post');
+  const crew = G.demoCrew(), ships = G.demoShips();
+  const cap = G.demoPlayer(), membre = G.normalize({ uid: 'pnj-1', id: { name: 'M' } });
+  assert.equal(G.canManageShipChannels(cap, ships['brise-lames'], crew), true, 'le capitaine');
+  assert.equal(G.canManageShipChannels(membre, ships['brise-lames'], crew), false, 'pas sans la permission');
+  const avec = G.crewAction(cap, { type: 'crew.rank.save', id: G.DEFAULT_RANK, name: 'Matelot', perms: { shipChannels: true } }, { crew }).crew;
+  assert.equal(G.canManageShipChannels(membre, ships['brise-lames'], avec), true);
+});
+</file>
+
+<file path="index.html">
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fiche RP</title>
+</head>
+<body>
+<div class="boot" id="boot"><img src="/assets/banner-small.webp" alt=""><p id="boot-msg">Chargement de ta fiche…</p></div>
+
+<div class="backdrop" aria-hidden="true"></div>
+
+<header class="crest"><img src="/assets/banner-big.webp" alt="" width="1400" height="132"></header>
+<nav class="bar topnav" aria-label="Navigation principale">
+  <div class="screens" role="tablist" aria-label="Écrans">
+    <button class="scr" role="tab" data-screen="admin" aria-controls="s-admin" id="scr-admin" hidden><span class="ico" data-i="125"></span><span>Joueurs</span></button>
+    <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
+    <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
+    <button class="scr" role="tab" data-screen="crew" aria-controls="s-crew"><span class="ico" data-i="1"></span><span>Équipage</span></button>
+    <button class="scr" role="tab" data-screen="map" aria-controls="s-map"><span class="ico" data-i="231"></span><span>Carte</span></button>
+    <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
+    <button class="scr" role="tab" data-screen="ashop" aria-controls="s-ashop" id="scr-ashop" hidden><span class="ico" data-i="265"></span><span>Boutiques</span></button>
+    <button class="scr" role="tab" data-screen="amap" aria-controls="s-amap" id="scr-amap" hidden><span class="ico" data-i="231"></span><span>Carte</span></button>
+    <button class="scr" role="tab" data-screen="marine" aria-controls="s-marine" id="scr-marine" hidden><span class="ico" data-i="160"></span><span>Marine</span></button>
+    <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
+    <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
+    <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
+  </div>
+  <div class="wallet-chips">
+    <span class="chip purse" title="Ta bourse"><span class="ico" data-i="261"></span><span class="money" id="purse"></span></span>
+  </div>
+</nav>
+
+<main class="screen" id="s-fiche" role="tabpanel">
+  <div class="mj-banner" id="mj-banner" hidden></div>
+  <section class="sheet no-fiche" id="no-fiche" hidden></section>
+  <section class="hero" aria-label="Identité">
+    <div class="portrait" id="portrait" role="button" tabindex="0" aria-label="Changer la photo du personnage"></div>
+    <div class="who">
+      <div class="stamp-row" id="h-faction"></div>
+      <h1 class="h-name" id="h-name"></h1>
+      <div class="h-epithet" id="h-epithet"></div>
+      <div class="h-will" id="h-will" role="img"></div>
+      <p class="h-aff" id="h-aff"></p>
+      <div class="h-pos" id="h-pos"></div>
+      <div class="h-rp" id="h-rp" role="img"></div>
+      <ul class="traits" id="h-traits"></ul>
+      <div class="level">
+        <div class="lv"><small>Niv.</small><span id="id-lv"></span></div>
+        <div class="grow">
+          <div class="gauge" id="xp-gauge" role="progressbar" aria-label="Expérience"><i></i></div>
+          <div class="gauge-cap"><span>Expérience</span><span id="xp-cap"></span></div>
+        </div>
+        <span class="hero-acts"><button class="btn ghost sm" id="open-photo">📷 Photo</button><button class="btn ghost sm" id="open-edit" hidden>Modifier</button></span>
+      </div>
+    </div>
+    <div class="badge-slot" id="badge-slot"></div>
+  </section>
+
+  <section class="log" aria-label="Carnet du personnage">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="t-perso" aria-controls="v-perso"><span class="ico" data-i="96"></span>Stats & compétences</button>
+      <button class="tab" role="tab" id="t-tech" aria-controls="v-tech"><span class="ico" data-i="131"></span>Techniques</button>
+      <button class="tab" role="tab" id="t-inv" aria-controls="v-inv"><span class="ico" data-i="270"></span>Inventaire</button>
+      <button class="tab" role="tab" id="t-job" aria-controls="v-job"><span class="ico" data-i="279"></span>Métier</button>
+      <button class="tab tab-mj" role="tab" id="t-mj" aria-controls="v-mj" hidden><span class="ico" data-i="125"></span>Édition MJ</button>
+    </div>
+    <div class="sheet">
+      <div role="tabpanel" id="v-perso" aria-labelledby="t-perso"></div>
+      <div role="tabpanel" id="v-tech" aria-labelledby="t-tech" hidden></div>
+      <div role="tabpanel" id="v-inv" aria-labelledby="t-inv" hidden></div>
+      <div role="tabpanel" id="v-job" aria-labelledby="t-job" hidden></div>
+      <div role="tabpanel" id="v-mj" aria-labelledby="t-mj" hidden></div>
+    </div>
+  </section>
+</main>
+
+<main class="screen" id="s-shop" role="tabpanel" hidden>
+  <section class="stall">
+    <div class="awning" aria-hidden="true"></div>
+    <div class="stall-body" id="v-shop"></div>
+  </section>
+</main>
+
+<main class="screen" id="s-nav" role="tabpanel" hidden>
+  <section class="voyage" id="v-nav"></section>
+</main>
+
+<main class="screen" id="s-admin" role="tabpanel" hidden>
+  <section class="sheet" id="v-admin"></section>
+</main>
+
+<main class="screen" id="s-crew" role="tabpanel" hidden>
+  <section class="sheet" id="v-crew"></section>
+</main>
+
+<main class="screen" id="s-marine" role="tabpanel" hidden>
+  <section class="sheet" id="v-marine"></section>
+</main>
+
+<main class="screen" id="s-fleet" role="tabpanel" hidden>
+  <section class="sheet" id="v-fleet"></section>
+</main>
+
+<main class="screen" id="s-ships" role="tabpanel" hidden>
+  <section class="sheet" id="v-ships"></section>
+</main>
+
+<main class="screen" id="s-map" role="tabpanel" hidden>
+  <section class="sheet" id="v-map"></section>
+</main>
+
+<main class="screen" id="s-amap" role="tabpanel" hidden>
+  <section class="sheet" id="v-amap"></section>
+  <input type="file" id="amap-file" accept="image/*" hidden>
+</main>
+
+<main class="screen" id="s-ashop" role="tabpanel" hidden>
+  <section class="sheet" id="v-ashop"></section>
+</main>
+
+<main class="screen" id="s-gest" role="tabpanel" hidden>
+  <section class="sheet" id="v-gest"></section>
+</main>
+
+<footer>
+  <span id="foot-note"></span>
+  <span class="links"><button id="open-mj" hidden>Panneau admin (démo)</button><button id="reset" hidden>Remettre la démo à zéro</button></span>
+</footer>
+
+<dialog id="d-edit" aria-labelledby="edit-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="edit-title">Modifier la fiche</h2><p>Identité, compétences et progression.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <form class="panel-body" id="edit-form" novalidate>
+      <div class="form" id="edit-fields"></div>
+      <div id="edit-extra"></div>
+      <p class="err" id="edit-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="submit" class="btn">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="d-photo" aria-labelledby="photo-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="photo-title">Photo du personnage</h2><p>Choisis une image ou colle un lien, puis fais-la glisser et zoome pour la cadrer.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div class="ph-wrap">
+        <div class="ph-stage" id="ph-stage" aria-label="Zone de cadrage">
+          <img id="ph-img" alt="" hidden draggable="false">
+          <div class="ph-empty" id="ph-empty">Clique ou dépose une image ici</div>
+        </div>
+        <div class="ph-side">
+          <button type="button" class="btn" id="ph-pick">Choisir une image</button>
+          <input type="file" id="ph-file" accept="image/*" hidden>
+          <label for="ph-url" class="ph-label">Ou depuis un lien</label>
+          <div class="ph-url-row"><input type="url" id="ph-url" placeholder="https://…/image.png" inputmode="url" autocomplete="off"><button type="button" class="btn sm" id="ph-url-go">Charger</button></div>
+          <label for="ph-zoom" class="ph-label">Zoom</label>
+          <input type="range" id="ph-zoom" min="1" max="4" step="0.01" value="1" disabled>
+          <p class="note">Tu peux aussi coller une image ou un lien avec Ctrl+V. La molette zoome.</p>
+          <button type="button" class="btn sm ghost" id="ph-remove" hidden>Revenir au portrait par défaut</button>
+        </div>
+      </div>
+      <p class="err" id="ph-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="ph-save" disabled>Enregistrer la photo</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-shopedit" aria-labelledby="se-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="se-title">Éditer la boutique</h2><p>Salon, vendeur et objets en vente.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="se-body"></div>
+      <p class="err" id="se-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="se-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-item" aria-labelledby="it-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="it-title">Nouvel objet</h2><p>Il pourra être vendu, donné, fabriqué ou utilisé dans une recette.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div class="form">
+        <div class="wide"><label for="it-name" id="it-name-label">Nom</label><input id="it-name" maxlength="60"></div>
+        <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
+        <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
+        <div id="it-weight-box"><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
+        <div class="wide it-ship" id="it-upg" hidden>
+          <div class="form">
+            <div><label for="it-utype">Effet</label><select id="it-utype"></select></div>
+            <div><label for="it-uamount">Valeur ajoutée</label><input id="it-uamount" type="number" min="1" inputmode="numeric"></div>
+          </div>
+          <p class="note" style="margin:4px 0 0">Installée sur un bateau par son propriétaire, l’amélioration est consommée. Crée une recette « Charpentier » qui la produit pour que les charpentiers puissent la fabriquer.</p>
+        </div>
+        <div class="wide it-ship" id="it-ship" hidden>
+          <div class="form">
+            <div><label for="it-cap">Cale au départ (kg)</label><input id="it-cap" type="number" min="0" inputmode="numeric"></div>
+            <div><label for="it-sail">Vitesse (niveau de voile)</label><input id="it-sail" type="number" min="1" inputmode="numeric"></div>
+            <div><label for="it-berths">Places (personnes)</label><input id="it-berths" type="number" min="1" inputmode="numeric"></div>
+            <div><label for="it-cannons">Canons au départ</label><input id="it-cannons" type="number" min="0" inputmode="numeric"></div>
+            <div><label for="it-space">Espace RP sur Discord</label><select id="it-space"></select></div>
+          </div>
+          <p class="note" style="margin:4px 0 0">Le nom de l’objet est le type de bateau. Acheté en boutique ou fabriqué, il devient un vrai bateau qui porte ce nom, puis son propriétaire le personnalise.</p>
+        </div>
+        <div class="wide"><label for="it-desc">Description</label><input id="it-desc" maxlength="400"></div>
+      </div>
+      <div class="se-face">
+        <div class="face it-preview" id="it-preview"></div>
+        <div class="se-face-ctl">
+          <b>Image de l’objet (facultative)</b>
+          <div class="se-row"><button type="button" class="btn sm" id="it-pick">Choisir une image</button><input type="file" id="it-file" accept="image/*" hidden><button type="button" class="btn sm ghost" id="it-noimg" hidden>Retirer</button></div>
+          <div class="ph-url-row"><input type="url" id="it-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="it-url-go">Utiliser</button></div>
+          <p class="note" style="margin:0">Sans image, une icône est choisie selon la catégorie. Seules les armes s’équipent. La valeur sert au prix de revente.</p>
+        </div>
+      </div>
+      <p class="err" id="it-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="it-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="it-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-recipe" aria-labelledby="rc-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="rc-title">Nouvelle recette</h2><p>Les ingrédients sont pris au lancement ; le résultat se récupère une fois le temps écoulé.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="rc-body"></div>
+      <p class="err" id="rc-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="rc-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="rc-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-prompt" aria-labelledby="pr-title" class="confirm">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="pr-title">Saisie</h2></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <form class="panel-body" id="pr-form">
+      <p id="pr-text"></p>
+      <input id="pr-input" class="mj-search" autocomplete="off">
+      <p class="err" id="pr-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="submit" class="btn" id="pr-ok">Valider</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="d-confirm" aria-labelledby="cf-title" class="confirm">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="cf-title">Confirmer</h2></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <p id="cf-text"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="cf-ok">Confirmer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-ship" aria-labelledby="sh-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="sh-title">Bateau</h2><p id="sh-sub"></p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="sh-body"></div>
+      <p class="err" id="sh-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="sh-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="sh-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-crew" aria-labelledby="cr-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="cr-title">Équipage</h2><p>Nom, Jolly Roger, membres, capitaine, banque et bateau.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="cr-body"></div>
+      <p class="err" id="cr-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="cr-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="cr-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-island" aria-labelledby="isl-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="isl-title">Île</h2><p>Image, salons, visibilité, accès et temps de trajet.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="isl-body"></div>
+      <p class="err" id="isl-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" id="isl-del" hidden>Supprimer</button>
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="button" class="btn" id="isl-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-tech" aria-labelledby="tech-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="tech-title">Nouvelle technique</h2><p>Elle sera utilisable une fois validée par un MJ.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <form class="panel-body" id="tech-form" novalidate>
+      <div class="form">
+        <div class="wide"><label for="tf-name">Nom de la technique</label><input id="tf-name" name="name" maxlength="40" required></div>
+        <div class="wide"><label for="tf-src">Type</label><select id="tf-src" name="src"></select></div>
+        <div class="wide">
+          <label>Image ou GIF</label>
+          <div class="tf-media">
+            <div class="tf-preview" id="tf-preview"></div>
+            <div class="tf-ctl">
+              <div class="se-row"><button type="button" class="btn sm" id="tf-pick">Choisir un fichier</button><button type="button" class="btn sm ghost" id="tf-media-del" hidden>Retirer</button></div>
+              <input type="file" id="tf-file" accept="image/*" hidden>
+              <div class="ph-url-row"><input type="url" id="tf-url" placeholder="ou colle un lien https://…gif" autocomplete="off"><button type="button" class="btn sm" id="tf-url-go">Charger</button></div>
+              <p class="note" style="margin:0">PNG, JPG ou GIF animé, 2 Mo maximum. Ctrl+V marche aussi.</p>
+            </div>
+          </div>
+        </div>
+        <div class="wide"><label for="tf-desc">Description</label><textarea id="tf-desc" name="desc" maxlength="300" rows="4" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px"></textarea></div>
+      </div>
+      <p class="err" id="tech-err" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" class="btn ghost" data-close>Annuler</button>
+        <button type="submit" class="btn" id="tech-submit">Proposer la technique</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="d-mj" aria-labelledby="mj-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="mj-title">Mode MJ</h2><p>Ouvre la fiche d’un joueur pour la modifier.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body" id="mj-body"></div>
+  </div>
+</dialog>
+
+<dialog class="levelup" id="levelup" aria-labelledby="lu-title">
+  <div class="card">
+    <img src="/assets/banner-small.webp" alt="">
+    <div class="big" id="lu-title"></div>
+    <p id="lu-text"></p>
+    <p class="note">Touche pour continuer</p>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+
+<script type="module" src="/src/main.js"></script>
+<datalist id="ship-types"></datalist>
+</body>
+</html>
+</file>
+
+<file path="api/staff.js">
+/**
+ * POST /api/staff { op, ... } : outils réservés au staff.
+ *  - players                              : liste des fiches
+ *  - act { target, action }                : modifier la fiche d'un joueur
+ *  - bulk { targets, action }              : la même action sur plusieurs joueurs (XP, niveaux, berrys, objets)
+ *  - shops                                    : toutes les boutiques
+ *  - shop.save { channelId, from?, shop }      : enregistre la boutique du salon channelId (déplacée depuis « from » si l'ID a changé)
+ *  - shop.delete { channelId }
+ *  - crews / crew.save { id?, crew } / crew.delete { id }  : équipages (membres, capitaine, banque, coffre, bateau)
+ *  - ships / ship.save { id?, ship } / ship.delete { id }  : bateaux (créés par le staff ou achetés)
+ *  - ship.upgrade { id, type, amount }                     : améliorer un bateau (cale, canons, voile)
+ *  - map.get / map.bg { bg, ratio } / map.island.save { id?, island } / map.island.move { id, x, y }
+ *    map.island.delete { id } / map.route { a, b, value|null } : carte du monde
+ *  - item.save { id?, item } / item.delete { id }        : base d'objets
+ *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
+ */
+import { handler, need } from './_lib/http.js';
+import { userFromRequest, isStaff, channelById } from './_lib/discord.js';
+import { env } from './_lib/env.js';
+import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
+import { ingest } from './_lib/media.js';
+import { loadCatalog, loadMap } from './_lib/context.js';
+import { normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+
+/** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
+function freeId(base, taken) {
+  let id = slug(base), n = 2;
+  while (taken[id]) id = `${slug(base)}-${n++}`;
+  return id;
+}
+
+export default handler(['POST'], async (req, body) => {
+  const me = await userFromRequest(req);
+  need(await isStaff(me.uid), 403, 'Réservé au staff.');
+  const catalog = await loadCatalog({ fresh: true });
+
+  switch (body.op) {
+    case 'players':
+      return { players: await listPlayers() };
+
+    case 'act': {
+      need(typeof body.target === 'string', 400, 'Joueur manquant.');
+      return retry(async () => {
+        const row = await read('players', body.target);
+        need(row, 404, 'Ce joueur n’a pas de fiche.');
+        const out = staffAction(normalize(row.data), body.action);
+        await write('players', body.target, out.player, row.version);
+        return out;
+      });
+    }
+
+    case 'bulk': {
+      const targets = [...new Set(Array.isArray(body.targets) ? body.targets : [])].filter((t) => typeof t === 'string');
+      need(targets.length, 400, 'Aucun joueur sélectionné.');
+      need(targets.length <= 500, 400, '500 joueurs maximum à la fois.');
+      need(['xp', 'levels', 'berry', 'give', 'take'].includes(body.action?.type), 400, 'Action non disponible en groupe.');
+      let ok = 0;
+      const failed = [];
+      // Une fiche à la fois : si l'une échoue (inventaire plein...), les autres passent quand même.
+      for (const uid of targets) {
+        try {
+          await retry(async () => {
+            const row = await read('players', uid);
+            need(row, 404, 'pas de fiche');
+            const out = staffAction(normalize(row.data), body.action);
+            await write('players', uid, out.player, row.version);
+          });
+          ok++;
+        } catch (err) {
+          failed.push({ uid, error: err.message });
+        }
+      }
+      console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
+      return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
+    }
+
+    case 'crews':
+      return { crews: await readAll('crews'), ships: await readAll('ships') };
+
+    case 'crew.save': {
+      const input = body.crew || {};
+      const crews = await readAll('crews');
+      const id = body.id && crews[body.id] ? body.id : freeId(input.name || 'equipage', crews);
+      const old = crews[id] ? normalizeCrew(structuredClone(crews[id])) : null;
+      const crew = normalizeCrew({ ...(old || {}), ...input, chest: input.chest ?? old?.chest ?? {} });
+      if (input.flag !== undefined) crew.flag = input.flag ? await ingest(input.flag, 'pavillons', id) : null;
+      // Bateau d'équipage : il doit exister, et devient la propriété de l'équipage.
+      if (crew.ship) {
+        const ship = await read('ships', crew.ship);
+        need(ship, 404, 'Bateau introuvable.');
+        if (ship.data.owner?.kind !== 'crew' || ship.data.owner.id !== id) {
+          await write('ships', crew.ship, { ...ship.data, owner: { kind: 'crew', id } }, ship.version);
+        }
+      }
+      // Un joueur n'est que dans un équipage : on met à jour les fiches concernées.
+      const before = new Set(old?.members || []), after = new Set(crew.members);
+      for (const uid of after) {
+        if (before.has(uid)) continue;
+        await retry(async () => {
+          const row = await read('players', uid);
+          need(row, 404, `Le joueur ${uid} n’a pas de fiche.`);
+          need(crew.kind !== 'flotte' || row.data.id?.faction === 'Marine', 400, `${row.data.id?.name || uid} n’est pas Marine : il ne peut pas rejoindre une flotte.`);
+          const prev = row.data.crewId;
+          if (prev && prev !== id && crews[prev]) {
+            const other = await read('crews', prev);
+            if (other) {
+              const o = normalizeCrew(other.data);
+              o.members = o.members.filter((m) => m !== uid);
+              await write('crews', prev, normalizeCrew(o), other.version);
+            }
+          }
+          await write('players', uid, { ...row.data, crewId: id }, row.version);
+        });
+      }
+      for (const uid of before) {
+        if (after.has(uid)) continue;
+        await retry(async () => {
+          const row = await read('players', uid);
+          if (row && row.data.crewId === id) await write('players', uid, { ...row.data, crewId: null }, row.version);
+        });
+      }
+      await retry(async () => {
+        const row = await read('crews', id);
+        await write('crews', id, crew, row?.version ?? null);
+      });
+      return { id, crew, toast: `${crew.kind === 'flotte' ? 'Flotte' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
+    }
+
+    case 'crew.delete': {
+      const row = await read('crews', body.id);
+      need(row, 404, 'Équipage introuvable.');
+      for (const uid of row.data.members || []) {
+        await retry(async () => {
+          const p = await read('players', uid);
+          if (p && p.data.crewId === body.id) await write('players', uid, { ...p.data, crewId: null }, p.version);
+        });
+      }
+      const ships = await readAll('ships');
+      for (const [sid, sh] of Object.entries(ships)) {
+        if (sh.owner?.kind === 'crew' && sh.owner.id === body.id) {
+          const r = await read('ships', sid);
+          await write('ships', sid, { ...r.data, owner: null }, r.version);
+        }
+      }
+      await remove('crews', body.id);
+      return { toast: `Équipage supprimé : ${row.data.name}. Ses bateaux sont maintenant sans propriétaire.` };
+    }
+
+    case 'ships':
+      return { ships: await readAll('ships') };
+
+    case 'ship.save': {
+      const input = { ...(body.ship || {}) };
+      // Position : le salon où le bateau est à quai, donné par son ID.
+      if ('positionId' in input) {
+        const pid = String(input.positionId || '').trim();
+        if (pid) {
+          const ch = await channelById(pid);
+          need(ch, 400, 'Salon introuvable pour la position : vérifie l’ID du salon.');
+          input.position = { channelId: pid, name: ch.name };
+        } else input.position = null;
+        delete input.positionId;
+      }
+      const ships = await readAll('ships');
+      const existing = body.id && ships[body.id] ? body.id : null;
+      if (!existing) {
+        // Un nouveau bateau vient toujours d'un modèle créé dans Gestion (catégorie Bateau).
+        need(input.model && catalog.items[input.model]?.kind === 'bateau', 400, 'Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
+        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail', 'space']) delete input[k]; // tout vient du modèle
+      }
+      const id = existing || freeId(input.name || catalog.items[input.model].name, ships);
+      const old = ships[id] || null;
+      const ship = old ? normalizeShip({ ...old, ...input }) : newShip(input);
+      if (input.photo !== undefined) ship.photo = input.photo ? await ingest(input.photo, 'bateaux', id) : null;
+      // Si le bateau quitte un équipage, celui-ci n'a plus de bateau attitré.
+      if (old?.owner?.kind === 'crew' && (ship.owner?.kind !== 'crew' || ship.owner.id !== old.owner.id)) {
+        const c = await read('crews', old.owner.id);
+        if (c && c.data.ship === id) await write('crews', old.owner.id, { ...c.data, ship: null }, c.version);
+      }
+      await retry(async () => {
+        const row = await read('ships', id);
+        await write('ships', id, ship, row?.version ?? null);
+      });
+      // Donné à un équipage ou une flotte sans bateau attitré : il le devient.
+      if (ship.owner?.kind === 'crew') {
+        await retry(async () => {
+          const c = await read('crews', ship.owner.id);
+          if (c && !c.data.ship) await write('crews', ship.owner.id, { ...c.data, ship: id }, c.version);
+        });
+      }
+      return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}` };
+    }
+
+    case 'ship.upgrade': {
+      return retry(async () => {
+        const row = await read('ships', body.id);
+        need(row, 404, 'Bateau introuvable.');
+        const ship = upgradeShip(normalizeShip(row.data), body.type, body.amount, { by: me.uid });
+        await write('ships', body.id, ship, row.version);
+        const n = Number(body.amount);
+        return { id: body.id, ship, toast: `${ship.name} : ${n > 0 ? '+' : ''}${n} ${body.type === 'cale' ? 'kg de cale' : body.type === 'canons' ? 'canon(s)' : 'niveau(x) de voile'}` };
+      });
+    }
+
+    case 'ship.delete': {
+      const row = await read('ships', body.id);
+      need(row, 404, 'Bateau introuvable.');
+      if (row.data.owner?.kind === 'crew') {
+        const c = await read('crews', row.data.owner.id);
+        if (c && c.data.ship === body.id) await write('crews', row.data.owner.id, { ...c.data, ship: null }, c.version);
+      }
+      await remove('ships', body.id);
+      return { toast: `Bateau supprimé : ${row.data.name}` };
+    }
+
+    case 'map.get':
+      return { map: (await loadMap()).map };
+
+    case 'map.bg':
+    case 'map.island.save':
+    case 'map.island.move':
+    case 'map.island.delete':
+    case 'map.link':
+    case 'map.unlink': {
+      // Images d'abord (hors de la boucle de réessai)
+      let bg, img;
+      if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
+      if (body.op === 'map.island.save' && body.island?.img) img = await ingest(body.island.img, 'iles', slug(body.island.name || 'ile'));
+      // Salons de l'île : on vérifie chaque ID et on retrouve son nom (et si c'est un forum)
+      let channels;
+      if (body.op === 'map.island.save') {
+        channels = [];
+        for (const c of body.island?.channels || []) {
+          const id = String(c.id || c).trim();
+          if (!id) continue;
+          const ch = await channelById(id);
+          need(ch, 400, `Salon introuvable : ${id}. Vérifie l’ID.`);
+          need(!env.guildId || !ch.guildId || ch.guildId === env.guildId, 400, `Le salon ${ch.name} n’est pas sur le serveur principal.`);
+          channels.push({ id, name: ch.name, kind: ch.forum ? 'forum' : 'salon' });
+        }
+      }
+      return retry(async () => {
+        const { map, version } = await loadMap();
+        let toast = 'Carte mise à jour', id = body.id;
+        if (body.op === 'map.bg') {
+          map.bg = bg;
+          if (Number(body.ratio) > 0) map.ratio = Number(body.ratio);
+          toast = bg ? 'Fond de carte enregistré' : 'Fond de carte retiré';
+        }
+        if (body.op === 'map.island.save') {
+          const old = body.id && map.islands[body.id];
+          const isl = normalizeIsland({ ...(old || {}), ...body.island, img: img ?? (body.island.img === null ? null : old?.img ?? null), channels });
+          // Un salon n'appartient qu'à une île : on le retire des autres
+          for (const [oid, o] of Object.entries(map.islands)) if (oid !== body.id) o.channels = o.channels.filter((c) => !isl.channels.some((n) => n.id === c.id));
+          if (!old) {
+            id = slug(isl.name);
+            for (let n = 2; map.islands[id]; n++) id = `${slug(isl.name)}-${n}`;
+          }
+          map.islands[id] = isl;
+          const what = isl.kind === 'waypoint' ? 'Point de passage' : 'Île';
+          toast = old ? `${what} modifié${isl.kind === 'waypoint' ? '' : 'e'} : ${isl.name}` : `${what} ajouté${isl.kind === 'waypoint' ? '' : 'e'} : ${isl.name}`;
+        }
+        if (body.op === 'map.island.move') {
+          need(map.islands[body.id], 404, 'Île introuvable.');
+          map.islands[body.id] = normalizeIsland({ ...map.islands[body.id], x: body.x, y: body.y });
+          toast = null;
+        }
+        if (body.op === 'map.island.delete') {
+          need(map.islands[body.id], 404, 'Île introuvable.');
+          toast = `Supprimé : ${map.islands[body.id].name}`;
+          delete map.islands[body.id]; // ses routes disparaissent avec elle
+        }
+        if (body.op === 'map.link' || body.op === 'map.unlink') {
+          need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Route invalide.');
+          const k = routeKey(body.a, body.b);
+          if (body.op === 'map.unlink') delete map.links[k];
+          else map.links[k] = body.value === null || body.value === '' || body.value === undefined ? null : Math.max(0, Math.round(Number(body.value) || 0));
+          toast = null;
+        }
+        const clean = normalizeMap(map);
+        await write('meta', 'map', clean, version);
+        return { map: clean, id, toast };
+      });
+    }
+
+    case 'shops':
+      return { shops: await readAll('shops') };
+
+    case 'shop.save': {
+      need(body.channelId && body.shop, 400, 'Boutique manquante.');
+      const channelId = String(body.channelId).trim();
+      // On retrouve le vrai salon à partir de son ID : pas besoin de taper son nom.
+      const ch = await channelById(channelId);
+      need(ch, 400, 'Salon introuvable : vérifie l’ID (clic droit sur le salon > Copier l’identifiant) et que le bot voit ce salon.');
+      need(!env.guildId || !ch.guildId || ch.guildId === env.guildId, 400, 'Ce salon n’est pas sur le serveur principal.');
+      const shop = normalizeShop({ ...body.shop });
+      shop.items = shop.items.filter(([k]) => ITEMS[k]);
+      need(new Set(shop.items.map((x) => x[0])).size === shop.items.length, 400, 'Un même objet apparaît deux fois.');
+      shop.name = String(shop.name || 'Comptoir').slice(0, 60);
+      shop.seller = String(shop.seller || 'Le marchand').slice(0, 40);
+      shop.face = String(shop.face || '').slice(0, 8);
+      shop.channel = `#${ch.name}`;
+      shop.img = shop.img ? await ingest(shop.img, 'vendeurs', channelId) : null;
+      const from = body.from && body.from !== channelId ? String(body.from) : null;
+      if (from) need(!(await read('shops', channelId)), 409, `Il y a déjà une boutique dans #${ch.name}.`);
+      return retry(async () => {
+        const row = await read('shops', channelId);
+        await write('shops', channelId, shop, row?.version ?? null);
+        if (from) await remove('shops', from);
+        return { channelId, shop, toast: from ? `Boutique déplacée vers #${ch.name}` : `Boutique de #${ch.name} enregistrée` };
+      });
+    }
+
+    case 'shop.delete':
+      need(body.channelId, 400, 'Salon manquant.');
+      await remove('shops', body.channelId);
+      return { shop: null, toast: 'Boutique fermée' };
+
+    case 'item.save': {
+      const item = normalizeItem(body.item || {});
+      const id = body.id && catalog.items[body.id] ? body.id : freeId(item.name, catalog.items);
+      item.img = item.img ? await ingest(item.img, 'objets', id) : null;
+      return retry(async () => {
+        const row = await read('items', id);
+        await write('items', id, item, row?.version ?? null);
+        catalog.items[id] = item;
+        return { id, catalog, toast: row ? `Objet modifié : ${item.name}` : `Objet créé : ${item.name}` };
+      });
+    }
+
+    case 'item.delete': {
+      need(catalog.items[body.id], 404, 'Objet introuvable.');
+      const used = Object.values(catalog.recipes).filter((r) => r.needs[body.id] || r.gives[body.id]).map(recipeLabel);
+      need(!used.length, 400, `Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
+      await remove('items', body.id);
+      delete catalog.items[body.id];
+      return { catalog, toast: 'Objet supprimé. Les joueurs qui le possèdent le verront comme « Objet supprimé ».' };
+    }
+
+    case 'recipe.save': {
+      const recipe = normalizeRecipe(body.recipe || {});
+      const id = body.id && catalog.recipes[body.id] ? body.id : freeId(recipeLabel(recipe), catalog.recipes);
+      return retry(async () => {
+        const row = await read('recipes', id);
+        await write('recipes', id, recipe, row?.version ?? null);
+        catalog.recipes[id] = recipe;
+        return { id, catalog, toast: row ? `Recette modifiée : ${recipeLabel(recipe)}` : `Recette créée : ${recipeLabel(recipe)}` };
+      });
+    }
+
+    case 'recipe.delete': {
+      need(catalog.recipes[body.id], 404, 'Recette introuvable.');
+      await remove('recipes', body.id);
+      delete catalog.recipes[body.id];
+      return { catalog, toast: 'Recette supprimée' };
+    }
+
+    default:
+      need(false, 400, 'Opération inconnue.');
+  }
+});
 </file>
 
 <file path="shared/game.js">
@@ -2454,7 +3313,7 @@ export function duree(sec) {
 
 /* ═══ Personnage ═════════════════════════════════════════════════════════ */
 /** Fiche créée par le staff avec /register. */
-export function newPlayer(uid, { name, race, job, classe } = {}) {
+export function newPlayer(uid, { name, race, job, classe, faction, grade } = {}) {
   const n = str(name, 60);
   if (!n) fail('Il faut un nom.');
   const r = inList(RACES, race);
@@ -2463,9 +3322,14 @@ export function newPlayer(uid, { name, race, job, classe } = {}) {
   if (!c) fail(`Classe inconnue. Choix : ${CLASSES.join(', ')}.`);
   const j = !job || norm(job) === 'aucun' ? null : Object.keys(JOBS).find((k) => k === job || norm(JOBS[k].name) === norm(job));
   if (job && norm(job) !== 'aucun' && !j) fail(`Métier inconnu. Choix : ${Object.values(JOBS).map((x) => x.name).join(', ')} ou aucun.`);
+  const f = faction ? inList(FACTIONS, faction) : 'Pirate';
+  if (!f) fail(`Faction inconnue. Choix : ${FACTIONS.join(', ')}.`);
+  // Le grade ne sert qu'aux Marines (3ème Classe par défaut)
+  const g = f === 'Marine' && grade ? inList(GRADES, grade) : GRADES[0];
+  if (!g) fail(`Grade inconnu. Choix : ${GRADES.join(', ')}.`);
   return normalize({
     uid,
-    id: { name: n, epithet: '', faction: 'Pirate', crew: '', crewRole: '', grade: GRADES[0], race: r, classe: c, bounty: 0 },
+    id: { name: n, epithet: '', faction: f, crew: '', crewRole: '', grade: g, race: r, classe: c, bounty: 0 },
     level: 1, xp: 0, statPts: 0, berry: 0,
     stats: { force: 10, rapidite: 10, resistance: 10, sdc: 10 },
     volonte: 0, haki: { observation: 0, armement: 0, rois: null }, fruit: null,
@@ -3038,9 +3902,12 @@ export function staffAction(player, action) {
 }
 
 /* ═══ Bateaux ════════════════════════════════════════════════════════════ */
-/** Caractéristiques enregistrées à la création : type, canons, capacité (kg). */
+/** Espace RP d'un bateau sur Discord : un post dans le forum commun, un forum à lui, ou rien. */
+export const SHIP_SPACES = { post: 'Un post dans le forum des bateaux', forum: 'Un forum à lui', none: 'Aucun' };
+/** Caractéristiques enregistrées à la création : type, canons, capacité (kg), espace RP. */
 export function normalizeShipStats(x) {
   return {
+    space: SHIP_SPACES[x.space] ? x.space : 'post',
     type: str(x.type, 40) || 'Navire',
     cannons: int(x.cannons, 0, 500),
     capacity: Math.round(Math.min(1e7, Math.max(0, Number(x.capacity) || 0))),
@@ -3068,7 +3935,15 @@ export function normalizeShip(s) {
   s.passengers = [...new Set((s.passengers || []).map(String))].slice(0, s.berths);
   s.requests = (s.requests || []).filter((r) => r?.uid && !s.passengers.includes(String(r.uid))).slice(-50);
   s.upgrades ??= [];
+  // Salon RP du bateau sur Discord (créé avec /bateau salon)
+  s.channel = s.channel?.id ? { id: String(s.channel.id), kind: s.channel.kind === 'forum' ? 'forum' : 'post', name: str(s.channel.name, 100) } : null;
   return s;
+}
+/** Peut-il créer et gérer les salons de ce bateau ? Propriétaire, ou membre autorisé de l'équipage / la flotte. */
+export function canManageShipChannels(p, ship, crew) {
+  if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
+  if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'shipChannels');
+  return false;
 }
 export function canEditShip(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
@@ -3187,6 +4062,7 @@ export const CREW_PERMS = {
   kick: 'Exclure des membres',
   ranks: 'Attribuer les grades',
   ship: 'Choisir le bateau',
+  shipChannels: 'Gérer les salons des bateaux',
   edit: 'Modifier le nom et le Jolly Roger',
 };
 export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas supprimable
@@ -3436,31 +4312,36 @@ export function inviteAction(player, action, ctx = {}) {
 }
 
 /* ═══ Carte du monde ═════════════════════════════════════════════════════
- * Les positions sont en % de la carte (0 à 100), la taille d'une île en % de
- * la largeur : la carte reste juste quelle que soit la taille de l'image.
+ * Positions en % de la carte (0 à 100), taille d'une île en % de la largeur.
+ * On ne voyage pas en ligne droite : on suit les routes maritimes tracées par
+ * le staff, d'île en île ou par des points de passage invisibles pour les
+ * joueurs (entrée de Reverse Mountain, traversée de la Calm Belt...).
  */
 /** Valeur de trajet par unité de distance (largeur de la carte = 100). */
 export const TRAVEL_PER_UNIT = 1;
 const pct = (v, d = 50) => Math.round(Math.min(100, Math.max(0, Number.isFinite(+v) ? +v : d)) * 100) / 100;
 
 export function normalizeIsland(x = {}) {
-  const name = str(x.name, 60);
+  const wp = x.kind === 'waypoint'; // point de passage : invisible pour les joueurs
+  const name = str(x.name, 60) || (wp ? 'Passage' : '');
   if (!name) fail('Donne un nom à l’île.');
   return {
+    kind: wp ? 'waypoint' : 'island',
     name,
-    desc: str(x.desc, 600),
-    img: x.img ? str(x.img, 3_000_000) : null, // PNG transparent
+    desc: wp ? '' : str(x.desc, 600),
+    img: !wp && x.img ? str(x.img, 3_000_000) : null, // PNG transparent
     x: pct(x.x), y: pct(x.y),
     size: Math.round(Math.min(60, Math.max(1, Number(x.size) || 8)) * 100) / 100, // % de la largeur de la carte
-    visible: x.visible !== false,
+    visible: wp ? false : x.visible !== false,
     accessible: x.accessible !== false,
-    channels: (Array.isArray(x.channels) ? x.channels : [])
+    channels: wp ? [] : (Array.isArray(x.channels) ? x.channels : [])
       .filter((c) => c && /^[\w-]{1,30}$/.test(String(c.id)))
       .map((c) => ({ id: String(c.id), name: str(c.name, 100), kind: c.kind === 'forum' ? 'forum' : 'salon' }))
       .filter((c, i, a) => a.findIndex((o) => o.id === c.id) === i)
       .slice(0, 50),
   };
 }
+export const routeKey = (a, b) => [a, b].sort().join('|');
 export function normalizeMap(m = {}) {
   const islands = {};
   for (const [id, isl] of Object.entries(m.islands || {})) {
@@ -3468,28 +4349,64 @@ export function normalizeMap(m = {}) {
       islands[id] = normalizeIsland(isl);
     } catch {}
   }
-  const routes = {};
-  for (const [k, v] of Object.entries(m.routes || {})) {
-    const [a, b] = k.split('|');
-    if (islands[a] && islands[b] && a !== b && Number.isFinite(+v)) routes[routeKey(a, b)] = int(v, 0, 1e6);
-  }
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, routes }; // ratio = hauteur / largeur du fond
+  // Routes : { "a|b": temps choisi, ou null = selon la longueur }
+  const links = {};
+  const add = (k, v) => {
+    const [a, b] = String(k).split('|');
+    if (!islands[a] || !islands[b] || a === b) return;
+    links[routeKey(a, b)] = v == null || v === '' || !Number.isFinite(+v) ? null : int(v, 0, 1e6);
+  };
+  for (const [k, v] of Object.entries(m.routes || {})) add(k, v); // anciens temps choisis : deviennent des routes
+  for (const [k, v] of Object.entries(m.links || {})) add(k, v);
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links }; // ratio = hauteur / largeur du fond
 }
-export const routeKey = (a, b) => [a, b].sort().join('|');
-/** Distance entre deux îles, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
+/** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {
   const A = map.islands[a], B = map.islands[b];
   if (!A || !B) return null;
   const dx = A.x - B.x, dy = (A.y - B.y) * map.ratio;
   return Math.hypot(dx, dy);
 }
-/** Temps de trajet : celui choisi par le staff, sinon calculé selon la distance. */
+/** Temps d'un tronçon de route : celui choisi par le staff, sinon selon sa longueur. null = pas de route. */
+export function linkTime(map, a, b) {
+  const v = map.links[routeKey(a, b)];
+  if (v === undefined) return null;
+  return v != null ? v : Math.max(1, Math.round(islandDistance(map, a, b) * TRAVEL_PER_UNIT));
+}
+/** Points reliés à a par une route : [{ id, value, auto }]. */
+export function neighbors(map, a) {
+  return Object.entries(map.links).flatMap(([k, v]) => {
+    const [x, y] = k.split('|');
+    const o = x === a ? y : y === a ? x : null;
+    return o ? [{ id: o, value: linkTime(map, a, o), auto: v == null }] : [];
+  });
+}
+/**
+ * Trajet le plus court de a à b en suivant les routes. On ne passe jamais par
+ * une île inaccessible (on peut en partir ou y arriver). Renvoie { value, path } ou null.
+ */
 export function travelTime(map, a, b) {
-  if (a === b) return 0;
-  const k = routeKey(a, b);
-  if (map.routes[k] != null) return { value: map.routes[k], auto: false };
-  const d = islandDistance(map, a, b);
-  return d == null ? null : { value: Math.max(1, Math.round(d * TRAVEL_PER_UNIT)), auto: true };
+  if (!map.islands[a] || !map.islands[b]) return null;
+  if (a === b) return { value: 0, path: [a] };
+  const dist = { [a]: 0 }, prev = {}, done = new Set();
+  for (;;) {
+    let u = null;
+    for (const [id, d] of Object.entries(dist)) if (!done.has(id) && (u === null || d < dist[u])) u = id;
+    if (u === null) return null; // aucune route
+    if (u === b) break;
+    done.add(u);
+    if (u !== a && !map.islands[u].accessible) continue; // on ne traverse pas une île fermée
+    for (const n of neighbors(map, u)) {
+      const d = dist[u] + n.value;
+      if (dist[n.id] === undefined || d < dist[n.id]) {
+        dist[n.id] = d;
+        prev[n.id] = u;
+      }
+    }
+  }
+  const path = [b];
+  while (path[0] !== a) path.unshift(prev[path[0]]);
+  return { value: dist[b], path };
 }
 /** Île d'un salon (ou d'un post de forum, via son forum). */
 export function islandOf(map, position) {
@@ -3498,17 +4415,25 @@ export function islandOf(map, position) {
   return Object.keys(map.islands).find((id) => map.islands[id].channels.some((c) => ids.includes(c.id))) || null;
 }
 /**
- * Carte vue par un joueur : îles visibles, plus celle où il se trouve.
- * Le staff voit tout (y compris les îles cachées et les réglages).
+ * Carte vue par un joueur : îles visibles, plus celle où il se trouve. Pas de
+ * points de passage ni de routes. Pour chaque île : le trajet depuis la sienne
+ * ({ value, via: noms des îles visibles traversées }) ou null s'il n'y a pas de route.
+ * Le staff voit tout.
  */
 export function mapFor(map0, player, { staff = false } = {}) {
   const map = normalizeMap(clone(map0));
   const here = islandOf(map, player?.position);
   if (staff) return { ...map, here };
-  const islands = Object.fromEntries(Object.entries(map.islands).filter(([id, isl]) => isl.visible || id === here));
-  const ids = Object.keys(islands);
+  const ids = Object.keys(map.islands).filter((id) => map.islands[id].kind === 'island' && (map.islands[id].visible || id === here));
+  const islands = Object.fromEntries(ids.map((id) => [id, map.islands[id]]));
   const travel = {};
-  if (here) for (const id of ids) if (id !== here) travel[id] = travelTime(map, here, id)?.value ?? null;
+  if (here) {
+    for (const id of ids) {
+      if (id === here) continue;
+      const t = travelTime(map, here, id);
+      travel[id] = t ? { value: t.value, via: t.path.slice(1, -1).filter((s) => islands[s]).map((s) => islands[s].name) } : null;
+    }
+  }
   return { bg: map.bg, ratio: map.ratio, islands, here, travel };
 }
 
@@ -3559,783 +4484,6 @@ export function demoShips() {
     'mouette-pnj': normalizeShip({ name: 'La Mouette Rieuse', desc: 'Le bateau d’un autre joueur (démo).', type: 'Goélette', cannons: 2, capacity: 150, berths: 3, sail: 2, owner: { kind: 'player', id: 'pnj-3' }, position: { channelId: 'demo', name: 'port-brisant' }, created: 0 }),
   };
 }
-</file>
-
-<file path="src/api.js">
-/**
- * Accès aux données. Dans Discord : l'API Vercel. Hors Discord : un mode démo
- * qui applique les mêmes règles (shared/game.js) dans le navigateur.
- */
-import * as G from '../shared/game.js';
-import { inDiscord, connect } from './discord.js';
-
-let token = null;
-export let mode = 'demo';
-export let channelId = null;
-
-async function call(method, path, body) {
-  const r = await fetch(path, {
-    method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Erreur du serveur.');
-  return data;
-}
-
-/* ─── Mode démo : tout reste dans ce navigateur ─── */
-/** Petite carte d'exemple : une mer dessinée et trois îles (sans image : formes par défaut). */
-function demoMap() {
-  const sea = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><defs><radialGradient id="g" cx="50%" cy="45%" r="75%"><stop offset="0" stop-color="#3f8ad0"/><stop offset="1" stop-color="#1b4f8e"/></radialGradient></defs><rect width="1600" height="900" fill="url(#g)"/><g fill="none" stroke="#9fd3ef" stroke-opacity=".35" stroke-width="3">${Array.from({ length: 14 }, (_, i) => `<path d="M${(i * 137) % 1500} ${(i * 211) % 850} q30 -18 60 0 t60 0"/>`).join('')}</g></svg>`;
-  return G.normalizeMap({
-    bg: `data:image/svg+xml;base64,${btoa(sea)}`, ratio: 0.5625,
-    islands: {
-      'port-brisant': { name: 'Port-Brisant', desc: 'Petit port marchand, point de départ de bien des équipages.', x: 24, y: 42, size: 10, channels: [{ id: 'demo', name: 'port-brisant' }] },
-      'water-7': { name: 'Water 7', desc: 'La cité des charpentiers.', x: 62, y: 58, size: 12, channels: [{ id: 'forum-w7', name: 'Water 7', kind: 'forum' }] },
-      'ile-cachee': { name: 'Île sans nom', desc: 'Personne ne sait qu’elle existe.', x: 84, y: 18, size: 7, visible: false, accessible: false },
-    },
-  });
-}
-const KEY = 'op_rp_demo_v10';
-let store;
-function loadStore() {
-  try {
-    store = JSON.parse(localStorage.getItem(KEY));
-  } catch {}
-  if (!store?.player) {
-    G.setCatalog(G.demoCatalog());
-    store = {
-      player: G.demoPlayer(), shops: { demo: G.demoShop() }, catalog: G.demoCatalog(),
-      // une demande d'embarquement sur le bateau de l'équipage, pour tester
-      ships: (() => {
-        const sh = G.demoShips();
-        sh['brise-lames'].requests = [{ uid: 'pnj-2', at: Date.now() }];
-        return sh;
-      })(),
-      map: demoMap(),
-      crews: {
-        'goeland-noir': G.demoCrew(),
-        // un autre équipage qui invite le joueur de démo, pour tester les invitations
-        'les-albatros': G.normalizeCrew({ name: 'Les Albatros', members: ['pnj-3'], captain: 'pnj-3', invites: [{ uid: 'demo', by: 'pnj-3', at: Date.now() }] }),
-      },
-    };
-  }
-  if (!store.shops) store.shops = { demo: store.shop ?? null };
-  store.crews ??= {};
-  store.ships ??= {};
-  delete store.shop;
-  G.setCatalog(store.catalog);
-  G.normalize(store.player);
-}
-const saveStore = () => {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(store));
-  } catch {}
-};
-export function resetDemo() {
-  localStorage.removeItem(KEY);
-  loadStore();
-}
-/** Équipage du joueur de démo et bateaux visibles, comme le renvoie l'API. */
-const DEMO_NAMES = { demo: null, 'pnj-1': 'Matelot (démo)', 'pnj-2': 'Recrue (démo)', 'pnj-3': 'Capitaine Albatros (démo)' };
-const demoName = (u) => (u === 'demo' ? G.fullName(store.player) : DEMO_NAMES[u] || 'Joueur (démo)');
-function demoCrewShips() {
-  const p = store.player;
-  const c = p.crewId ? G.normalizeCrew(store.crews[p.crewId]) : null;
-  const crew = c ? { id: p.crewId, ...c, memberNames: Object.fromEntries([...c.members, ...c.invites.map((i) => i.uid)].map((u) => [u, demoName(u)])) } : null;
-  const ships = Object.entries(store.ships)
-    .filter(([, s]) => (s.owner?.kind === 'player' && s.owner.id === p.uid) || (s.owner?.kind === 'crew' && crew && s.owner.id === crew.id))
-    .map(([id, s]) => ({ id, ...s }));
-  const invites = Object.entries(store.crews).map(([id, raw]) => [id, G.normalizeCrew(raw)]).filter(([, cc]) => cc.invites.some((i) => i.uid === 'demo'))
-    .map(([id, cc]) => ({ id, name: cc.name, flag: cc.flag, members: cc.members.length, by: cc.invites.find((i) => i.uid === 'demo').by, byName: demoName(cc.invites.find((i) => i.uid === 'demo').by) }));
-  return { crew: structuredClone(crew), ships: structuredClone(ships), invites };
-}
-/** Port du salon de démo, comme le renvoie l'API. */
-function demoHarbor() {
-  const p = store.player;
-  const crew = demoCrewShips().crew;
-  const all = Object.entries(store.ships).map(([id, sh]) => ({ id, ...G.normalizeShip(structuredClone(sh)) }));
-  const harbor = all.filter((sh) => sh.position?.channelId === 'demo');
-  const aboard = all.find((sh) => sh.passengers.includes(p.uid)) || null;
-  const requests = all.filter((sh) => G.canManageShip(p, sh, crew)).flatMap((sh) => sh.requests.map((r) => ({ shipId: sh.id, shipName: sh.name, uid: r.uid, at: r.at })));
-  const names = Object.fromEntries(['demo', 'pnj-1', 'pnj-2', 'pnj-3'].map((u) => [u, demoName(u)]));
-  const crewNames = Object.fromEntries(Object.entries(store.crews).map(([id, c]) => [id, c.name]));
-  return { harbor, aboard, requests, names, crewNames };
-}
-const demoState = () => ({
-  map: G.mapFor(store.map, store.player),
-  nav: demoHarbor(),
-  ...demoCrewShips(),
-  me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
-  player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
-  channelId: store.player.position?.channelId ?? null, channelName: store.player.position?.name ?? '', position: store.player.position ?? null,
-});
-
-/* ─── Interface commune ─── */
-export async function boot() {
-  if (inDiscord()) {
-    const c = await connect();
-    token = c.token;
-    channelId = c.channelId;
-    mode = 'discord';
-    return state();
-  }
-  loadStore();
-  channelId = 'demo';
-  return demoState();
-}
-
-/** État complet ; le staff peut demander la fiche d'un autre joueur. */
-export async function state(playerId) {
-  if (mode === 'demo') return demoState();
-  const q = new URLSearchParams({ channel: channelId || '' });
-  if (playerId) q.set('player', playerId);
-  return call('GET', `/api/state?${q}`);
-}
-
-/** Action du joueur sur sa propre fiche. */
-export async function act(action) {
-  if (mode === 'demo') {
-    G.setCatalog(store.catalog);
-    if (action.type === 'crew.search') {
-      const q = (action.q || '').toLowerCase();
-      return { results: [{ uid: 'pnj-2', name: demoName('pnj-2'), crew: null }].filter((x) => x.name.toLowerCase().includes(q)) };
-    }
-    if (action.type === 'crew.join' || action.type === 'crew.decline') {
-      const out = G.inviteAction(store.player, action, { crew: { id: action.crewId, ...store.crews[action.crewId] } });
-      const { id, ...data } = out.crew;
-      store.crews[action.crewId] = data;
-      if (out.previous && store.crews[out.previous]) {
-        const o = G.normalizeCrew(store.crews[out.previous]);
-        if (o.captain === 'demo' && o.members.length > 1) throw new Error(`Tu es capitaine de ${o.name} : cède d’abord ta place.`);
-        o.members = o.members.filter((u) => u !== 'demo');
-        store.crews[out.previous] = G.normalizeCrew(o);
-      }
-      store.player = out.player;
-      saveStore();
-      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
-    }
-    if (action.type.startsWith('crew.')) {
-      const { crew } = demoCrewShips();
-      if (!crew) throw new Error('Tu n’as pas d’équipage.');
-      const out = G.crewAction(store.player, action, { crew, ships: Object.fromEntries(Object.entries(store.ships).map(([id, s]) => [id, { id, ...s }])) });
-      const { id, memberNames, ...data } = out.crew;
-      store.crews[id] = data;
-      for (const [sid, sh] of Object.entries(out.ships || {})) {
-        const { id: _i, ...rest } = sh;
-        store.ships[sid] = rest;
-      }
-      store.player = out.player;
-      saveStore();
-      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
-    }
-    if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
-      const { crew } = demoCrewShips();
-      const out = G.shipAction(store.player, store.ships[action.shipId], action, { crew, channelId: 'demo' });
-      const { id: _i, ...data } = out.ship;
-      store.ships[action.shipId] = data;
-      const boarder = out.boarded ? 'demo' : out.accepted;
-      if (boarder) for (const [sid, sh] of Object.entries(store.ships)) if (sid !== action.shipId) sh.passengers = (sh.passengers || []).filter((u) => u !== boarder);
-      store.player = out.player;
-      saveStore();
-      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
-    }
-    if (action.type === 'ship.edit') {
-      const { crew } = demoCrewShips();
-      const out = G.playerAction(store.player, action, { ship: store.ships[action.shipId], crew });
-      store.ships[action.shipId] = out.ship;
-      saveStore();
-      return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
-    }
-    const out = G.playerAction(store.player, action, { shop: store.shops.demo, channelId: 'demo' });
-    store.player = out.player;
-    if (out.shop) store.shops.demo = out.shop;
-    if (out.newShip) {
-      let id = G.slug(out.newShip.name);
-      for (let n = 2; store.ships[id]; n++) id = `${G.slug(out.newShip.name)}-${n}`;
-      store.ships[id] = out.newShip;
-      out.toast = `${out.newShip.name} est à toi ! Donne-lui un nom dans « Équipage ».`;
-    }
-    saveStore();
-    return { ...structuredClone(out), ...demoCrewShips(), nav: demoHarbor() };
-  }
-  return call('POST', '/api/action', { channelId, action });
-}
-
-/** Outils du staff. */
-export async function staff(op, payload = {}) {
-  if (mode === 'demo') {
-    if (op === 'players') return { players: [{ uid: 'demo', ident: store.player.id, level: store.player.level, photo: store.player.photo, job: store.player.job.id, crewId: store.player.crewId }] };
-    if (op === 'act') {
-      const out = G.staffAction(store.player, payload.action);
-      store.player = out.player;
-      saveStore();
-      return structuredClone(out);
-    }
-    if (op === 'bulk') {
-      let ok = 0;
-      const failed = [];
-      for (const uid of payload.targets) {
-        try {
-          if (uid !== 'demo') throw new Error('pas de fiche');
-          store.player = G.staffAction(store.player, payload.action).player;
-          ok++;
-        } catch (err) {
-          failed.push({ uid, error: err.message });
-        }
-      }
-      saveStore();
-      return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}` };
-    }
-    if (op === 'item.save' || op === 'recipe.save') {
-      const items = op === 'item.save', table = items ? store.catalog.items : store.catalog.recipes;
-      G.setCatalog(store.catalog);
-      const data = items ? G.normalizeItem(payload.item) : G.normalizeRecipe(payload.recipe);
-      const label = items ? data.name : G.recipeLabel(data);
-      let id = payload.id && table[payload.id] ? payload.id : G.slug(label);
-      if (!payload.id) for (let n = 2; table[id]; n++) id = `${G.slug(label)}-${n}`;
-      const isNew = !table[id];
-      table[id] = data;
-      saveStore();
-      return { id, catalog: structuredClone(store.catalog), toast: `${items ? 'Objet' : 'Recette'} ${isNew ? 'créé' : 'modifié'}${items ? '' : 'e'} : ${label}` };
-    }
-    if (op === 'item.delete' || op === 'recipe.delete') {
-      const items = op === 'item.delete';
-      if (items) {
-        const used = Object.values(store.catalog.recipes).filter((r) => r.needs[payload.id] || r.gives[payload.id]).map(G.recipeLabel);
-        if (used.length) throw new Error(`Utilisé par la recette : ${used.join(', ')}. Modifie-la d’abord.`);
-      }
-      delete (items ? store.catalog.items : store.catalog.recipes)[payload.id];
-      saveStore();
-      return { catalog: structuredClone(store.catalog), toast: items ? 'Objet supprimé' : 'Recette supprimée' };
-    }
-    if (op === 'crews') return { crews: structuredClone(store.crews), ships: structuredClone(store.ships) };
-    if (op === 'crew.save') {
-      const id = payload.id && store.crews[payload.id] ? payload.id : G.slug(payload.crew.name);
-      const old = store.crews[id];
-      const crew = G.normalizeCrew({ ...(old || {}), ...payload.crew, chest: old?.chest ?? {} });
-      if (crew.members.includes('demo')) store.player.crewId = id;
-      else if (store.player.crewId === id) store.player.crewId = null;
-      if (crew.ship && store.ships[crew.ship]) store.ships[crew.ship].owner = { kind: 'crew', id };
-      store.crews[id] = crew;
-      saveStore();
-      return { id, crew, toast: `${crew.kind === 'flotte' ? 'Flotte' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
-    }
-    if (op === 'crew.delete') {
-      if (store.player.crewId === payload.id) store.player.crewId = null;
-      for (const sh of Object.values(store.ships)) if (sh.owner?.kind === 'crew' && sh.owner.id === payload.id) sh.owner = null;
-      delete store.crews[payload.id];
-      saveStore();
-      return { toast: 'Équipage supprimé' };
-    }
-    if (op === 'ship.save') {
-      const { id: _i, positionId, ...input } = payload.ship;
-      const existing = payload.id && store.ships[payload.id] ? payload.id : null;
-      if (!existing) {
-        if (store.catalog.items[input.model]?.kind !== 'bateau') throw new Error('Choisis un modèle de bateau (à créer dans Gestion, catégorie « Bateau »).');
-        for (const k of ['type', 'cannons', 'capacity', 'berths', 'sail']) delete input[k];
-      }
-      if (positionId !== undefined) input.position = positionId ? { channelId: positionId, name: positionId === 'demo' ? 'port-brisant' : `salon-${positionId.slice(-4)}` } : null;
-      G.setCatalog(store.catalog);
-      let id = existing || G.slug(input.name || store.catalog.items[input.model].name);
-      if (!existing) for (let n = 2; store.ships[id]; n++) id = `${G.slug(input.name || 'bateau')}-${n}`;
-      const ship = existing ? G.normalizeShip({ ...store.ships[id], ...input }) : G.newShip(input);
-      if (ship.owner?.kind === 'crew' && store.crews[ship.owner.id] && !store.crews[ship.owner.id].ship) store.crews[ship.owner.id].ship = id;
-      store.ships[id] = ship;
-      saveStore();
-      return { id, ship, toast: `Bateau enregistré : ${ship.name}` };
-    }
-    if (op === 'ship.upgrade') {
-      const ship = G.upgradeShip(G.normalizeShip(store.ships[payload.id]), payload.type, payload.amount, { by: 'mj-demo' });
-      store.ships[payload.id] = ship;
-      saveStore();
-      return { id: payload.id, ship: structuredClone(ship), toast: `${ship.name} amélioré` };
-    }
-    if (op === 'ship.delete') {
-      for (const c of Object.values(store.crews)) if (c.ship === payload.id) c.ship = null;
-      delete store.ships[payload.id];
-      saveStore();
-      return { toast: 'Bateau supprimé' };
-    }
-    if (op === 'map.get') return { map: structuredClone(store.map) };
-    if (op.startsWith('map.')) {
-      const m = store.map;
-      let toast = null, id = payload.id;
-      if (op === 'map.bg') {
-        m.bg = payload.bg;
-        if (payload.ratio > 0) m.ratio = payload.ratio;
-        toast = 'Fond de carte enregistré';
-      }
-      if (op === 'map.island.save') {
-        const old = payload.id && m.islands[payload.id];
-        const channels = (payload.island.channels || []).map((c) => ({ id: String(c.id), name: c.name || `salon-${String(c.id).slice(-4)}` }));
-        const isl = G.normalizeIsland({ ...(old || {}), ...payload.island, channels });
-        if (!old) {
-          id = G.slug(isl.name);
-          for (let n = 2; m.islands[id]; n++) id = `${G.slug(isl.name)}-${n}`;
-        }
-        m.islands[id] = isl;
-        toast = old ? `Île modifiée : ${isl.name}` : `Île ajoutée : ${isl.name}`;
-      }
-      if (op === 'map.island.move') m.islands[payload.id] = G.normalizeIsland({ ...m.islands[payload.id], x: payload.x, y: payload.y });
-      if (op === 'map.island.delete') {
-        toast = `Île supprimée : ${m.islands[payload.id].name}`;
-        delete m.islands[payload.id];
-      }
-      if (op === 'map.route') {
-        const k = G.routeKey(payload.a, payload.b);
-        if (payload.value === null) delete m.routes[k];
-        else m.routes[k] = payload.value;
-      }
-      store.map = G.normalizeMap(m);
-      saveStore();
-      return { map: structuredClone(store.map), id, toast };
-    }
-    if (op === 'shops') return { shops: structuredClone(Object.fromEntries(Object.entries(store.shops).filter(([, v]) => v))) };
-    if (op === 'shop.save') {
-      const id = String(payload.channelId);
-      if (payload.from && payload.from !== id && store.shops[id]) throw new Error('Il y a déjà une boutique dans ce salon.');
-      const shop = G.normalizeShop(structuredClone(payload.shop));
-      shop.channel = id === 'demo' ? '#port-brisant' : `#salon-${id.slice(-4)}`;
-      store.shops[id] = shop;
-      if (payload.from && payload.from !== id) delete store.shops[payload.from];
-      saveStore();
-      return { channelId: id, shop: structuredClone(shop), toast: 'Boutique enregistrée' };
-    }
-    if (op === 'shop.delete') {
-      delete store.shops[payload.channelId];
-      saveStore();
-      return { shop: null, toast: 'Boutique fermée' };
-    }
-    throw new Error(`Opération inconnue en démo : ${op}`);
-  }
-  return call('POST', '/api/staff', { op, channelId, ...payload });
-}
-</file>
-
-<file path="index.html">
-<!doctype html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Fiche RP</title>
-</head>
-<body>
-<div class="boot" id="boot"><img src="/assets/banner-small.webp" alt=""><p id="boot-msg">Chargement de ta fiche…</p></div>
-
-<div class="backdrop" aria-hidden="true"></div>
-
-<header class="crest"><img src="/assets/banner-big.webp" alt="" width="1400" height="132"></header>
-<nav class="bar topnav" aria-label="Navigation principale">
-  <div class="screens" role="tablist" aria-label="Écrans">
-    <button class="scr" role="tab" data-screen="admin" aria-controls="s-admin" id="scr-admin" hidden><span class="ico" data-i="125"></span><span>Joueurs</span></button>
-    <button class="scr" role="tab" data-screen="fiche" aria-controls="s-fiche"><span class="ico" data-i="121"></span><span>Ma fiche</span></button>
-    <button class="scr" role="tab" data-screen="shop" aria-controls="s-shop"><span class="ico" data-i="265"></span><span>Boutique</span></button>
-    <button class="scr" role="tab" data-screen="crew" aria-controls="s-crew"><span class="ico" data-i="1"></span><span>Équipage</span></button>
-    <button class="scr" role="tab" data-screen="map" aria-controls="s-map"><span class="ico" data-i="231"></span><span>Carte</span></button>
-    <button class="scr" role="tab" data-screen="nav" aria-controls="s-nav"><span class="ico" data-i="188"></span><span>Navigation</span></button>
-    <button class="scr" role="tab" data-screen="ashop" aria-controls="s-ashop" id="scr-ashop" hidden><span class="ico" data-i="265"></span><span>Boutiques</span></button>
-    <button class="scr" role="tab" data-screen="amap" aria-controls="s-amap" id="scr-amap" hidden><span class="ico" data-i="231"></span><span>Carte</span></button>
-    <button class="scr" role="tab" data-screen="marine" aria-controls="s-marine" id="scr-marine" hidden><span class="ico" data-i="160"></span><span>Marine</span></button>
-    <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
-    <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
-    <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
-  </div>
-  <div class="wallet-chips">
-    <span class="chip purse" title="Ta bourse"><span class="ico" data-i="261"></span><span class="money" id="purse"></span></span>
-  </div>
-</nav>
-
-<main class="screen" id="s-fiche" role="tabpanel">
-  <div class="mj-banner" id="mj-banner" hidden></div>
-  <section class="sheet no-fiche" id="no-fiche" hidden></section>
-  <section class="hero" aria-label="Identité">
-    <div class="portrait" id="portrait" role="button" tabindex="0" aria-label="Changer la photo du personnage"></div>
-    <div class="who">
-      <div class="stamp-row" id="h-faction"></div>
-      <h1 class="h-name" id="h-name"></h1>
-      <div class="h-epithet" id="h-epithet"></div>
-      <div class="h-will" id="h-will" role="img"></div>
-      <p class="h-aff" id="h-aff"></p>
-      <div class="h-pos" id="h-pos"></div>
-      <div class="h-rp" id="h-rp" role="img"></div>
-      <ul class="traits" id="h-traits"></ul>
-      <div class="level">
-        <div class="lv"><small>Niv.</small><span id="id-lv"></span></div>
-        <div class="grow">
-          <div class="gauge" id="xp-gauge" role="progressbar" aria-label="Expérience"><i></i></div>
-          <div class="gauge-cap"><span>Expérience</span><span id="xp-cap"></span></div>
-        </div>
-        <span class="hero-acts"><button class="btn ghost sm" id="open-photo">📷 Photo</button><button class="btn ghost sm" id="open-edit" hidden>Modifier</button></span>
-      </div>
-    </div>
-    <div class="badge-slot" id="badge-slot"></div>
-  </section>
-
-  <section class="log" aria-label="Carnet du personnage">
-    <div class="tabs" role="tablist">
-      <button class="tab" role="tab" id="t-perso" aria-controls="v-perso"><span class="ico" data-i="96"></span>Stats & compétences</button>
-      <button class="tab" role="tab" id="t-tech" aria-controls="v-tech"><span class="ico" data-i="131"></span>Techniques</button>
-      <button class="tab" role="tab" id="t-inv" aria-controls="v-inv"><span class="ico" data-i="270"></span>Inventaire</button>
-      <button class="tab" role="tab" id="t-job" aria-controls="v-job"><span class="ico" data-i="279"></span>Métier</button>
-      <button class="tab tab-mj" role="tab" id="t-mj" aria-controls="v-mj" hidden><span class="ico" data-i="125"></span>Édition MJ</button>
-    </div>
-    <div class="sheet">
-      <div role="tabpanel" id="v-perso" aria-labelledby="t-perso"></div>
-      <div role="tabpanel" id="v-tech" aria-labelledby="t-tech" hidden></div>
-      <div role="tabpanel" id="v-inv" aria-labelledby="t-inv" hidden></div>
-      <div role="tabpanel" id="v-job" aria-labelledby="t-job" hidden></div>
-      <div role="tabpanel" id="v-mj" aria-labelledby="t-mj" hidden></div>
-    </div>
-  </section>
-</main>
-
-<main class="screen" id="s-shop" role="tabpanel" hidden>
-  <section class="stall">
-    <div class="awning" aria-hidden="true"></div>
-    <div class="stall-body" id="v-shop"></div>
-  </section>
-</main>
-
-<main class="screen" id="s-nav" role="tabpanel" hidden>
-  <section class="voyage" id="v-nav"></section>
-</main>
-
-<main class="screen" id="s-admin" role="tabpanel" hidden>
-  <section class="sheet" id="v-admin"></section>
-</main>
-
-<main class="screen" id="s-crew" role="tabpanel" hidden>
-  <section class="sheet" id="v-crew"></section>
-</main>
-
-<main class="screen" id="s-marine" role="tabpanel" hidden>
-  <section class="sheet" id="v-marine"></section>
-</main>
-
-<main class="screen" id="s-fleet" role="tabpanel" hidden>
-  <section class="sheet" id="v-fleet"></section>
-</main>
-
-<main class="screen" id="s-ships" role="tabpanel" hidden>
-  <section class="sheet" id="v-ships"></section>
-</main>
-
-<main class="screen" id="s-map" role="tabpanel" hidden>
-  <section class="sheet" id="v-map"></section>
-</main>
-
-<main class="screen" id="s-amap" role="tabpanel" hidden>
-  <section class="sheet" id="v-amap"></section>
-  <input type="file" id="amap-file" accept="image/*" hidden>
-</main>
-
-<main class="screen" id="s-ashop" role="tabpanel" hidden>
-  <section class="sheet" id="v-ashop"></section>
-</main>
-
-<main class="screen" id="s-gest" role="tabpanel" hidden>
-  <section class="sheet" id="v-gest"></section>
-</main>
-
-<footer>
-  <span id="foot-note"></span>
-  <span class="links"><button id="open-mj" hidden>Panneau admin (démo)</button><button id="reset" hidden>Remettre la démo à zéro</button></span>
-</footer>
-
-<dialog id="d-edit" aria-labelledby="edit-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="edit-title">Modifier la fiche</h2><p>Identité, compétences et progression.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <form class="panel-body" id="edit-form" novalidate>
-      <div class="form" id="edit-fields"></div>
-      <div id="edit-extra"></div>
-      <p class="err" id="edit-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="submit" class="btn">Enregistrer</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<dialog id="d-photo" aria-labelledby="photo-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="photo-title">Photo du personnage</h2><p>Choisis une image ou colle un lien, puis fais-la glisser et zoome pour la cadrer.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div class="ph-wrap">
-        <div class="ph-stage" id="ph-stage" aria-label="Zone de cadrage">
-          <img id="ph-img" alt="" hidden draggable="false">
-          <div class="ph-empty" id="ph-empty">Clique ou dépose une image ici</div>
-        </div>
-        <div class="ph-side">
-          <button type="button" class="btn" id="ph-pick">Choisir une image</button>
-          <input type="file" id="ph-file" accept="image/*" hidden>
-          <label for="ph-url" class="ph-label">Ou depuis un lien</label>
-          <div class="ph-url-row"><input type="url" id="ph-url" placeholder="https://…/image.png" inputmode="url" autocomplete="off"><button type="button" class="btn sm" id="ph-url-go">Charger</button></div>
-          <label for="ph-zoom" class="ph-label">Zoom</label>
-          <input type="range" id="ph-zoom" min="1" max="4" step="0.01" value="1" disabled>
-          <p class="note">Tu peux aussi coller une image ou un lien avec Ctrl+V. La molette zoome.</p>
-          <button type="button" class="btn sm ghost" id="ph-remove" hidden>Revenir au portrait par défaut</button>
-        </div>
-      </div>
-      <p class="err" id="ph-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="ph-save" disabled>Enregistrer la photo</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-shopedit" aria-labelledby="se-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="se-title">Éditer la boutique</h2><p>Salon, vendeur et objets en vente.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div id="se-body"></div>
-      <p class="err" id="se-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="se-save">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-item" aria-labelledby="it-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="it-title">Nouvel objet</h2><p>Il pourra être vendu, donné, fabriqué ou utilisé dans une recette.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div class="form">
-        <div class="wide"><label for="it-name" id="it-name-label">Nom</label><input id="it-name" maxlength="60"></div>
-        <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
-        <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
-        <div id="it-weight-box"><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
-        <div class="wide it-ship" id="it-upg" hidden>
-          <div class="form">
-            <div><label for="it-utype">Effet</label><select id="it-utype"></select></div>
-            <div><label for="it-uamount">Valeur ajoutée</label><input id="it-uamount" type="number" min="1" inputmode="numeric"></div>
-          </div>
-          <p class="note" style="margin:4px 0 0">Installée sur un bateau par son propriétaire, l’amélioration est consommée. Crée une recette « Charpentier » qui la produit pour que les charpentiers puissent la fabriquer.</p>
-        </div>
-        <div class="wide it-ship" id="it-ship" hidden>
-          <div class="form">
-            <div><label for="it-cap">Cale au départ (kg)</label><input id="it-cap" type="number" min="0" inputmode="numeric"></div>
-            <div><label for="it-sail">Vitesse (niveau de voile)</label><input id="it-sail" type="number" min="1" inputmode="numeric"></div>
-            <div><label for="it-berths">Places (personnes)</label><input id="it-berths" type="number" min="1" inputmode="numeric"></div>
-            <div><label for="it-cannons">Canons au départ</label><input id="it-cannons" type="number" min="0" inputmode="numeric"></div>
-          </div>
-          <p class="note" style="margin:4px 0 0">Le nom de l’objet est le type de bateau. Acheté en boutique ou fabriqué, il devient un vrai bateau qui porte ce nom, puis son propriétaire le personnalise.</p>
-        </div>
-        <div class="wide"><label for="it-desc">Description</label><input id="it-desc" maxlength="400"></div>
-      </div>
-      <div class="se-face">
-        <div class="face it-preview" id="it-preview"></div>
-        <div class="se-face-ctl">
-          <b>Image de l’objet (facultative)</b>
-          <div class="se-row"><button type="button" class="btn sm" id="it-pick">Choisir une image</button><input type="file" id="it-file" accept="image/*" hidden><button type="button" class="btn sm ghost" id="it-noimg" hidden>Retirer</button></div>
-          <div class="ph-url-row"><input type="url" id="it-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="it-url-go">Utiliser</button></div>
-          <p class="note" style="margin:0">Sans image, une icône est choisie selon la catégorie. Seules les armes s’équipent. La valeur sert au prix de revente.</p>
-        </div>
-      </div>
-      <p class="err" id="it-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" id="it-del" hidden>Supprimer</button>
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="it-save">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-recipe" aria-labelledby="rc-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="rc-title">Nouvelle recette</h2><p>Les ingrédients sont pris au lancement ; le résultat se récupère une fois le temps écoulé.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div id="rc-body"></div>
-      <p class="err" id="rc-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" id="rc-del" hidden>Supprimer</button>
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="rc-save">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-prompt" aria-labelledby="pr-title" class="confirm">
-  <div class="panel">
-    <div class="panel-head">
-      <div><h2 id="pr-title">Saisie</h2></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <form class="panel-body" id="pr-form">
-      <p id="pr-text"></p>
-      <input id="pr-input" class="mj-search" autocomplete="off">
-      <p class="err" id="pr-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="submit" class="btn" id="pr-ok">Valider</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<dialog id="d-confirm" aria-labelledby="cf-title" class="confirm">
-  <div class="panel">
-    <div class="panel-head">
-      <div><h2 id="cf-title">Confirmer</h2></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <p id="cf-text"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="cf-ok">Confirmer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-ship" aria-labelledby="sh-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="sh-title">Bateau</h2><p id="sh-sub"></p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div id="sh-body"></div>
-      <p class="err" id="sh-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" id="sh-del" hidden>Supprimer</button>
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="sh-save">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-crew" aria-labelledby="cr-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="cr-title">Équipage</h2><p>Nom, Jolly Roger, membres, capitaine, banque et bateau.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div id="cr-body"></div>
-      <p class="err" id="cr-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" id="cr-del" hidden>Supprimer</button>
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="cr-save">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-island" aria-labelledby="isl-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="isl-title">Île</h2><p>Image, salons, visibilité, accès et temps de trajet.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body">
-      <div id="isl-body"></div>
-      <p class="err" id="isl-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" id="isl-del" hidden>Supprimer</button>
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="button" class="btn" id="isl-save">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-</dialog>
-
-<dialog id="d-tech" aria-labelledby="tech-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="tech-title">Nouvelle technique</h2><p>Elle sera utilisable une fois validée par un MJ.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <form class="panel-body" id="tech-form" novalidate>
-      <div class="form">
-        <div class="wide"><label for="tf-name">Nom de la technique</label><input id="tf-name" name="name" maxlength="40" required></div>
-        <div class="wide"><label for="tf-src">Type</label><select id="tf-src" name="src"></select></div>
-        <div class="wide">
-          <label>Image ou GIF</label>
-          <div class="tf-media">
-            <div class="tf-preview" id="tf-preview"></div>
-            <div class="tf-ctl">
-              <div class="se-row"><button type="button" class="btn sm" id="tf-pick">Choisir un fichier</button><button type="button" class="btn sm ghost" id="tf-media-del" hidden>Retirer</button></div>
-              <input type="file" id="tf-file" accept="image/*" hidden>
-              <div class="ph-url-row"><input type="url" id="tf-url" placeholder="ou colle un lien https://…gif" autocomplete="off"><button type="button" class="btn sm" id="tf-url-go">Charger</button></div>
-              <p class="note" style="margin:0">PNG, JPG ou GIF animé, 2 Mo maximum. Ctrl+V marche aussi.</p>
-            </div>
-          </div>
-        </div>
-        <div class="wide"><label for="tf-desc">Description</label><textarea id="tf-desc" name="desc" maxlength="300" rows="4" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px"></textarea></div>
-      </div>
-      <p class="err" id="tech-err" role="alert"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" data-close>Annuler</button>
-        <button type="submit" class="btn" id="tech-submit">Proposer la technique</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<dialog id="d-mj" aria-labelledby="mj-title">
-  <div class="panel">
-    <img class="panel-crest" src="/assets/banner-small.webp" alt="">
-    <div class="panel-head">
-      <div><h2 id="mj-title">Mode MJ</h2><p>Ouvre la fiche d’un joueur pour la modifier.</p></div>
-      <button class="close" data-close aria-label="Fermer">×</button>
-    </div>
-    <div class="panel-body" id="mj-body"></div>
-  </div>
-</dialog>
-
-<dialog class="levelup" id="levelup" aria-labelledby="lu-title">
-  <div class="card">
-    <img src="/assets/banner-small.webp" alt="">
-    <div class="big" id="lu-title"></div>
-    <p id="lu-text"></p>
-    <p class="note">Touche pour continuer</p>
-  </div>
-</dialog>
-
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
-
-
-<script type="module" src="/src/main.js"></script>
-<datalist id="ship-types"></datalist>
-</body>
-</html>
 </file>
 
 <file path="test/api.test.js">
@@ -6127,6 +6275,19 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .mapview{max-height:none;margin-left:auto;margin-right:auto}
 .map-bg{object-fit:contain}
 .mapview:not(.labels-on) .island:not(.sel) .isl-name{display:none}
+
+
+/* ═══ v35 : routes maritimes ═══ */
+.map-links{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.map-links line{vector-effect:non-scaling-stroke}
+.map-links .lk{stroke:#fff3cf;stroke-width:3;stroke-dasharray:8 6;opacity:.85}
+.map-links .lk-hit{stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
+.map-links .lkg:hover .lk{stroke:var(--red);opacity:1}
+.island.waypoint{width:auto!important}
+.wp-dot{display:block;width:14px;height:14px;background:var(--gold);border:2px solid var(--ink);transform:rotate(45deg) scale(calc(1 / var(--z, 1)))}
+.island.link-from img,.island.link-from .isl-blob,.island.link-from .wp-dot{outline:3px solid #2f9a55;outline-offset:2px}
+.btn.on{background:#7fc28a}
+.trip-row{grid-template-columns:1fr 60px 2fr}
 </file>
 
 <file path="src/main.js">
@@ -6328,9 +6489,12 @@ function photoHTML(p = S) {
   const f = p.photo;
   return `<img class="ph-link" src="${imgSrc(f.url)}" alt="Portrait de ${name}" style="left:${f.l}%;top:${f.t}%;width:${f.w}%" ${broken}>`;
 }
+/** Rôle affiché sous le nom : grade pour un Marine, grade dans l'équipage pour un membre d'équipage. */
 function affiliation() {
   const { faction, crew, crewRole, grade } = S.id;
-  if (faction === 'Marine') return `<b>${esc(grade)}</b> de la Marine${crewRole ? `, ${esc(crewRole)}` : ''}`;
+  const group = CREW && CREW.members?.includes(S.uid) ? CREW : null;
+  if (faction === 'Marine') return `<b>${esc(grade)}</b> de la Marine${group?.kind === 'flotte' ? `, ${esc(group.name)}` : ''}`;
+  if (group) return `<b>${esc(G.rankName(group, S.uid))}</b> de ${esc(group.name)}`;
   return [crewRole && `<b>${esc(crewRole)}</b>`, crew && esc(crew)].filter(Boolean).join(', ');
 }
 function badgeHTML() {
@@ -7935,7 +8099,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div class="ship-pic">${shipPic(sh)}</div>
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
-      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}</div>
+      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${extra}
       ${actions}
@@ -8295,7 +8459,8 @@ function renderShipEdit() {
         <div><label for="sh-cannons">Canons</label><input id="sh-cannons" type="number" min="0" value="${d.cannons}"></div>
         <div><label for="sh-cap">Cale (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
         <div><label for="sh-berths">Places (personnes)</label><input id="sh-berths" type="number" min="1" value="${d.berths ?? 4}"></div>
-        <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>`}
+        <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
+        <div><label for="sh-space">Espace RP sur Discord</label><select id="sh-space">${Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (d.space || 'post') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`}
         <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
           <optgroup label="Flottes de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Équipages">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind !== 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
@@ -8327,6 +8492,7 @@ function readShipEdit() {
     d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
     d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
     d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
+    d.space = $('sh-space').value;
   }
   d.positionId = $('sh-pos').value.trim();
   const o = $('sh-owner').value;
@@ -8673,31 +8839,42 @@ $('cr-del').addEventListener('click', async () => {
 
 /* ═══ Carte du monde ═════════════════════════════════════════════════════ */
 let MAP = null; // carte vue par le joueur (îles visibles, île où il est, trajets depuis là)
+const LABEL_ZOOM = 1.8; // en dessous, les noms des îles sont cachés (sauf l'île choisie)
+const viewState = {}; // zoom et position de chaque carte, gardés entre deux affichages
 /**
  * Visionneuse de carte : zoom (molette, pincement, boutons) et déplacement
- * (glisser). En mode édition, on fait glisser les îles pour les placer.
+ * (glisser). En mode édition : on fait glisser les îles, on voit les routes.
  */
-const LABEL_ZOOM = 1.8; // en dessous, les noms des îles sont cachés (sauf l'île choisie)
-function mapViewer(root, map, { editable = false, here = null, selected = null, onIsland, onMove, onRatio } = {}) {
+function mapViewer(root, map, { editable = false, here = null, selected = null, linkFrom = null, showLinks = false, onIsland, onMove, onRatio, onLink } = {}) {
   let ratio = map.ratio || 0.5625;
   // La carte garde ses proportions : largeur limitée pour tenir dans 72 % de la hauteur d'écran.
   const size = (r) => `aspect-ratio:${1 / r};width:min(100%, calc(72vh / ${r}))`;
+  const nodes = map.islands;
+  const links = showLinks ? Object.keys(map.links || {}).filter((k) => k.split('|').every((x) => nodes[x])) : [];
+  const islandBtn = ([id, isl]) => isl.kind === 'waypoint'
+    ? `<button class="island waypoint ${id === linkFrom ? 'link-from' : ''}" data-island="${esc(id)}" style="left:${isl.x}%;top:${isl.y}%" aria-label="Point de passage ${esc(isl.name)}">
+        <span class="wp-dot"></span><span class="isl-name">◆ ${esc(isl.name)}</span></button>`
+    : `<button class="island ${isl.visible ? '' : 'hidden-isl'} ${isl.accessible ? '' : 'closed-isl'} ${id === here ? 'here' : ''} ${id === selected ? 'sel' : ''} ${id === linkFrom ? 'link-from' : ''}"
+        data-island="${esc(id)}" style="left:${isl.x}%;top:${isl.y}%;width:${isl.size}%" aria-label="${esc(isl.name)}">
+        ${isl.img ? `<img src="${imgSrc(isl.img)}" alt="" draggable="false">` : '<span class="isl-blob"></span>'}
+        <span class="isl-name">${editable && !isl.visible ? '👁 ' : ''}${!isl.accessible ? '⛔ ' : ''}${esc(isl.name)}</span>
+        ${id === here ? '<span class="isl-here">📍 Tu es ici</span>' : ''}
+      </button>`;
   root.innerHTML = `
     <div class="mapview" style="${size(ratio)}">
       <div class="map-stage">
         ${map.bg ? `<img class="map-bg" src="${imgSrc(map.bg)}" alt="" draggable="false">` : '<div class="map-bg map-empty"></div>'}
-        ${Object.entries(map.islands).map(([id, isl]) => `
-          <button class="island ${isl.visible ? '' : 'hidden-isl'} ${isl.accessible ? '' : 'closed-isl'} ${id === here ? 'here' : ''} ${id === selected ? 'sel' : ''}"
-            data-island="${esc(id)}" style="left:${isl.x}%;top:${isl.y}%;width:${isl.size}%" aria-label="${esc(isl.name)}">
-            ${isl.img ? `<img src="${imgSrc(isl.img)}" alt="" draggable="false">` : '<span class="isl-blob"></span>'}
-            <span class="isl-name">${editable && !isl.visible ? '👁 ' : ''}${!isl.accessible ? '⛔ ' : ''}${esc(isl.name)}</span>
-            ${id === here ? '<span class="isl-here">📍 Tu es ici</span>' : ''}
-          </button>`).join('')}
+        ${links.length ? `<svg class="map-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${links.map((k) => {
+          const [a, b] = k.split('|'), A = nodes[a], B = nodes[b];
+          const xy = `x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"`;
+          return `<g class="lkg"><line class="lk-hit" data-link="${esc(k)}" ${xy}/><line class="lk" ${xy}/></g>`;
+        }).join('')}</svg>` : ''}
+        ${Object.entries(nodes).map(islandBtn).join('')}
       </div>
       <div class="map-ctl"><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
     </div>`;
   const view = root.querySelector('.mapview'), stage = root.querySelector('.map-stage');
-  const st = { z: 1, tx: 0, ty: 0 };
+  const st = (viewState[root.id] ??= { z: 1, tx: 0, ty: 0 });
   const apply = () => {
     const W = view.clientWidth, H = view.clientHeight;
     st.z = Math.min(8, Math.max(1, st.z));
@@ -8755,8 +8932,8 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
       drag = null;
       return;
     }
-    const isl = editable ? e.target.closest('[data-island]') : null;
-    drag = { x: e.clientX, y: e.clientY, tx: st.tx, ty: st.ty, isl, moved: false, target: e.target.closest('[data-island]') };
+    const target = e.target.closest('[data-island]');
+    drag = { x: e.clientX, y: e.clientY, tx: st.tx, ty: st.ty, isl: editable ? target : null, moved: false, target, link: e.target.closest('[data-link]')?.dataset.link };
   });
   view.addEventListener('pointermove', (e) => {
     if (!ptrs.has(e.pointerId)) return;
@@ -8791,6 +8968,7 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
       d.isl.classList.remove('dragging');
       onMove?.(d.isl.dataset.island, parseFloat(d.isl.style.left), parseFloat(d.isl.style.top));
     } else if (!d.moved && d.target) onIsland?.(d.target.dataset.island);
+    else if (!d.moved && d.link) onLink?.(d.link);
   };
   view.addEventListener('pointerup', end);
   view.addEventListener('pointercancel', end);
@@ -8809,12 +8987,16 @@ function renderMap() {
     return;
   }
   const isl = mapSel && m.islands[mapSel];
+  const t = m.travel?.[mapSel];
+  const trip = !isl || mapSel === m.here || !m.here ? ''
+    : t ? ` · Trajet depuis ton île : <b>${t.value}</b>${t.via?.length ? ` (via ${t.via.map(esc).join(', ')})` : ''}`
+    : ' · Aucune route connue depuis ton île';
   el.innerHTML = `
     <div class="sec-head"><div><h2>Carte du monde</h2><p class="lede" style="margin:0">${m.here ? `Tu es sur <b>${esc(m.islands[m.here].name)}</b>.` : 'Ta position n’est sur aucune île de la carte.'} Zoome avec la molette ou deux doigts, fais glisser pour te déplacer.</p></div></div>
     <div id="map-player"></div>
     <div class="isl-info" id="isl-info">${isl ? `
       <div class="isl-head">${isl.img ? `<img src="${imgSrc(isl.img)}" alt="">` : ''}<div><h3>${esc(isl.name)}</h3>
-        <p class="note" style="margin:0">${mapSel === m.here ? '📍 Tu es ici · ' : ''}${isl.accessible ? 'Accessible' : '⛔ Inaccessible'}${mapSel !== m.here && m.travel?.[mapSel] != null ? ` · Trajet depuis ton île : <b>${m.travel[mapSel]}</b>` : ''}</p></div></div>
+        <p class="note" style="margin:0">${mapSel === m.here ? '📍 Tu es ici · ' : ''}${isl.accessible ? 'Accessible' : '⛔ Inaccessible'}${trip}</p></div></div>
       ${isl.desc ? `<p>${esc(isl.desc)}</p>` : ''}
       ${isl.channels.length ? `<div class="pax">${isl.channels.map((c) => `<span>${c.kind === 'forum' ? '🗂️' : '#'} ${esc(c.name)}</span>`).join('')}</div>` : ''}` : '<p class="note" style="margin:0">Clique sur une île pour en savoir plus.</p>'}</div>`;
   mapViewer($('map-player'), m, { here: m.here, selected: mapSel, onIsland: (id) => ((mapSel = id), renderMap()) });
@@ -8822,6 +9004,11 @@ function renderMap() {
 
 /* Éditeur du staff */
 let amap = null, islandDraft = null, islandDraftId = null;
+let linkMode = false, linkFrom = null; // « Tracer des routes » : premier point choisi
+const nodeLabel = (id) => {
+  const n = amap?.islands[id];
+  return n ? `${n.kind === 'waypoint' ? '◆ ' : ''}${esc(n.name)}` : '?';
+};
 async function loadAdminMap() {
   try {
     amap = (await API.staff('map.get')).map;
@@ -8851,22 +9038,49 @@ function renderAdminMap() {
   const el = $('v-amap');
   if (!amap) return void (el.innerHTML = '<p class="note">Chargement de la carte…</p>');
   const ids = Object.keys(amap.islands);
+  const card = (id) => {
+    const i = amap.islands[id], nb = G.neighbors(amap, id).length;
+    const routes = `${nb} route${nb > 1 ? 's' : ''}`;
+    return `<button class="gest-card" data-isl="${esc(id)}">
+      <span class="slot-ico">${i.kind === 'waypoint' ? '<span class="wp-dot" style="--z:1"></span>' : i.img ? `<span class="ico item-img"><img src="${imgSrc(i.img)}" alt=""></span>` : ico(206)}</span>
+      <span><b>${nodeLabel(id)}</b><small>${i.kind === 'waypoint' ? `Point de passage · ${routes}` : `${i.visible ? 'Visible' : '👁 Cachée'} · ${i.accessible ? 'Accessible' : '⛔ Inaccessible'} · ${i.channels.length} salon${i.channels.length > 1 ? 's' : ''} · ${routes}`}</small></span>
+    </button>`;
+  };
   el.innerHTML = `
     <div class="sec-head">
-      <div><h2>Carte</h2><p class="lede" style="margin:0">Fais glisser les îles pour les placer. Clique sur une île pour la modifier.</p></div>
-      <div class="se-row"><button class="btn ghost" id="amap-bg-file">Fond de carte (fichier)</button><button class="btn ghost" id="amap-bg-link">Fond (lien)</button><button class="btn" id="amap-new">+ Île</button></div>
+      <div><h2>Carte</h2><p class="lede" style="margin:0">${linkMode
+        ? (linkFrom ? `Clique sur le point à relier à <b>${nodeLabel(linkFrom)}</b>.` : 'Clique sur un point, puis sur un autre pour tracer une route entre eux. Clique sur une route pour la supprimer.')
+        : 'Fais glisser les îles pour les placer. Clique sur une île pour la modifier. Les joueurs voyagent en suivant les routes.'}</p></div>
+      <div class="se-row">
+        <button class="btn ghost" id="amap-bg-file">Fond de carte (fichier)</button><button class="btn ghost" id="amap-bg-link">Fond (lien)</button>
+        <button class="btn ghost" id="amap-wp">+ Point de passage</button><button class="btn" id="amap-new">+ Île</button>
+        <button class="btn ${linkMode ? 'on' : 'ghost'}" id="amap-links" aria-pressed="${linkMode}">🧭 ${linkMode ? 'Terminer les routes' : 'Tracer des routes'}</button>
+      </div>
     </div>
     <div id="map-admin"></div>
-    ${ids.length ? `<div class="fleet-list" style="margin-top:12px">${ids.map((id) => {
-      const i = amap.islands[id];
-      return `<button class="gest-card" data-isl="${esc(id)}">
-        <span class="slot-ico">${i.img ? `<span class="ico item-img"><img src="${imgSrc(i.img)}" alt=""></span>` : ico(206)}</span>
-        <span><b>${esc(i.name)}</b><small>${i.visible ? 'Visible' : '👁 Cachée'} · ${i.accessible ? 'Accessible' : '⛔ Inaccessible'} · ${i.channels.length} salon${i.channels.length > 1 ? 's' : ''}</small></span>
-      </button>`;
-    }).join('')}</div>` : '<p class="note">Aucune île. Ajoute un fond de carte, puis des îles (PNG transparents).</p>'}`;
+    ${ids.length ? `<div class="fleet-list" style="margin-top:12px">${ids.map(card).join('')}</div>` : '<p class="note">Aucune île. Ajoute un fond de carte, puis des îles (PNG transparents).</p>'}`;
   mapViewer($('map-admin'), amap, {
     editable: true,
-    onIsland: (id) => openIslandEdit(id),
+    showLinks: true,
+    linkFrom,
+    onIsland: (id) => {
+      if (!linkMode) return openIslandEdit(id);
+      if (!linkFrom || linkFrom === id) {
+        linkFrom = linkFrom === id ? null : id;
+        return renderAdminMap();
+      }
+      const a = linkFrom;
+      linkFrom = null;
+      if (amap.links[G.routeKey(a, id)] !== undefined) {
+        toast('Ces deux points sont déjà reliés.');
+        return renderAdminMap();
+      }
+      mapCall('map.link', { a, b: id, value: null });
+    },
+    onLink: async (k) => {
+      const [a, b] = k.split('|');
+      if (await askConfirm(`Route entre ${amap.islands[a].name} et ${amap.islands[b].name}.`, { title: 'Supprimer cette route ?', ok: 'Supprimer', danger: true })) mapCall('map.unlink', { a, b });
+    },
     onMove: (id, x, y) => mapCall('map.island.move', { id, x, y }),
     // proportions enregistrées fausses : on corrige (les temps de trajet en dépendent)
     onRatio: (r) => mapCall('map.bg', { bg: amap.bg, ratio: r }),
@@ -8875,6 +9089,12 @@ function renderAdminMap() {
 }
 $('v-amap').addEventListener('click', async (e) => {
   if (e.target.closest('#amap-new')) return openIslandEdit(null);
+  if (e.target.closest('#amap-wp')) return void mapCall('map.island.save', { id: null, island: { kind: 'waypoint', name: 'Passage', x: 50, y: 50 } });
+  if (e.target.closest('#amap-links')) {
+    linkMode = !linkMode;
+    linkFrom = null;
+    return renderAdminMap();
+  }
   const i = e.target.closest('[data-isl]')?.dataset.isl;
   if (i) return openIslandEdit(i);
   if (e.target.closest('#amap-bg-file')) return $('amap-file').click();
@@ -8902,7 +9122,7 @@ $('amap-file').addEventListener('change', async (e) => {
 
 function openIslandEdit(id) {
   islandDraftId = id;
-  islandDraft = structuredClone(id ? amap.islands[id] : { name: '', desc: '', img: null, x: 50, y: 50, size: 8, visible: true, accessible: true, channels: [] });
+  islandDraft = structuredClone(id ? amap.islands[id] : { kind: 'island', name: '', desc: '', img: null, x: 50, y: 50, size: 8, visible: true, accessible: true, channels: [] });
   $('isl-title').textContent = id ? islandDraft.name : 'Nouvelle île';
   $('isl-del').hidden = !id;
   $('isl-err').textContent = '';
@@ -8910,18 +9130,22 @@ function openIslandEdit(id) {
   openDialog('d-island');
 }
 function renderIslandEdit() {
-  const d = islandDraft;
-  const others = Object.keys(amap.islands).filter((o) => o !== islandDraftId);
+  const d = islandDraft, wp = d.kind === 'waypoint';
+  const nb = islandDraftId ? G.neighbors(amap, islandDraftId) : [];
+  const free = Object.keys(amap.islands).filter((o) => o !== islandDraftId && !nb.some((n) => n.id === o));
+  const dests = Object.keys(amap.islands).filter((o) => o !== islandDraftId && amap.islands[o].kind !== 'waypoint');
   $('isl-body').innerHTML = `
     <div class="form">
-      <div class="wide"><label for="isl-name">Nom de l’île</label><input id="isl-name" value="${esc(d.name)}" maxlength="60"></div>
+      <div class="wide"><label for="isl-name">${wp ? 'Nom du point de passage (vu par le staff seulement)' : 'Nom de l’île'}</label><input id="isl-name" value="${esc(d.name)}" maxlength="60"></div>
+      ${wp ? `<div class="isl-flags"><label class="chk"><input type="checkbox" id="isl-access" ${d.accessible ? 'checked' : ''}> Praticable (les routes peuvent y passer)</label></div>` : `
       <div class="wide"><label for="isl-desc">Description</label><input id="isl-desc" value="${esc(d.desc)}" maxlength="600"></div>
       <div><label for="isl-size">Taille sur la carte : <b id="isl-size-v">${d.size}</b> %</label><input id="isl-size" type="range" min="1" max="40" step="0.5" value="${d.size}"></div>
       <div class="isl-flags">
         <label class="chk"><input type="checkbox" id="isl-visible" ${d.visible ? 'checked' : ''}> Visible par tous</label>
         <label class="chk"><input type="checkbox" id="isl-access" ${d.accessible ? 'checked' : ''}> Accessible</label>
-      </div>
+      </div>`}
     </div>
+    ${wp ? '<p class="note">Invisible pour les joueurs : il sert à forcer le chemin des routes (entrée de Reverse Mountain, traversée de la Calm Belt…). Pour que les joueurs voient « via Reverse Mountain », fais-en plutôt une île.</p>' : `
     <div class="img-field" style="margin-top:12px">
       <div class="prev isl-prev">${d.img ? `<img src="${imgSrc(d.img)}" alt="">` : ico(206)}</div>
       <div class="se-face-ctl">
@@ -8933,35 +9157,42 @@ function renderIslandEdit() {
     <h3 class="ed-h">Salons de l’île</h3>
     <div class="pax">${d.channels.map((c, i) => `<span>${c.kind === 'forum' ? '🗂️' : '#'} ${esc(c.name || c.id)} <button class="linklike" data-chdel="${i}" aria-label="Retirer">✕</button></span>`).join('') || '<span class="note">Aucun salon.</span>'}</div>
     <div class="ph-url-row"><input id="isl-ch" inputmode="numeric" placeholder="ID d’un salon ou d’un forum"><button type="button" class="btn sm" id="isl-ch-add">Ajouter</button></div>
-    <p class="note" style="margin:4px 0 0">Un forum entier peut appartenir à l’île : chacun de ses posts compte alors comme étant sur l’île. Le nom des salons est retrouvé à l’enregistrement.</p>
-    ${islandDraftId && others.length ? `<h3 class="ed-h">Temps de trajet depuis cette île</h3>
-      <div class="routes">${others.map((o) => {
+    <p class="note" style="margin:4px 0 0">Un forum entier peut appartenir à l’île : chacun de ses posts compte alors comme étant sur l’île. Le nom des salons est retrouvé à l’enregistrement.</p>`}
+    ${islandDraftId ? `
+      <h3 class="ed-h">Routes maritimes</h3>
+      <div class="routes">${nb.map((n) => `<div class="route-row"><span>${nodeLabel(n.id)}</span><input type="number" min="0" data-seg="${esc(n.id)}" value="${n.auto ? '' : n.value}" placeholder="auto : ${n.value}" aria-label="Temps du tronçon vers ${esc(amap.islands[n.id].name)}"><button type="button" class="linklike" data-unseg="${esc(n.id)}" aria-label="Supprimer cette route">✕</button></div>`).join('') || '<p class="note" style="margin:0">Aucune route : ce point est isolé, on ne peut pas y aller.</p>'}</div>
+      ${free.length ? `<div class="mj-row" style="margin-top:6px"><select id="isl-seg-to" aria-label="Relier à">${free.map((o) => `<option value="${esc(o)}">${nodeLabel(o)}</option>`).join('')}</select><button type="button" class="btn sm" id="isl-seg-add">Relier</button></div>` : ''}
+      <p class="note">Temps d’un tronçon : vide = selon sa longueur sur la carte. Tu peux aussi tracer les routes directement sur la carte (« Tracer des routes »).</p>
+      ${!wp && dests.length ? `<h3 class="ed-h">Temps de trajet depuis cette île</h3>
+      <div class="routes">${dests.map((o) => {
         const t = G.travelTime(amap, islandDraftId, o);
-        return `<div class="route-row"><span>${esc(amap.islands[o].name)}</span><input type="number" min="0" data-route="${esc(o)}" value="${t && !t.auto ? t.value : ''}" placeholder="auto : ${t?.value ?? '?'}" aria-label="Temps de trajet vers ${esc(amap.islands[o].name)}"><small class="note">${t?.auto ? 'calculé' : 'choisi'}</small></div>`;
-      }).join('')}</div>
-      <p class="note">Vide = calculé selon la distance. Une valeur remplace le calcul (dans les deux sens).</p>` : ''}`;
+        const via = t ? t.path.slice(1, -1).map(nodeLabel).join(', ') : '';
+        return `<div class="route-row trip-row"><span>${esc(amap.islands[o].name)}</span><b>${t ? t.value : '—'}</b><small class="note">${t ? (via ? `via ${via}` : 'route directe') : 'aucune route'}</small></div>`;
+      }).join('')}</div>` : ''}`
+    : '<p class="note">Enregistre d’abord, puis trace ses routes.</p>'}`;
 }
 function readIslandEdit() {
   const d = islandDraft;
   d.name = $('isl-name').value;
+  if ($('isl-access')) d.accessible = $('isl-access').checked;
+  if (d.kind === 'waypoint') return;
   d.desc = $('isl-desc').value;
   d.size = +$('isl-size').value;
   d.visible = $('isl-visible').checked;
-  d.accessible = $('isl-access').checked;
+}
+/** Change une route depuis la fiche d'une île, puis réaffiche la fiche. */
+async function segCall(op, payload) {
+  readIslandEdit();
+  if (await mapCall(op, payload)) renderIslandEdit();
 }
 $('d-island').addEventListener('input', (e) => {
   if (e.target.id === 'isl-size') $('isl-size-v').textContent = e.target.value;
 });
 $('d-island').addEventListener('change', async (e) => {
-  const o = e.target.dataset?.route;
+  const o = e.target.dataset?.seg;
   if (o) {
     const v = e.target.value.trim();
-    const out = await mapCall('map.route', { a: islandDraftId, b: o, value: v === '' ? null : Math.max(0, Math.round(+v)) });
-    if (out) {
-      readIslandEdit();
-      renderIslandEdit();
-    }
-    return;
+    return segCall('map.link', { a: islandDraftId, b: o, value: v === '' ? null : Math.max(0, Math.round(+v)) });
   }
   if (e.target.id === 'isl-file') {
     const f = e.target.files[0];
@@ -8973,6 +9204,9 @@ $('d-island').addEventListener('change', async (e) => {
   }
 });
 $('d-island').addEventListener('click', (e) => {
+  const un = e.target.closest('[data-unseg]')?.dataset.unseg;
+  if (un) return void segCall('map.unlink', { a: islandDraftId, b: un });
+  if (e.target.id === 'isl-seg-add') return void segCall('map.link', { a: islandDraftId, b: $('isl-seg-to').value, value: null });
   if (e.target.id === 'isl-pick') return $('isl-file').click();
   if (e.target.id === 'isl-noimg') {
     readIslandEdit();
@@ -9002,7 +9236,7 @@ $('d-island').addEventListener('click', (e) => {
 });
 $('isl-save').addEventListener('click', async () => {
   readIslandEdit();
-  if (!islandDraft.name.trim()) return void ($('isl-err').textContent = 'Donne un nom à l’île.');
+  if (!islandDraft.name.trim()) return void ($('isl-err').textContent = 'Donne un nom.');
   $('isl-save').disabled = true;
   $('isl-err').textContent = islandDraft.img?.startsWith('data:') ? 'Envoi de l’image…' : '';
   const { x, y, ...rest } = islandDraft;
@@ -9012,10 +9246,9 @@ $('isl-save').addEventListener('click', async () => {
   else $('isl-err').textContent = '';
 });
 $('isl-del').addEventListener('click', async () => {
-  if (!(await askConfirm('L’île et ses temps de trajet seront supprimés. Les salons restent des salons RP.', { title: `Supprimer ${islandDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
+  if (!(await askConfirm('Ce point et ses routes seront supprimés. Les salons restent des salons RP.', { title: `Supprimer ${islandDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
   if (await mapCall('map.island.delete', { id: islandDraftId })) closeDialog($('d-island'));
 });
-
 /* ═══ Gestion (staff) : base d'objets et recettes ════════════════════════ */
 let gestTab = 'items', gestQuery = '';
 let itemDraft = null, itemDraftId = null, recipeDraft = null, recipeDraftId = null;
@@ -9101,6 +9334,7 @@ function openItemEdit(id = null) {
   $('it-cap').value = sh.capacity;
   $('it-berths').value = sh.berths ?? 4;
   $('it-sail').value = sh.sail ?? 1;
+  $('it-space').innerHTML = Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (sh.space || 'post') ? 'selected' : ''}>${l}</option>`).join('');
   syncItemKind(itemDraft.kind);
   const up = itemDraft.upgrade || { type: 'cale', amount: 100 };
   $('it-utype').innerHTML = Object.entries(G.UPGRADES).map(([k, u]) => `<option value="${k}" ${k === up.type ? 'selected' : ''}>${u.name} (+ ${u.unit})</option>`).join('');
@@ -9152,7 +9386,7 @@ $('it-noimg').addEventListener('click', () => {
 $('it-save').addEventListener('click', () => {
   const item = {
     name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
-    ship: { cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
+    ship: { space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');

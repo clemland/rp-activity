@@ -1268,3 +1268,11 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .island.link-from img,.island.link-from .isl-blob,.island.link-from .wp-dot{outline:3px solid #2f9a55;outline-offset:2px}
 .btn.on{background:#7fc28a}
 .trip-row{grid-template-columns:1fr 60px 2fr}
+
+
+/* ═══ v36 : carte plus grande, plein écran ═══ */
+#s-map,#s-amap{max-width:none}
+#s-map .sheet,#s-amap .sheet{padding:18px}
+.mapview{width:min(100%, calc(85vh / var(--r, .5625)))}
+.mapview.big{position:fixed;inset:0;margin:auto;z-index:150;width:min(100vw, calc(100vh / var(--r, .5625)));border:none;box-shadow:0 0 0 100vmax rgba(9,20,52,.88)}
+.map-ctl .sq{width:36px;height:36px}

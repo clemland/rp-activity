@@ -2554,8 +2554,8 @@ const viewState = {}; // zoom et position de chaque carte, gardés entre deux af
  */
 function mapViewer(root, map, { editable = false, here = null, selected = null, linkFrom = null, showLinks = false, onIsland, onMove, onRatio, onLink } = {}) {
   let ratio = map.ratio || 0.5625;
-  // La carte garde ses proportions : largeur limitée pour tenir dans 72 % de la hauteur d'écran.
-    const size = (r) => `--r:${r};aspect-ratio:${1 / r}`;
+  // La carte garde ses proportions (la largeur maximale est réglée dans le CSS).
+  const size = (r) => `--r:${r};aspect-ratio:${1 / r}`;
   const nodes = map.islands;
   const links = showLinks ? Object.keys(map.links || {}).filter((k) => k.split('|').every((x) => nodes[x])) : [];
   const islandBtn = ([id, isl]) => isl.kind === 'waypoint'
@@ -2578,16 +2578,20 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
         }).join('')}</svg>` : ''}
         ${Object.entries(nodes).map(islandBtn).join('')}
       </div>
-            <div class="map-ctl"><button class="sq" data-z="full" aria-label="Plein écran">⛶</button><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
+      <div class="map-ctl"><button class="sq" data-z="full" aria-label="Plein écran">⛶</button><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
     </div>`;
   const view = root.querySelector('.mapview'), stage = root.querySelector('.map-stage');
-  const st = (viewState[root.id] ??= { z: 1, tx: 0, ty: 0 });
+  // Zoom et position en PROPORTIONS de la carte (fx, fy entre 1 - zoom et 0), pas en pixels :
+  // ils restent justes quand la carte se redessine ou change de taille.
+  const st = (viewState[root.id] ??= { z: 1, fx: 0, fy: 0 });
+  st.fx ??= 0;
+  st.fy ??= 0;
   const apply = () => {
-    const W = view.clientWidth, H = view.clientHeight;
     st.z = Math.min(8, Math.max(1, st.z));
-    st.tx = Math.min(0, Math.max(W - W * st.z, st.tx));
-    st.ty = Math.min(0, Math.max(H - H * st.z, st.ty));
-    stage.style.transform = `translate(${st.tx}px, ${st.ty}px) scale(${st.z})`;
+    st.fx = Math.min(0, Math.max(1 - st.z, st.fx));
+    st.fy = Math.min(0, Math.max(1 - st.z, st.fy));
+    // translate en % : proportion de la taille de la carte, quelle qu'elle soit
+    stage.style.transform = `translate(${st.fx * 100}%, ${st.fy * 100}%) scale(${st.z})`;
     view.style.setProperty('--z', st.z);
     view.classList.toggle('labels-on', st.z >= LABEL_ZOOM);
   };
@@ -2608,17 +2612,19 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
     else bg.addEventListener('load', fit, { once: true });
   }
   const zoomAt = (factor, cx, cy) => {
-    const r = view.getBoundingClientRect(), x = cx - r.left, y = cy - r.top, z0 = st.z;
+    const r = view.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const px = (cx - r.left) / r.width, py = (cy - r.top) / r.height, z0 = st.z;
     st.z = Math.min(8, Math.max(1, st.z * factor));
-    st.tx = x - ((x - st.tx) * st.z) / z0;
-    st.ty = y - ((y - st.ty) * st.z) / z0;
+    st.fx = px - ((px - st.fx) * st.z) / z0;
+    st.fy = py - ((py - st.fy) * st.z) / z0;
     apply();
   };
   view.addEventListener('wheel', (e) => {
     e.preventDefault();
     zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
   }, { passive: false });
-    // Plein écran : gardé entre deux affichages (on peut placer des îles sans en sortir)
+  // Plein écran : gardé entre deux affichages (on peut placer des îles sans en sortir)
   const fullBtn = root.querySelector('[data-z="full"]');
   const setBig = (on) => {
     st.big = on;
@@ -2632,7 +2638,7 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
     if (z == null) return;
     if (z === 'full') return setBig(!st.big);
     const r = view.getBoundingClientRect();
-    if (z === '0') Object.assign(st, { z: 1, tx: 0, ty: 0 });
+    if (z === '0') Object.assign(st, { z: 1, fx: 0, fy: 0 });
     else zoomAt(z === '1' ? 1.4 : 1 / 1.4, r.left + r.width / 2, r.top + r.height / 2);
     apply();
   });
@@ -2650,7 +2656,7 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
       return;
     }
     const target = e.target.closest('[data-island]');
-    drag = { x: e.clientX, y: e.clientY, tx: st.tx, ty: st.ty, isl: editable ? target : null, moved: false, target, link: e.target.closest('[data-link]')?.dataset.link };
+    drag = { x: e.clientX, y: e.clientY, fx: st.fx, fy: st.fy, isl: editable ? target : null, moved: false, target, link: e.target.closest('[data-link]')?.dataset.link };
   });
   view.addEventListener('pointermove', (e) => {
     if (!ptrs.has(e.pointerId)) return;
@@ -2670,8 +2676,10 @@ function mapViewer(root, map, { editable = false, here = null, selected = null, 
       drag.isl.style.top = `${Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100))}%`;
       drag.isl.classList.add('dragging');
     } else {
-      st.tx = drag.tx + dx;
-      st.ty = drag.ty + dy;
+      const r = view.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      st.fx = drag.fx + dx / r.width;
+      st.fy = drag.fy + dy / r.height;
       apply();
     }
   });

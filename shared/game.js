@@ -1133,6 +1133,9 @@ export function normalizeIsland(x = {}) {
     x: pct(x.x), y: pct(x.y),
     size: Math.round(Math.min(60, Math.max(1, Number(x.size) || 8)) * 100) / 100, // % de la largeur de la carte
         rot: ((Math.round(Number(x.rot) || 0) % 360) + 360) % 360, // rotation de l'image, en degrés
+            // Position du nom par rapport au centre de l'île, en multiples de sa largeur
+    lx: x.lx != null && x.lx !== '' && Number.isFinite(+x.lx) ? Math.round(Math.min(3, Math.max(-3, +x.lx)) * 100) / 100 : 0,
+    ly: x.ly != null && x.ly !== '' && Number.isFinite(+x.ly) ? Math.round(Math.min(3, Math.max(-3, +x.ly)) * 100) / 100 : 0.45,
     visible: wp ? false : x.visible !== false,
     accessible: x.accessible !== false,
     channels: wp ? [] : (Array.isArray(x.channels) ? x.channels : [])
@@ -1159,7 +1162,14 @@ export function normalizeMap(m = {}) {
   };
   for (const [k, v] of Object.entries(m.routes || {})) add(k, v); // anciens temps choisis : deviennent des routes
   for (const [k, v] of Object.entries(m.links || {})) add(k, v);
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links }; // ratio = hauteur / largeur du fond
+    // Sens unique : { "a|b": point de départ }. Sans entrée, la route va dans les deux sens.
+  const oneway = {};
+  for (const [k, from] of Object.entries(m.oneway || {})) {
+    const [a, b] = String(k).split('|');
+    const kk = routeKey(a, b);
+    if (links[kk] !== undefined && (from === a || from === b)) oneway[kk] = from;
+  }
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway }; // ratio = hauteur / largeur du fond
 }
 /** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {
@@ -1174,14 +1184,18 @@ export function linkTime(map, a, b) {
   if (v === undefined) return null;
   return v != null ? v : Math.max(1, Math.round(islandDistance(map, a, b) * TRAVEL_PER_UNIT));
 }
-/** Points reliés à a par une route : [{ id, value, auto }]. */
-export function neighbors(map, a) {
+/** Toutes les routes d'un point : [{ id, value, auto, dir }] avec dir = 'both', 'out' (départ seulement) ou 'in' (arrivée seulement). */
+export function linksOf(map, a) {
   return Object.entries(map.links).flatMap(([k, v]) => {
     const [x, y] = k.split('|');
     const o = x === a ? y : y === a ? x : null;
-    return o ? [{ id: o, value: linkTime(map, a, o), auto: v == null }] : [];
+    if (!o) return [];
+    const from = map.oneway?.[k];
+    return [{ id: o, value: linkTime(map, a, o), auto: v == null, dir: !from ? 'both' : from === a ? 'out' : 'in' }];
   });
 }
+/** Points où l'on peut aller depuis a (on ne prend jamais une route à sens unique à contresens). */
+export const neighbors = (map, a) => linksOf(map, a).filter((n) => n.dir !== 'in');
 /**
  * Trajet le plus court de a à b en suivant les routes. On ne passe jamais par
  * une île inaccessible (on peut en partir ou y arriver). Renvoie { value, path } ou null.

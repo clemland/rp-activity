@@ -2560,16 +2560,28 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
   const links = showLinks ? Object.keys(map.links || {}).filter((k) => k.split('|').every((x) => nodes[x])) : [];
   // Poignées de l'île choisie en mode « Placer » : carré = taille, rond = rotation
   const handles = '<span class="h-box"></span><span class="h-size" data-h="size" title="Taille"></span><span class="h-rot" data-h="rot" title="Rotation (Maj : par 15°)"></span>';
+  // Nom d'une île : dans un calque AU-DESSUS de toutes les îles, placé par rapport à son centre
+  // (lx, ly en multiples de la largeur de l'île).
+  const labelPos = (isl) => `left:${isl.x + (isl.lx ?? 0) * isl.size}%;top:${isl.y + ((isl.ly ?? 0.45) * isl.size) / ratio}%`;
   const islandBtn = ([id, isl]) => isl.kind === 'waypoint'
     ? `<button class="island waypoint ${placing ? 'placing' : ''} ${id === selected ? 'sel' : ''} ${id === linkFrom ? 'link-from' : ''}" data-island="${esc(id)}" style="left:${isl.x}%;top:${isl.y}%" aria-label="Point de passage ${esc(isl.name)}">
         <span class="wp-dot"></span><span class="isl-name">◆ ${esc(isl.name)}</span></button>`
     : `<button class="island ${isl.visible ? '' : 'hidden-isl'} ${isl.accessible ? '' : 'closed-isl'} ${id === here ? 'here' : ''} ${id === selected ? 'sel' : ''} ${id === linkFrom ? 'link-from' : ''} ${placing ? 'placing' : ''}"
         data-island="${esc(id)}" style="left:${isl.x}%;top:${isl.y}%;width:${isl.size}%" aria-label="${esc(isl.name)}">
         <span class="isl-art" style="transform:rotate(${isl.rot || 0}deg)">${isl.img ? `<img src="${imgSrc(isl.img)}" alt="" draggable="false">` : '<span class="isl-blob"></span>'}</span>
-        <span class="isl-name">${editable && !isl.visible ? '👁 ' : ''}${!isl.accessible ? '⛔ ' : ''}${esc(isl.name)}</span>
         ${id === here ? '<span class="isl-here">📍 Tu es ici</span>' : ''}
         ${placing && id === selected ? handles : ''}
       </button>`;
+  const labelsHtml = Object.entries(nodes).filter(([, isl]) => isl.kind !== 'waypoint').map(([id, isl]) => {
+    const movable = placing && id === selected;
+    return `<span class="isl-label ${id === selected ? 'sel' : ''} ${movable ? 'drag' : ''}" data-for="${esc(id)}" ${movable ? `data-label-of="${esc(id)}" title="Fais glisser pour placer le nom"` : ''} style="${labelPos(isl)}">${editable && !isl.visible ? '👁 ' : ''}${!isl.accessible ? '⛔ ' : ''}${esc(isl.name)}</span>`;
+  }).join('');
+  // Flèches des routes à sens unique, au milieu de la ligne
+  const arrowsHtml = links.filter((k) => map.oneway?.[k]).map((k) => {
+    const [a, b] = k.split('|'), from = map.oneway[k], to = from === a ? b : a, A = nodes[from], B = nodes[to];
+    const ang = (Math.atan2((B.y - A.y) * ratio, B.x - A.x) * 180) / Math.PI;
+    return `<span class="lk-arrow" style="left:${(A.x + B.x) / 2}%;top:${(A.y + B.y) / 2}%;--a:${ang}deg">➤</span>`;
+  }).join('');
   root.innerHTML = `
     <div class="mapview" style="${size(ratio)}">
       <div class="map-stage">
@@ -2577,9 +2589,11 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
         ${links.length ? `<svg class="map-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${links.map((k) => {
           const [a, b] = k.split('|'), A = nodes[a], B = nodes[b];
           const xy = `x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"`;
-          return `<g class="lkg"><line class="lk-hit" data-link="${esc(k)}" ${xy}/><line class="lk" ${xy}/></g>`;
+          return `<g class="lkg"><line class="lk-hit" data-link="${esc(k)}" ${xy}/><line class="lk ${map.oneway?.[k] ? 'oneway' : ''}" ${xy}/></g>`;
         }).join('')}</svg>` : ''}
         ${Object.entries(nodes).map(islandBtn).join('')}
+        ${arrowsHtml}
+        <div class="isl-labels">${labelsHtml}</div>
       </div>
       <div class="map-ctl"><button class="sq" data-z="full" aria-label="Plein écran">⛶</button><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
     </div>`;
@@ -2644,7 +2658,12 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
     else zoomAt(z === '1' ? 1.4 : 1 / 1.4, r.left + r.width / 2, r.top + r.height / 2);
     apply();
   });
-  // Glisser : déplace la vue ; en mode « Placer », déplace, redimensionne ou tourne une île.
+  // Met à jour la position d'un nom pendant qu'on déplace son île ou le nom lui-même
+  const moveLabel = (id, isl) => {
+    const lab = [...stage.querySelectorAll('.isl-label')].find((x) => x.dataset.for === id);
+    if (lab) lab.setAttribute('style', labelPos(isl));
+  };
+  // Glisser : déplace la vue ; en mode « Placer », déplace, redimensionne ou tourne une île, ou déplace son nom.
   const ptrs = new Map();
   let drag = null, pinch = null;
   view.addEventListener('pointerdown', (e) => {
@@ -2657,15 +2676,14 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
       drag = null;
       return;
     }
-    const target = e.target.closest('[data-island]');
-    const handle = placing ? e.target.closest('[data-h]')?.dataset.h ?? null : null;
-    drag = { x: e.clientX, y: e.clientY, fx: st.fx, fy: st.fy, isl: placing ? target : null, handle, moved: false, target, link: e.target.closest('[data-link]')?.dataset.link };
-    if (handle && target) {
+    const label = placing ? e.target.closest('[data-label-of]')?.dataset.labelOf ?? null : null;
+    const target = label ? null : e.target.closest('[data-island]');
+    const handle = placing && target ? e.target.closest('[data-h]')?.dataset.h ?? null : null;
+    drag = { x: e.clientX, y: e.clientY, fx: st.fx, fy: st.fy, isl: placing ? target : null, label, handle, moved: false, target, link: e.target.closest('[data-link]')?.dataset.link };
+    if (handle) {
       // Centre de l'île à l'écran : la taille et l'angle se mesurent depuis là
       const r = target.getBoundingClientRect(), isl = nodes[target.dataset.island];
-      Object.assign(drag, {
-        cx: r.left + r.width / 2, cy: r.top + r.height / 2, size0: isl.size, rot0: isl.rot || 0,
-      });
+      Object.assign(drag, { cx: r.left + r.width / 2, cy: r.top + r.height / 2, size0: isl.size, rot0: isl.rot || 0 });
       drag.d0 = Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy) || 1;
       drag.a0 = Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx);
     }
@@ -2682,12 +2700,23 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) < 5) return;
     drag.moved = true;
-    if (drag.isl) {
+    const r = stage.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * 100, py = ((e.clientY - r.top) / r.height) * 100;
+    if (drag.label) {
+      // Le nom : position par rapport au centre de l'île, en multiples de sa largeur
+      const isl = nodes[drag.label];
+      const clamp = (v) => Math.round(Math.min(3, Math.max(-3, v)) * 100) / 100;
+      drag.lx = clamp((px - isl.x) / isl.size);
+      drag.ly = clamp(((py - isl.y) * ratio) / isl.size);
+      moveLabel(drag.label, { ...isl, lx: drag.lx, ly: drag.ly });
+    } else if (drag.isl) {
+      const id = drag.isl.dataset.island, isl = nodes[id];
       drag.isl.classList.add('dragging');
       if (drag.handle === 'size') {
         const s = Math.min(60, Math.max(1, drag.size0 * (Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy) / drag.d0)));
         drag.size = Math.round(s * 10) / 10;
         drag.isl.style.width = `${drag.size}%`;
+        moveLabel(id, { ...isl, size: drag.size });
       } else if (drag.handle === 'rot') {
         let a = drag.rot0 + ((Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx) - drag.a0) * 180) / Math.PI;
         if (e.shiftKey) a = Math.round(a / 15) * 15;
@@ -2695,15 +2724,16 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
         const art = drag.isl.querySelector('.isl-art');
         if (art) art.style.transform = `rotate(${drag.rot}deg)`;
       } else {
-        const r = stage.getBoundingClientRect();
-        drag.isl.style.left = `${Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100))}%`;
-        drag.isl.style.top = `${Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100))}%`;
+        const x = Math.min(100, Math.max(0, px)), y = Math.min(100, Math.max(0, py));
+        drag.isl.style.left = `${x}%`;
+        drag.isl.style.top = `${y}%`;
+        moveLabel(id, { ...isl, x, y });
       }
     } else {
-      const r = view.getBoundingClientRect();
-      if (!r.width || !r.height) return;
-      st.fx = drag.fx + dx / r.width;
-      st.fy = drag.fy + dy / r.height;
+      const vr = view.getBoundingClientRect();
+      if (!vr.width || !vr.height) return;
+      st.fx = drag.fx + dx / vr.width;
+      st.fy = drag.fy + dy / vr.height;
       apply();
     }
   });
@@ -2713,13 +2743,14 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
     if (!drag) return;
     const d = drag;
     drag = null;
-    if (d.isl && d.moved) {
+    if (d.label && d.moved) onPlace?.(d.label, { lx: d.lx, ly: d.ly });
+    else if (d.isl && d.moved) {
       d.isl.classList.remove('dragging');
       const id = d.isl.dataset.island, isl = nodes[id];
       onPlace?.(id, { x: parseFloat(d.isl.style.left), y: parseFloat(d.isl.style.top), size: d.size ?? isl.size, rot: d.rot ?? isl.rot ?? 0 });
-    } else if (!d.moved && d.target) onIsland?.(d.target.dataset.island);
+    } else if (!d.moved && d.target) onIsland?.(d.target.dataset.island, e);
     else if (!d.moved && d.link) onLink?.(d.link);
-    else if (!d.moved) onBlank?.();
+    else if (!d.moved && !d.label) onBlank?.();
   };
   view.addEventListener('pointerup', end);
   view.addEventListener('pointercancel', end);
@@ -2760,7 +2791,7 @@ let mapMode = 'view', linkFrom = null, placeSel = null;
 const MODE_HELP = {
   view: 'Clique sur une île pour la modifier. Rien ne bouge par erreur : pour déplacer les îles, passe en mode « Placer les îles ».',
   place: 'Fais glisser une île pour la déplacer. Clique dessus pour ses poignées : le carré blanc la redimensionne, le rond la fait tourner (Maj : par pas de 15°).',
-  links: 'Clique sur un point, puis sur un autre pour tracer une route entre eux. Clique sur une route pour la supprimer.',
+    links: 'Clique sur un point, puis sur un autre pour tracer une route. Maj + clic sur le second : route à sens unique (➤). Clique sur une route pour la supprimer.',
 };
 const nodeLabel = (id) => {
   const n = amap?.islands[id];
@@ -2797,7 +2828,7 @@ function renderAdminMap() {
   if (placeSel && !amap.islands[placeSel]) placeSel = null;
   const ids = Object.keys(amap.islands);
   const card = (id) => {
-    const i = amap.islands[id], nb = G.neighbors(amap, id).length;
+       const i = amap.islands[id], nb = G.linksOf(amap, id).length;
     const routes = `${nb} route${nb > 1 ? 's' : ''}`;
     return `<button class="gest-card" data-isl="${esc(id)}">
       <span class="slot-ico">${i.kind === 'waypoint' ? '<span class="wp-dot" style="--z:1"></span>' : i.img ? `<span class="ico item-img"><img src="${imgSrc(i.img)}" alt=""></span>` : ico(206)}</span>
@@ -2829,7 +2860,7 @@ function renderAdminMap() {
     showLinks: true,
     selected: mapMode === 'place' ? placeSel : null,
     linkFrom: mapMode === 'links' ? linkFrom : null,
-    onIsland: (id) => {
+    onIsland: (id, ev) => {
       if (mapMode === 'view') return openIslandEdit(id);
       if (mapMode === 'place') {
         placeSel = placeSel === id ? null : id;
@@ -2846,7 +2877,8 @@ function renderAdminMap() {
         toast('Ces deux points sont déjà reliés.');
         return renderAdminMap();
       }
-      mapCall('map.link', { a, b: id, value: null });
+      // Maj + clic sur le second point : route à sens unique (du premier vers le second)
+      mapCall('map.link', { a, b: id, value: null, oneway: ev?.shiftKey ? a : null });
     },
     onBlank: () => {
       if (mapMode === 'place' && placeSel) {
@@ -2914,7 +2946,7 @@ function openIslandEdit(id) {
 }
 function renderIslandEdit() {
   const d = islandDraft, wp = d.kind === 'waypoint';
-  const nb = islandDraftId ? G.neighbors(amap, islandDraftId) : [];
+  const nb = islandDraftId ? G.linksOf(amap, islandDraftId) : [];
   const free = Object.keys(amap.islands).filter((o) => o !== islandDraftId && !nb.some((n) => n.id === o));
   const dests = Object.keys(amap.islands).filter((o) => o !== islandDraftId && amap.islands[o].kind !== 'waypoint');
   $('isl-body').innerHTML = `
@@ -2944,7 +2976,7 @@ function renderIslandEdit() {
     <p class="note" style="margin:4px 0 0">Un forum entier peut appartenir à l’île : chacun de ses posts compte alors comme étant sur l’île. Le nom des salons est retrouvé à l’enregistrement.</p>`}
     ${islandDraftId ? `
       <h3 class="ed-h">Routes maritimes</h3>
-      <div class="routes">${nb.map((n) => `<div class="route-row"><span>${nodeLabel(n.id)}</span><input type="number" min="0" data-seg="${esc(n.id)}" value="${n.auto ? '' : n.value}" placeholder="auto : ${n.value}" aria-label="Temps du tronçon vers ${esc(amap.islands[n.id].name)}"><button type="button" class="linklike" data-unseg="${esc(n.id)}" aria-label="Supprimer cette route">✕</button></div>`).join('') || '<p class="note" style="margin:0">Aucune route : ce point est isolé, on ne peut pas y aller.</p>'}</div>
+      <div class="routes">${nb.map((n) => `<div class="route-row route-dir"><span>${nodeLabel(n.id)}</span><select data-dir="${esc(n.id)}" aria-label="Sens de la route"><option value="both" ${n.dir === 'both' ? 'selected' : ''}>↔ Les deux sens</option><option value="out" ${n.dir === 'out' ? 'selected' : ''}>→ Vers ${esc(amap.islands[n.id].name)} seulement</option><option value="in" ${n.dir === 'in' ? 'selected' : ''}>← Depuis ${esc(amap.islands[n.id].name)} seulement</option></select><input type="number" min="0" data-seg="${esc(n.id)}" value="${n.auto ? '' : n.value}" placeholder="auto : ${n.value}" aria-label="Temps du tronçon vers ${esc(amap.islands[n.id].name)}"><button type="button" class="linklike" data-unseg="${esc(n.id)}" aria-label="Supprimer cette route">✕</button></div>`).join('') || '<p class="note" style="margin:0">Aucune route : ce point est isolé, on ne peut pas y aller.</p>'}</div>
       ${free.length ? `<div class="mj-row" style="margin-top:6px"><select id="isl-seg-to" aria-label="Relier à">${free.map((o) => `<option value="${esc(o)}">${nodeLabel(o)}</option>`).join('')}</select><button type="button" class="btn sm" id="isl-seg-add">Relier</button></div>` : ''}
       <p class="note">Temps d’un tronçon : vide = selon sa longueur sur la carte. Tu peux aussi tracer les routes directement sur la carte (« Tracer des routes »).</p>
       ${!wp && dests.length ? `<h3 class="ed-h">Temps de trajet depuis cette île</h3>
@@ -2975,6 +3007,11 @@ $('d-island').addEventListener('input', (e) => {
     if (e.target.id === 'isl-rot') $('isl-rot-v').textContent = e.target.value;
 });
 $('d-island').addEventListener('change', async (e) => {
+  const dirTo = e.target.dataset?.dir;
+  if (dirTo) {
+    const v = e.target.value;
+    return segCall('map.dir', { a: islandDraftId, b: dirTo, from: v === 'both' ? null : v === 'out' ? islandDraftId : dirTo });
+  }
   const o = e.target.dataset?.seg;
   if (o) {
     const v = e.target.value.trim();

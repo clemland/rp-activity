@@ -220,8 +220,9 @@ export default handler(['POST'], async (req, body) => {
     case 'map.island.save':
     case 'map.island.move':
     case 'map.island.delete':
-    case 'map.link':
-    case 'map.unlink': {
+        case 'map.link':
+    case 'map.unlink':
+    case 'map.dir': {
       // Images d'abord (hors de la boucle de réessai)
       let bg, img;
       if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
@@ -263,7 +264,7 @@ export default handler(['POST'], async (req, body) => {
         if (body.op === 'map.island.move') {
           need(map.islands[body.id], 404, 'Île introuvable.');
                     const cur = map.islands[body.id];
-          map.islands[body.id] = normalizeIsland({ ...cur, x: body.x ?? cur.x, y: body.y ?? cur.y, size: body.size ?? cur.size, rot: body.rot ?? cur.rot });
+                    map.islands[body.id] = normalizeIsland({ ...cur, x: body.x ?? cur.x, y: body.y ?? cur.y, size: body.size ?? cur.size, rot: body.rot ?? cur.rot, lx: body.lx ?? cur.lx, ly: body.ly ?? cur.ly });
           toast = null;
         }
         if (body.op === 'map.island.delete') {
@@ -274,8 +275,17 @@ export default handler(['POST'], async (req, body) => {
         if (body.op === 'map.link' || body.op === 'map.unlink') {
           need(map.islands[body.a] && map.islands[body.b] && body.a !== body.b, 400, 'Route invalide.');
           const k = routeKey(body.a, body.b);
-          if (body.op === 'map.unlink') delete map.links[k];
-          else map.links[k] = body.value === null || body.value === '' || body.value === undefined ? null : Math.max(0, Math.round(Number(body.value) || 0));
+          if (body.op === 'map.unlink') {
+            delete map.links[k];
+            delete map.oneway[k];
+          } else if (body.op === 'map.dir') {
+            need(map.links[k] !== undefined, 404, 'Cette route n’existe pas.');
+            if (body.from === body.a || body.from === body.b) map.oneway[k] = body.from;
+            else delete map.oneway[k];
+          } else {
+            map.links[k] = body.value === null || body.value === '' || body.value === undefined ? null : Math.max(0, Math.round(Number(body.value) || 0));
+            if (body.oneway === body.a || body.oneway === body.b) map.oneway[k] = body.oneway; // route tracée à sens unique
+          }
           toast = null;
         }
         const clean = normalizeMap(map);

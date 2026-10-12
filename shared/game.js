@@ -1132,6 +1132,7 @@ export function normalizeIsland(x = {}) {
     img: !wp && x.img ? str(x.img, 3_000_000) : null, // PNG transparent
     x: pct(x.x), y: pct(x.y),
     size: Math.round(Math.min(60, Math.max(1, Number(x.size) || 8)) * 100) / 100, // % de la largeur de la carte
+        rot: ((Math.round(Number(x.rot) || 0) % 360) + 360) % 360, // rotation de l'image, en degrés
     visible: wp ? false : x.visible !== false,
     accessible: x.accessible !== false,
     channels: wp ? [] : (Array.isArray(x.channels) ? x.channels : [])

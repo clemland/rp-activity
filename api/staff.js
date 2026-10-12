@@ -262,7 +262,8 @@ export default handler(['POST'], async (req, body) => {
         }
         if (body.op === 'map.island.move') {
           need(map.islands[body.id], 404, 'Île introuvable.');
-          map.islands[body.id] = normalizeIsland({ ...map.islands[body.id], x: body.x, y: body.y });
+                    const cur = map.islands[body.id];
+          map.islands[body.id] = normalizeIsland({ ...cur, x: body.x ?? cur.x, y: body.y ?? cur.y, size: body.size ?? cur.size, rot: body.rot ?? cur.rot });
           toast = null;
         }
         if (body.op === 'map.island.delete') {

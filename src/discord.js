@@ -31,7 +31,26 @@ export async function connect() {
 
 /**
  * Adresse utilisable pour une image. Dans Discord, les images d'autres sites
- * sont bloquées : celles d'ImgBB passent par notre relais /api/img (mis en cache).
+ * sont bloquées : celles d'ImgBB passent par le chemin /ibb (URL Mapping
+ * « /ibb → i.ibb.co » du Developer Portal), que Discord va chercher directement.
  */
-export const mediaSrc = (u) =>
-  inDiscord() && typeof u === 'string' && /^https:\/\/i\.ibb\.co\//.test(u) ? `/api/img?u=${encodeURIComponent(u)}` : u;
+const IBB = /^https:\/\/i\.ibb\.co\//;
+export const mediaSrc = (u) => (inDiscord() && typeof u === 'string' && IBB.test(u) ? u.replace(IBB, '/ibb/') : u);
+
+// Secours : si une image ne passe pas par /ibb (mapping absent, ImgBB lent…),
+// on la redemande une fois par notre relais /api/img avant de la déclarer introuvable.
+if (inDiscord()) {
+  document.addEventListener(
+    'error',
+    (e) => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || img.dataset.relay) return;
+      const m = /\/ibb\/(.+)$/.exec(img.getAttribute('src') || '');
+      if (!m) return;
+      e.stopPropagation(); // pas encore « introuvable » : on réessaie d'abord par le relais
+      img.dataset.relay = '1';
+      img.src = `/api/img?u=${encodeURIComponent(`https://i.ibb.co/${m[1]}`)}`;
+    },
+    true,
+  );
+}

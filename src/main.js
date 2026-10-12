@@ -196,9 +196,12 @@ function photoHTML(p = S) {
   const f = p.photo;
   return `<img class="ph-link" src="${imgSrc(f.url)}" alt="Portrait de ${name}" style="left:${f.l}%;top:${f.t}%;width:${f.w}%" ${broken}>`;
 }
+/** Rôle affiché sous le nom : grade pour un Marine, grade dans l'équipage pour un membre d'équipage. */
 function affiliation() {
   const { faction, crew, crewRole, grade } = S.id;
-  if (faction === 'Marine') return `<b>${esc(grade)}</b> de la Marine${crewRole ? `, ${esc(crewRole)}` : ''}`;
+  const group = CREW && CREW.members?.includes(S.uid) ? CREW : null;
+  if (faction === 'Marine') return `<b>${esc(grade)}</b> de la Marine${group?.kind === 'flotte' ? `, ${esc(group.name)}` : ''}`;
+  if (group) return `<b>${esc(G.rankName(group, S.uid))}</b> de ${esc(group.name)}`;
   return [crewRole && `<b>${esc(crewRole)}</b>`, crew && esc(crew)].filter(Boolean).join(', ');
 }
 function badgeHTML() {

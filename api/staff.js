@@ -53,7 +53,7 @@ export default handler(['POST'], async (req, body) => {
       const targets = [...new Set(Array.isArray(body.targets) ? body.targets : [])].filter((t) => typeof t === 'string');
       need(targets.length, 400, 'Aucun joueur sélectionné.');
       need(targets.length <= 500, 400, '500 joueurs maximum à la fois.');
-      need(['xp', 'levels', 'berry', 'give', 'take'].includes(body.action?.type), 400, 'Action non disponible en groupe.');
+      need(['xp', 'levels', 'berry', 'give', 'take', 'health.add'].includes(body.action?.type), 400, 'Action non disponible en groupe.');
       let ok = 0;
       const failed = [];
       // Une fiche à la fois : si l'une échoue (inventaire plein...), les autres passent quand même.

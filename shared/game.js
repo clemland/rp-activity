@@ -58,6 +58,19 @@ export const CLASSES = ['Fighter', 'Sabreur', 'Tireur'];
 export const FRUIT_TYPES = ['Paramecia', 'Zoan', 'Logia'];
 export const SLOTS = { arme1: 'Arme 1', arme2: 'Arme 2' };
 export const TECH_SOURCES = { combat: 'Style de combat', fruit: 'Fruit du démon' };
+/** État de santé : blessures et maladies, cumulables, avec une gravité de 1 (légère) à 4 (critique). */
+export const HEALTH_TYPES = { blessure: 'Blessure', maladie: 'Maladie' };
+export const HEALTH_LEVELS = ['Légère', 'Sérieuse', 'Grave', 'Critique'];
+export function normalizeHealth(h = {}) {
+  return {
+    id: str(h.id, 20) || newWid(),
+    type: HEALTH_TYPES[h.type] ? h.type : 'blessure',
+    level: int(h.level ?? 1, 1, 4),
+    label: str(h.label, 80),
+    desc: str(h.desc, 300),
+    at: Number(h.at) || Date.now(),
+  };
+}
 
 /** Métiers. « Aucun métier » = job.id null. */
 export const JOBS = {
@@ -159,6 +172,7 @@ export function normalize(p) {
   for (const t of p.techniques) if (!TECH_SOURCES[t.src]) t.src = 'combat';
   p.crewId ??= null;
   p.position ??= null; // dernier salon RP où il a écrit
+    p.health = (Array.isArray(p.health) ? p.health : []).filter((h) => h && str(h.label, 80)).map(normalizeHealth).slice(0, 30);
   // Courbe d'XP changée : le surplus d'une ancienne fiche devient des niveaux (avec leurs points).
   if (typeof p.level === 'number' && typeof p.xp === 'number') {
     p.level = Math.min(MAX_LEVEL, Math.max(1, p.level));
@@ -680,6 +694,27 @@ export function staffAction(player, action) {
       if (!n) fail('Indique un montant.');
       p.berry = Math.max(0, p.berry + n);
       out.toast = `${n > 0 ? '+' : '−'}${fmt(Math.abs(n))} berrys pour ${fullName(p)}`;
+      break;
+    }
+        case 'health.add': {
+      const label = str(a.label, 80);
+      if (!label) fail('Décris la blessure ou la maladie.');
+      if (p.health.length >= 30) fail('30 états de santé maximum.');
+      const h = normalizeHealth({ type: a.kind, level: a.level, label, desc: a.desc });
+      p.health.push(h);
+      out.toast = `${fullName(p)} : ${HEALTH_TYPES[h.type].toLowerCase()} « ${h.label} » (${HEALTH_LEVELS[h.level - 1].toLowerCase()})`;
+      break;
+    }
+    case 'health.remove': {
+      const h = p.health.find((x) => x.id === a.id);
+      if (!h) fail('Cet état de santé n’existe plus.');
+      p.health = p.health.filter((x) => x !== h);
+      out.toast = `Guéri : ${h.label}`;
+      break;
+    }
+    case 'health.clear': {
+      p.health = [];
+      out.toast = `${fullName(p)} est de nouveau intact`;
       break;
     }
     case 'craft.finish': {

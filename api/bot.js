@@ -13,7 +13,7 @@
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY } from '../shared/game.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS } from '../shared/game.js';
 
 const RP_KEY = 'rp:channels';
 const SHIPS_KEY = 'ships:config';
@@ -97,16 +97,31 @@ export default handler(['POST'], async (req, body) => {
       return { channels: next };
     }
 
-    case 'rp.message': {
+      case 'rp.message': {
       need(body.userId && body.channelId, 400, 'Message incomplet.');
       const row = await read('players', body.userId);
       if (!row) return { noProfile: true }; // pas de fiche : rien à compter
-      return retry(async () => {
+      const res = await retry(async () => {
         const fresh = await read('players', body.userId);
         const r = rpMessage(normalize(fresh.data), { channelId: body.channelId, parentId: body.parentId || null, name: body.name, length: Number(body.length) || 0 });
         if (r.player.position?.channelId !== fresh.data.position?.channelId || r.counted) await write('players', body.userId, r.player, fresh.version);
         return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player) };
       });
+      // Agir en RP ailleurs que sur son bateau (son salon, ou le salon où il est à quai) : on descend du bord.
+      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+        const here = [String(body.channelId), body.parentId ? String(body.parentId) : null];
+        for (const [sid, sh] of Object.entries(await readAll('ships'))) {
+          if (!(sh.passengers || []).includes(body.userId)) continue;
+          const stays = [sh.channel?.id, sh.position?.channelId].some((c) => c && here.includes(String(c)));
+          if (stays) continue;
+          await retry(async () => {
+            const r = await read('ships', sid);
+            if (r) await write('ships', sid, { ...r.data, passengers: (r.data.passengers || []).filter((u) => u !== body.userId) }, r.version);
+          });
+          res.leftShip = sh.name;
+        }
+      }
+      return res;
     }
 
     case 'ships.config':

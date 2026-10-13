@@ -216,6 +216,37 @@ function badgeHTML() {
   if (bounty > 0) return `<div class="plaque"><span class="pl-label">Prime</span><span class="pl-value" id="h-bounty">${berry(bounty)}</span><span class="pl-foot">Dead or alive</span></div>`;
   return '';
 }
+
+/** Étiquette de santé sous le nom : « Intact », ou le résumé des blessures et maladies (dépliable). */
+function healthHTML(p) {
+  const list = p.health || [];
+  if (!list.length) return '<span class="hp-tag ok">💚 Intact</span>';
+  const worst = Math.max(...list.map((h) => h.level));
+  const nb = (t, w) => {
+    const n = list.filter((h) => h.type === t).length;
+    return n ? `${n} ${w}${n > 1 ? 's' : ''}` : '';
+  };
+  const sum = [nb('blessure', 'blessure'), nb('maladie', 'maladie')].filter(Boolean).join(', ');
+  return `<details class="health"><summary class="hp-tag lvl-${worst}">${worst >= 3 ? '🩸' : '🩹'} ${sum} · ${G.HEALTH_LEVELS[worst - 1]}</summary>
+    <ul>${list.map((h) => `<li><b>${h.type === 'maladie' ? '🤒' : '🩹'} ${esc(h.label)}</b><span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.desc ? `<br><small>${esc(h.desc)}</small>` : ''}</li>`).join('')}</ul></details>`;
+}
+/** Section « État de santé » de l'onglet Édition MJ. */
+function healthToolsHTML() {
+  const list = S.health || [];
+  return `<h3 class="ed-h">État de santé</h3>
+    <div class="mj-tools">
+      ${list.length ? `<div class="member-list">${list.map((h) => `<div class="member-row"><span class="m-name">${h.type === 'maladie' ? '🤒' : '🩹'} <b>${esc(h.label)}</b>${h.desc ? ` <small class="note">${esc(h.desc)}</small>` : ''}</span><span class="rank-badge hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span><span class="m-acts"><button class="btn sm ghost" data-health-del="${esc(h.id)}">Guérir</button></span></div>`).join('')}</div>` : '<p class="note" style="margin:0">💚 Intact : aucune blessure, aucune maladie.</p>'}
+      <div class="mj-row health-row">
+        <select id="mjh-type" aria-label="Type">${Object.entries(G.HEALTH_TYPES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+        <select id="mjh-level" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
+        <input id="mjh-label" maxlength="80" placeholder="Ex. Bras cassé, Fièvre…" aria-label="Description courte">
+        <input id="mjh-desc" maxlength="300" placeholder="Détail (facultatif)" aria-label="Détail">
+        <button class="btn sm" id="mjh-add">Ajouter</button>
+        ${list.length > 1 ? '<button class="btn sm ghost" id="mjh-clear">Tout guérir</button>' : ''}
+      </div>
+    </div>`;
+}
+
 function renderHero() {
   const f = FACTION[S.id.faction] || FACTION.Pirate;
   const key = JSON.stringify(S.photo || '') + (S.uid || '');
@@ -229,6 +260,12 @@ function renderHero() {
   const aff = affiliation();
   $('h-aff').innerHTML = aff;
   $('h-aff').hidden = !aff;
+    const hh = $('h-health');
+  if (hh) {
+    const open = hh.querySelector('details')?.open; // garder le détail déplié au rafraîchissement
+    hh.innerHTML = healthHTML(S);
+    if (open) hh.querySelector('details')?.setAttribute('open', '');
+  }
   const pos = $('h-pos');
   if (pos) pos.innerHTML = S.position ? `📍 <b>#${esc(S.position.name || S.position.channelId)}</b>` : '📍 Nulle part pour l’instant : écris un message RP dans un salon RP.';
   // Actions RP récompensées aujourd'hui (le compteur repart à minuit, heure de Paris)
@@ -1522,6 +1559,7 @@ function renderMjTab() {
     <div class="mj-tools">
       ${progressionTools('mjt')}
     </div>
+    ${healthToolsHTML()}
     <h3 class="ed-h">Objets</h3>
     <div class="mj-tools">
       <div class="mj-row">
@@ -1533,6 +1571,17 @@ function renderMjTab() {
     <p class="note" style="margin-top:14px"><button class="linklike" id="mj-pick">← Liste des joueurs</button></p>`;
 }
 $('v-mj').addEventListener('click', async (e) => {
+    const hdel = e.target.closest('[data-health-del]')?.dataset.healthDel;
+  if (hdel) return void staffAct({ type: 'health.remove', id: hdel });
+  if (e.target.closest('#mjh-add')) {
+    const label = $('mjh-label').value.trim();
+    if (!label) return toast('Décris la blessure ou la maladie.');
+    return void staffAct({ type: 'health.add', kind: $('mjh-type').value, level: +$('mjh-level').value, label, desc: $('mjh-desc').value.trim() });
+  }
+  if (e.target.closest('#mjh-clear')) {
+    if (await askConfirm('Toutes ses blessures et maladies seront retirées.', { title: 'Tout guérir ?', ok: 'Tout guérir' })) staffAct({ type: 'health.clear' });
+    return;
+  }
   if (e.target.closest('#mj-edit-open')) return openEdit();
   if (e.target.closest('#mj-pick')) return showScreen('admin');
   const ok = e.target.closest('[data-ok-tech]')?.dataset.okTech;
@@ -1710,6 +1759,13 @@ function renderBulk() {
       <select id="blk-item">${itemOptions()}</select>
       <input id="blk-qty" type="number" min="1" value="1" style="width:76px" aria-label="Quantité">
       <button class="btn sm" data-blk-give="give">Donner</button><button class="btn sm ghost" data-blk-give="take">Retirer</button>
+    </div>
+    <div class="mj-row prog-row health-row">
+      <label for="blk-hlabel">Santé</label>
+      <select id="blk-htype" aria-label="Type">${Object.entries(G.HEALTH_TYPES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+      <select id="blk-hlevel" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
+      <input id="blk-hlabel" maxlength="80" placeholder="Ex. Brûlures, Scorbut…">
+      <button class="btn sm" id="blk-health">Ajouter à tous</button>
     </div>`;
 }
 async function loadPlayers() {
@@ -1723,7 +1779,7 @@ async function loadPlayers() {
   renderPlayerList();
   if (screen === 'marine') renderMarine();
 }
-const describe = (a) =>
+const describe = (a) => a.type === 'health.add' ? `ajouter « ${a.label} » (${a.kind === 'maladie' ? 'maladie' : 'blessure'} ${G.HEALTH_LEVELS[a.level - 1].toLowerCase()})` :
   a.type === 'give' || a.type === 'take'
     ? `${a.type === 'give' ? 'donner' : 'retirer'} ${a.qty} × ${itemOf(a.key).name}`
     : `${a.amount > 0 ? 'ajouter' : 'retirer'} ${fmt(Math.abs(a.amount))} ${a.type === 'xp' ? 'XP' : a.type === 'levels' ? `niveau${Math.abs(a.amount) > 1 ? 'x' : ''}` : 'berrys'}`;
@@ -1771,6 +1827,11 @@ $('v-admin').addEventListener('click', (e) => {
   }
   const open = e.target.closest('[data-open]')?.dataset.open;
   if (open) return void openPlayer(open, { tab: 't-mj' });
+    if (e.target.closest('#blk-health')) {
+    const label = $('blk-hlabel').value.trim();
+    if (!label) return toast('Décris la blessure ou la maladie.');
+    return void bulk({ type: 'health.add', kind: $('blk-htype').value, level: +$('blk-hlevel').value, label });
+  }
   const give = e.target.closest('[data-blk-give]')?.dataset.blkGive;
   if (give) {
     if (!$('blk-item').value) return toast('Crée d’abord des objets dans Gestion.');

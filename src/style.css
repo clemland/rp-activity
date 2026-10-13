@@ -1335,3 +1335,22 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .il-item.on{background:var(--gold)}
 .il-item img{width:48px;height:48px;object-fit:contain}
 .il-item small{font-size:11px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+
+/* ═══ v42 : état de santé ═══ */
+.h-health{margin-top:4px}
+.hp-tag{display:inline-flex;gap:6px;align-items:center;font-size:13px;font-weight:800;border:2px solid var(--ink);border-radius:20px;padding:1px 10px;cursor:pointer;list-style:none}
+.hp-tag::-webkit-details-marker{display:none}
+.hp-tag.ok{background:#e3f4e5;color:#1d6b33;cursor:default}
+.hp-tag.lvl-1{background:#fff3cf}
+.hp-tag.lvl-2{background:#ffe2b8}
+.hp-tag.lvl-3{background:#ffcdc4}
+.hp-tag.lvl-4{background:var(--red);color:#fff}
+.health ul{margin:6px 0 0;padding:8px 12px 8px 26px;background:#fffaea;border:2px solid var(--ink);border-radius:6px;font-size:14px;max-width:460px}
+.health li + li{margin-top:4px}
+.health li span{font-size:12px;font-weight:800;margin-left:6px}
+.hp-lvl-1{color:#8a6a12}
+.hp-lvl-2{color:#b5651d}
+.hp-lvl-3{color:#c7352c}
+.hp-lvl-4{color:#8e130d}
+.health-row input{flex:1 1 160px;min-width:0}

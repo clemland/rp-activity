@@ -522,7 +522,7 @@ export function playerAction(player, action, ctx = {}) {
     case 'tech.save': {
       const name = str(a.name, 40);
       if (!name) fail('Donne un nom à ta technique.');
-      const data = { name, src: TECH_SOURCES[a.src] ? a.src : 'combat', desc: str(a.desc, 600), ok: false };
+      const data = { name, src: TECH_SOURCES[a.src] ? a.src : 'combat', desc: str(a.desc, 600), ok: false, refused: null }; // modifiée : de nouveau à valider
       if (a.media !== undefined) data.media = a.media ? str(a.media, 600000) : null;
       if (a.id != null) {
         const t = p.techniques.find((x) => x.id === a.id);
@@ -691,8 +691,16 @@ export function staffAction(player, action) {
     case 'tech.validate': {
       const t = p.techniques.find((x) => x.id === a.id);
       if (!t) fail('Technique introuvable.');
-      if (a.ok) { t.ok = true; out.toast = `Technique validée : ${t.name}`; }
-      else { p.techniques = p.techniques.filter((x) => x !== t); out.toast = `Technique refusée : ${t.name}`; }
+      if (a.ok) {
+        t.ok = true;
+        t.refused = null;
+        out.toast = `Technique validée : ${t.name}`;
+      } else {
+        // Refusée : elle reste sur la fiche avec le motif ; le joueur peut la corriger et la reproposer.
+        t.ok = false;
+        t.refused = { reason: str(a.reason, 300) || 'Sans motif précisé.', at: Date.now() };
+        out.toast = `Technique refusée : ${t.name}`;
+      }
       break;
     }
     default: fail('Action inconnue.');
@@ -853,7 +861,11 @@ export function shipAction(player, ship0, action, ctx = {}) {
   return out;
 }
 
-/* ═══ Équipages ══════════════════════════════════════════════════════════ */
+/* ═══ Équipages et escouades ═════════════════════════════════════════════
+ * Un équipage, ou une escouade de la Marine (kind « flotte » dans les données,
+ * pour garder les fiches existantes). Les deux ont une banque commune.
+ * Membres PNJ : identifiant « npc-… », sans compte Discord, ajoutés par le staff.
+ */
 /** Permissions qu'un capitaine peut donner à un grade. Le capitaine les a toutes. */
 export const CREW_PERMS = {
   bankIn: 'Déposer à la banque',
@@ -868,24 +880,33 @@ export const CREW_PERMS = {
 export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas supprimable
 const INVITE_TTL = 7 * 24 * 3600 * 1000;
 const defaultRank = () => ({ id: DEFAULT_RANK, name: 'Matelot', perms: { bankIn: true } });
-/** Permissions qui ont du sens selon le type : une flotte n'a pas de banque. */
-export const permsFor = (c) => Object.fromEntries(Object.entries(CREW_PERMS).filter(([k]) => c?.kind !== 'flotte' || !k.startsWith('bank')));
-/** Mots selon le type : « l’équipage » / « la flotte », etc. */
+/** Membre PNJ (ajouté par le staff, sans compte Discord) ? */
+export const isNpc = (id) => String(id ?? '').startsWith('npc-');
+/** Permissions proposées pour un grade : les mêmes pour un équipage et une escouade. */
+export const permsFor = () => ({ ...CREW_PERMS });
+/** Mots selon le type : « l’équipage » / « l’escouade », etc. */
 export function crewWords(c) {
   return c?.kind === 'flotte'
-    ? { Nom: 'Flotte', le: 'la flotte', de: 'de la flotte', ce: 'cette flotte', un: 'une flotte', chef: 'commandant', Chef: 'Commandant' }
+    ? { Nom: 'Escouade', le: 'l’escouade', de: 'de l’escouade', ce: 'cette escouade', un: 'une escouade', chef: 'commandant', Chef: 'Commandant' }
     : { Nom: 'Équipage', le: 'l’équipage', de: 'de l’équipage', ce: 'cet équipage', un: 'un équipage', chef: 'capitaine', Chef: 'Capitaine' };
 }
 
-export const CREW_KINDS = { equipage: 'Équipage', flotte: 'Flotte de la Marine' };
-export const crewWord = (c) => (c?.kind === 'flotte' ? 'flotte' : 'équipage');
+export const CREW_KINDS = { equipage: 'Équipage', flotte: 'Escouade de la Marine' };
+export const crewWord = (c) => (c?.kind === 'flotte' ? 'escouade' : 'équipage');
 export function normalizeCrew(c) {
   c.kind = c.kind === 'flotte' ? 'flotte' : 'equipage';
-  c.name = str(c.name, 60) || (c.kind === 'flotte' ? 'Flotte sans nom' : 'Équipage sans nom');
-  c.flag ??= null; // Jolly Roger (image)
-  c.members = [...new Set((c.members || []).map(String))];
+  c.name = str(c.name, 60) || (c.kind === 'flotte' ? 'Escouade sans nom' : 'Équipage sans nom');
+  c.flag ??= null; // Jolly Roger ou emblème (image)
+  // Membres PNJ : { "npc-…": { name, grade } } (grade de la Marine pour une escouade)
+  c.npcs = Object.fromEntries(
+    Object.entries(c.npcs || {})
+      .filter(([id, n]) => isNpc(id) && n && str(n.name, 60))
+      .slice(0, 50)
+      .map(([id, n]) => [id, { name: str(n.name, 60), grade: c.kind === 'flotte' && GRADES.includes(n.grade) ? n.grade : null }]),
+  );
+  c.members = [...new Set([...(c.members || []).map(String).filter((u) => !isNpc(u) || c.npcs[u]), ...Object.keys(c.npcs)])];
   c.captain = c.captain && c.members.includes(String(c.captain)) ? String(c.captain) : c.members[0] ?? null;
-  c.bank = c.kind === 'flotte' ? 0 : int(c.bank, 0, 1e13); // une flotte n'a pas de banque commune
+  c.bank = int(c.bank, 0, 1e13); // banque commune (équipages et escouades)
   c.chest = Object.fromEntries(Object.entries(c.chest || {}).map(([k, q]) => [k, int(q, 0, 1e7)]).filter(([, q]) => q > 0));
   c.ship ??= null;
   // Grades
@@ -909,12 +930,17 @@ export function crewCan(crew, uid, perm) {
   const r = crew.ranks.find((x) => x.id === crew.memberRanks[uid]);
   return !!r?.perms?.[perm];
 }
-export const rankName = (crew, uid) => (crew.captain === uid ? (crew.kind === 'flotte' ? 'Commandant' : 'Capitaine') : crew.ranks.find((r) => r.id === crew.memberRanks[uid])?.name ?? 'Matelot');
+/** Grade affiché : capitaine/commandant, grade Marine d'un PNJ d'escouade, sinon son grade d'équipage. */
+export function rankName(crew, uid) {
+  if (crew.captain === uid) return crew.kind === 'flotte' ? 'Commandant' : 'Capitaine';
+  if (crew.npcs?.[uid]?.grade) return crew.npcs[uid].grade;
+  return crew.ranks.find((r) => r.id === crew.memberRanks[uid])?.name ?? 'Matelot';
+}
 export const chestWeight = (c) => Object.entries(c.chest || {}).reduce((a, [k, q]) => a + itemWeight(k) * q, 0);
 export const crewCapacity = (ship) => (ship ? ship.capacity : CHEST_BASE);
 
 /**
- * Action d'un membre sur son équipage (banque, coffre, bateau d'équipage).
+ * Action d'un membre sur son équipage ou son escouade (banque, coffre, bateau, grades…).
  * ctx : { crew, ships: { id: ship } } ; renvoie { player, crew, ships?, toast, item? }.
  */
 export function crewAction(player, action, ctx = {}) {
@@ -930,7 +956,6 @@ export function crewAction(player, action, ctx = {}) {
   const out = { player: p, crew, toast: null };
   switch (a.type) {
     case 'crew.bank.deposit': {
-      if (crew.kind === 'flotte') fail('Une flotte n’a pas de banque commune.');
       need('bankIn');
       const n = int(a.amount, 0, 1e13);
       if (!n) fail('Indique un montant.');
@@ -940,7 +965,6 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.bank.withdraw': {
-      if (crew.kind === 'flotte') fail('Une flotte n’a pas de banque commune.');
       need('bankOut');
       const n = int(a.amount, 0, 1e13);
       if (!n) fail('Indique un montant.');
@@ -972,7 +996,7 @@ export function crewAction(player, action, ctx = {}) {
     }
     case 'crew.ship': {
       need('ship');
-      if (!a.shipId) { crew.ship = null; out.toast = 'L’équipage n’a plus de bateau attitré'; break; }
+      if (!a.shipId) { crew.ship = null; out.toast = `${W.Nom} n’a plus de bateau attitré`; break; }
       const s = clone(ctx.ships?.[a.shipId]);
       if (!s) fail('Bateau introuvable.');
       const mine = s.owner?.kind === 'player' && s.owner.id === p.uid;
@@ -1000,7 +1024,7 @@ export function crewAction(player, action, ctx = {}) {
       if (!isCap) fail(`Seul le ${W.chef} crée et modifie les grades.`);
       const name = str(a.name, 30);
       if (!name) fail('Donne un nom au grade.');
-      const perms = Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!a.perms?.[k] && k in permsFor(crew)]));
+      const perms = Object.fromEntries(Object.keys(CREW_PERMS).map((k) => [k, !!a.perms?.[k]]));
       let r = a.id && crew.ranks.find((x) => x.id === a.id);
       if (r) Object.assign(r, { name, perms });
       else {
@@ -1045,7 +1069,7 @@ export function crewAction(player, action, ctx = {}) {
       need('invite');
       const u = String(a.uid || '');
       if (!u) fail('Choisis un joueur.');
-      if (crew.kind === 'flotte' && a.faction && a.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une flotte.');
+      if (crew.kind === 'flotte' && a.faction && a.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une escouade.');
       if (crew.members.includes(u)) fail(`Ce joueur est déjà dans ${W.le}.`);
       if (crew.invites.some((i) => i.uid === u)) fail('Ce joueur est déjà invité.');
       crew.invites.push({ uid: u, by: p.uid, at: ctx.now || Date.now() });
@@ -1060,6 +1084,7 @@ export function crewAction(player, action, ctx = {}) {
     }
     case 'crew.kick': {
       need('kick');
+      if (isNpc(a.uid)) fail('Les PNJ se gèrent dans le panneau admin.');
       if (!crew.members.includes(a.uid)) fail(`Ce joueur n’est pas dans ${W.le}.`);
       if (a.uid === crew.captain) fail(`On ne peut pas exclure le ${W.chef}.`);
       if (a.uid === p.uid) fail(`Pour partir, utilise « Quitter ${W.le} ».`);
@@ -1071,6 +1096,7 @@ export function crewAction(player, action, ctx = {}) {
     }
     case 'crew.transfer': {
       if (!isCap) fail(`Seul le ${W.chef} peut céder sa place.`);
+      if (isNpc(a.uid)) fail(`Un PNJ ne peut devenir ${W.chef} que par le panneau admin.`);
       if (!crew.members.includes(a.uid) || a.uid === p.uid) fail(`Choisis un autre membre ${W.de}.`);
       crew.captain = a.uid;
       crew.memberRanks[p.uid] = DEFAULT_RANK;
@@ -1078,7 +1104,7 @@ export function crewAction(player, action, ctx = {}) {
       break;
     }
     case 'crew.leave': {
-      if (isCap && crew.members.length > 1) fail(`Cède d’abord ta place de ${W.chef} à un autre membre.`);
+      if (isCap && crew.members.some((u) => u !== p.uid && !isNpc(u))) fail(`Cède d’abord ta place de ${W.chef} à un autre membre.`);
       crew.members = crew.members.filter((u) => u !== p.uid);
       delete crew.memberRanks[p.uid];
       if (isCap) crew.captain = null;
@@ -1099,7 +1125,7 @@ export function crewAction(player, action, ctx = {}) {
 export function inviteAction(player, action, ctx = {}) {
   const p = clone(player), crew = ctx.crew ? normalizeCrew(clone(ctx.crew)) : null;
   if (!crew || !crew.invites.some((i) => i.uid === p.uid)) fail('Cette invitation n’existe plus.');
-  if (action.type === 'crew.join' && crew.kind === 'flotte' && p.id.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une flotte.');
+  if (action.type === 'crew.join' && crew.kind === 'flotte' && p.id.faction !== 'Marine') fail('Seuls les Marines peuvent rejoindre une escouade.');
   crew.invites = crew.invites.filter((i) => i.uid !== p.uid);
   if (action.type === 'crew.decline') return { player: p, crew, toast: `Invitation de ${crew.name} refusée` };
   if (action.type !== 'crew.join') fail('Action inconnue.');
@@ -1110,7 +1136,6 @@ export function inviteAction(player, action, ctx = {}) {
   p.crewId = crew.id;
   return { player: p, crew, previous, toast: `Bienvenue dans ${crew.name} !` };
 }
-
 /* ═══ Carte du monde ═════════════════════════════════════════════════════
  * Positions en % de la carte (0 à 100), taille d'une île en % de la largeur.
  * On ne voyage pas en ligne droite : on suit les routes maritimes tracées par

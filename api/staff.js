@@ -20,7 +20,7 @@ import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
-import { normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import { isNpc, fullName, normalizeIsland, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -74,6 +74,16 @@ export default handler(['POST'], async (req, body) => {
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
 
+        case 'techniques': {
+      // Toutes les techniques en attente de validation, tous joueurs confondus
+      const list = [];
+      for (const [uid, p] of Object.entries(await readAll('players'))) {
+        for (const t of p.techniques || []) if (!t.ok && !t.refused) list.push({ uid, player: fullName(p), tech: t });
+      }
+      list.sort((a, b) => (a.tech.id || 0) - (b.tech.id || 0));
+      return { list };
+    }
+    
     case 'crews':
       return { crews: await readAll('crews'), ships: await readAll('ships') };
 
@@ -95,7 +105,7 @@ export default handler(['POST'], async (req, body) => {
       // Un joueur n'est que dans un équipage : on met à jour les fiches concernées.
       const before = new Set(old?.members || []), after = new Set(crew.members);
       for (const uid of after) {
-        if (before.has(uid)) continue;
+        if (before.has(uid) || isNpc(uid)) continue; // les PNJ n'ont pas de fiche
         await retry(async () => {
           const row = await read('players', uid);
           need(row, 404, `Le joueur ${uid} n’a pas de fiche.`);
@@ -113,7 +123,7 @@ export default handler(['POST'], async (req, body) => {
         });
       }
       for (const uid of before) {
-        if (after.has(uid)) continue;
+        if (after.has(uid) || isNpc(uid)) continue;
         await retry(async () => {
           const row = await read('players', uid);
           if (row && row.data.crewId === id) await write('players', uid, { ...row.data, crewId: null }, row.version);
@@ -123,7 +133,7 @@ export default handler(['POST'], async (req, body) => {
         const row = await read('crews', id);
         await write('crews', id, crew, row?.version ?? null);
       });
-      return { id, crew, toast: `${crew.kind === 'flotte' ? 'Flotte' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
+      return { id, crew, toast: `${crew.kind === 'flotte' ? 'Escouade' : 'Équipage'} ${old ? 'modifié' : 'créé'}${crew.kind === 'flotte' ? 'e' : ''} : ${crew.name}` };
     }
 
     case 'crew.delete': {

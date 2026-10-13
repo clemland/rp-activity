@@ -546,28 +546,37 @@ $('v-perso').addEventListener('click', async (e) => {
 const SRC_CLS = { combat: 'src-lame', fruit: 'src-fruit' };
 let editingTech = null;
 let techMedia;
+/** Statut d'une technique : validée (rien), refusée (avec motif) ou à valider. */
+const techStatus = (t) => (t.ok ? '' : t.refused ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>');
 function renderTech() {
-  const wait = S.techniques.filter((t) => !t.ok).length;
+  const wait = S.techniques.filter((t) => !t.ok && !t.refused).length;
+  const refused = S.techniques.filter((t) => !t.ok && t.refused).length;
   $('v-tech').innerHTML = `
     <div class="tech-tools">
       <div><h2>Techniques</h2><p class="lede" style="margin:0">Crée tes propres techniques. Un MJ les valide avant qu'elles soient utilisables en RP.</p></div>
       <button class="btn" id="new-tech">${ico(131)}Nouvelle technique</button>
     </div>
     ${wait ? `<p class="note">${wait} technique${wait > 1 ? 's' : ''} en attente de validation.</p>` : ''}
+    ${refused ? `<p class="note">${refused} technique${refused > 1 ? 's' : ''} refusée${refused > 1 ? 's' : ''} : lis le motif, corrige-la, et elle repartira en validation.</p>` : ''}
     ${S.techniques.map((t) => `
-      <details class="tech">
+      <details class="tech" ${t.refused && !t.ok ? 'open' : ''}>
         <summary>
           ${t.media ? `<span class="t-thumb"><img src="${imgSrc(t.media)}" alt="" loading="lazy"></span>` : ''}
-          <span><span class="t-name">${esc(t.name)}</span>${t.ok ? '' : '<span class="status wait">À valider</span>'}<br><span class="t-meta"><span class="${SRC_CLS[t.src]}">${G.TECH_SOURCES[t.src]}</span></span></span>
+          <span><span class="t-name">${esc(t.name)}</span>${techStatus(t)}<br><span class="t-meta"><span class="${SRC_CLS[t.src]}">${G.TECH_SOURCES[t.src]}</span></span></span>
           <span class="cost"><span class="chev" aria-hidden="true">▾</span></span>
         </summary>
+        ${!t.ok && t.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(t.refused.reason)}</p>` : ''}
         ${t.media ? `<div class="t-media"><img src="${imgSrc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.classList.add('broken');this.remove()"></div>` : ''}
         <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
         <div class="t-actions">
-          <button class="btn sm ghost" data-edit-tech="${t.id}">Modifier</button><button class="btn sm ghost" data-del-tech="${t.id}">Supprimer</button>
-          ${tools() && VIEW && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>` : ''}
+          <button class="btn sm ghost" data-edit-tech="${t.id}">${!t.ok && t.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-del-tech="${t.id}">Supprimer</button>
+          ${tools() && VIEW && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button>${t.refused ? '' : `<button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>`}` : ''}
         </div>
       </details>`).join('') || '<p class="note">Aucune technique pour l’instant.</p>'}`;
+}
+/** Le staff refuse une technique : le motif est obligatoire, le joueur le verra sur sa fiche. */
+async function askRefuseReason() {
+  return askText('Explique au joueur pourquoi : il verra ce motif sur sa fiche et pourra corriger sa technique.', { title: 'Refuser la technique', ok: 'Refuser', placeholder: 'Ex. trop puissante pour son niveau', max: 300 });
 }
 function showTechMedia() {
   const box = $('tf-preview');
@@ -578,15 +587,15 @@ function showTechMedia() {
 }
 function openTechForm(t = null) {
   editingTech = t?.id ?? null;
-  $('tech-title').textContent = t ? 'Modifier la technique' : 'Nouvelle technique';
-  $('tech-submit').textContent = t ? 'Enregistrer' : 'Proposer la technique';
+  $('tech-title').textContent = t ? (t.refused && !t.ok ? 'Corriger la technique' : 'Modifier la technique') : 'Nouvelle technique';
+  $('tech-submit').textContent = t ? (t.ok ? 'Enregistrer' : 'Reproposer la technique') : 'Proposer la technique';
   $('tf-src').innerHTML = Object.entries(G.TECH_SOURCES).map(([k, l]) => `<option value="${k}" ${t?.src === k ? 'selected' : ''}>${l}</option>`).join('');
   $('tf-name').value = t?.name ?? '';
   $('tf-desc').value = t?.desc ?? '';
   techMedia = t?.media ?? null;
   $('tf-url').value = '';
   showTechMedia();
-  $('tech-err').textContent = '';
+  $('tech-err').textContent = t && !t.ok && t.refused ? `Motif du refus : ${t.refused.reason}` : '';
   openDialog('d-tech');
 }
 $('v-tech').addEventListener('click', async (e) => {
@@ -602,7 +611,10 @@ $('v-tech').addEventListener('click', async (e) => {
   const ok = id('data-ok-tech');
   if (ok != null) return staffAct({ type: 'tech.validate', id: ok, ok: true });
   const no = id('data-no-tech');
-  if (no != null) return staffAct({ type: 'tech.validate', id: no, ok: false });
+  if (no != null) {
+    const reason = await askRefuseReason();
+    if (reason) staffAct({ type: 'tech.validate', id: no, ok: false, reason });
+  }
 });
 $('tf-pick').addEventListener('click', () => $('tf-file').click());
 $('tf-file').addEventListener('change', async (e) => {
@@ -658,13 +670,12 @@ $('tech-form').addEventListener('submit', async (e) => {
     return $('tf-name').focus();
   }
   $('tech-submit').disabled = true;
-  $('tech-err').textContent = techMedia && !techMedia.startsWith('/media/') ? 'Envoi de l’image…' : '';
+  $('tech-err').textContent = techMedia && !techMedia.startsWith('/media/') && !/^https:\/\/i\.ibb\.co\//.test(techMedia) ? 'Envoi de l’image…' : '';
   const out = await run({ type: 'tech.save', id: editingTech ?? undefined, name, src: $('tf-src').value, desc: $('tf-desc').value.trim(), media: techMedia });
   $('tech-submit').disabled = false;
   if (out) closeDialog($('d-tech'));
   else $('tech-err').textContent = '';
 });
-
 /* ═══ Inventaire ═════════════════════════════════════════════════════════ */
 let sel = null;
 function renderInv() {
@@ -904,7 +915,7 @@ setInterval(() => {
 /* ═══ Navigation : le port du salon ═════════════════════════════════════ */
 function ownerLabel(sh) {
   if (!sh.owner) return 'Sans propriétaire';
-  if (sh.owner.kind === 'crew') return `${NAVD?.crewKinds?.[sh.owner.id] === 'flotte' ? 'Flotte' : 'Équipage'} : ${esc(NAVD?.crewNames?.[sh.owner.id] ?? '?')}`;
+  if (sh.owner.kind === 'crew') return `${NAVD?.crewKinds?.[sh.owner.id] === 'flotte' ? 'Escouade' : 'Équipage'} : ${esc(NAVD?.crewNames?.[sh.owner.id] ?? '?')}`;
   return sh.owner.id === S.uid ? 'À toi' : `À ${esc(NAVD?.names?.[sh.owner.id] ?? '?')}`;
 }
 const navName = (u) => (u === S.uid ? 'toi' : esc(NAVD?.names?.[u] ?? '?'));
@@ -1480,7 +1491,7 @@ function renderMjTab() {
     if (tab.getAttribute('aria-selected') === 'true') selectTab(tabs[0]);
     return;
   }
-  const wait = S.techniques.filter((t) => !t.ok);
+  const wait = S.techniques.filter((t) => !t.ok && !t.refused);
   const job = S.job.id ? JOBS[S.job.id] : null;
   $('v-mj').innerHTML = `
     <div class="sec-head">
@@ -1526,7 +1537,11 @@ $('v-mj').addEventListener('click', async (e) => {
   const ok = e.target.closest('[data-ok-tech]')?.dataset.okTech;
   if (ok) return void staffAct({ type: 'tech.validate', id: Number(ok), ok: true });
   const no = e.target.closest('[data-no-tech]')?.dataset.noTech;
-  if (no) return void staffAct({ type: 'tech.validate', id: Number(no), ok: false });
+  if (no) {
+    const reason = await askRefuseReason();
+    if (reason) staffAct({ type: 'tech.validate', id: Number(no), ok: false, reason });
+    return;
+  }
   const give = e.target.closest('[data-mjt-give]')?.dataset.mjtGive;
   if (give) return void staffAct({ type: give, key: $('mjt-item').value, qty: +$('mjt-qty').value || 1 });
   const act = readProgression(e, 'mjt');
@@ -1617,7 +1632,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, atech: tools(), amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -1776,6 +1791,7 @@ async function enterAdmin({ target = null } = {}) {
   loadPlayers();
   loadAdminShops();
   loadFleet();
+  loadPendingTechs();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 
@@ -1806,9 +1822,9 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div class="ship-pic">${shipPic(sh)}</div>
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
+      ${extra}
       <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
-      ${extra}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
     </div>
@@ -1835,22 +1851,25 @@ function crewTabHTML() {
   return `
     <section class="crew-box">
       <h3>Membres (${c.members.length})</h3>
-      <div class="member-list">${members.map((u) => `
+      <div class="member-list">${members.map((u) => {
+        const npc = G.isNpc(u);
+        return `
         <div class="member-row">
-          <span class="m-name">${u === c.captain ? '👑 ' : ''}<b>${nameOf(u)}</b>${u === me ? ' <small class="note">(toi)</small>' : ''}</span>
-          ${u === c.captain ? `<span class="rank-badge cap">${esc(G.rankName(c, u))}</span>`
+          <span class="m-name">${u === c.captain ? '👑 ' : ''}<b>${nameOf(u)}</b>${npc ? '<span class="npc-badge">PNJ</span>' : ''}${u === me ? ' <small class="note">(toi)</small>' : ''}</span>
+          ${u === c.captain || (npc && c.npcs?.[u]?.grade) ? `<span class="rank-badge ${u === c.captain ? 'cap' : ''}">${esc(G.rankName(c, u))}</span>`
             : can('ranks') && (isCap || u !== me) ? `<select data-rank-of="${esc(u)}" aria-label="Grade de ${nameOf(u)}">${rankOpts(u)}</select>`
             : `<span class="rank-badge">${esc(G.rankName(c, u))}</span>`}
           <span class="m-acts">
-            ${isCap && u !== me ? `<button class="btn sm ghost" data-captain="${esc(u)}" title="Céder ta place de ${W.chef}">Nommer ${W.chef}</button>` : ''}
-            ${can('kick') && u !== c.captain && u !== me ? `<button class="btn sm ghost danger-txt" data-kick="${esc(u)}">Exclure</button>` : ''}
+            ${isCap && u !== me && !npc ? `<button class="btn sm ghost" data-captain="${esc(u)}" title="Céder ta place de ${W.chef}">Nommer ${W.chef}</button>` : ''}
+            ${can('kick') && u !== c.captain && u !== me && !npc ? `<button class="btn sm ghost danger-txt" data-kick="${esc(u)}">Exclure</button>` : ''}
           </span>
-        </div>`).join('')}</div>
+        </div>`;
+      }).join('')}</div>
     </section>
     ${can('invite') ? `<section class="crew-box">
       <h3>Inviter ${c.kind === 'flotte' ? 'un Marine' : 'un joueur'}</h3>
       <input class="mj-search" id="crew-search" type="search" placeholder="Nom du joueur…" value="${esc(crewSearch)}" autocomplete="off">
-      <div class="search-results" id="crew-results">${crewResults.map((x) => `<div class="member-row"><span class="m-name"><b>${esc(x.name)}</b>${x.crew ? ' <small class="note">(a déjà un équipage ou une flotte)</small>' : ''}</span><span></span><span class="m-acts"><button class="btn sm" data-invite="${esc(x.uid)}">Inviter</button></span></div>`).join('') || (crewSearch ? '<p class="note">Aucun joueur trouvé.</p>' : '')}</div>
+      <div class="search-results" id="crew-results">${crewResults.map((x) => `<div class="member-row"><span class="m-name"><b>${esc(x.name)}</b>${x.crew ? ' <small class="note">(a déjà un équipage ou une escouade)</small>' : ''}</span><span></span><span class="m-acts"><button class="btn sm" data-invite="${esc(x.uid)}">Inviter</button></span></div>`).join('') || (crewSearch ? '<p class="note">Aucun joueur trouvé.</p>' : '')}</div>
       ${c.invites.length ? `<b>Invitations en attente</b><div class="member-list">${c.invites.map((i) => `<div class="member-row"><span class="m-name">${nameOf(i.uid)}</span><span class="rank-badge">invité</span><span class="m-acts"><button class="btn sm ghost" data-uninvite="${esc(i.uid)}">Annuler</button></span></div>`).join('')}</div>` : ''}
     </section>` : ''}
     ${isCap ? `<section class="crew-box">
@@ -1901,14 +1920,13 @@ function cargoHTML() {
   const selQ = cx.key ? (cx.side === 'inv' ? inv[cx.key] : c.chest[cx.key]) || 0 : 0;
   if (cx.key && !selQ) cx = { side: null, key: null, qty: 1 };
   const it = cx.key ? itemOf(cx.key) : null;
-  const okPerm = true; // tous les membres utilisent la cale
   return `
-    ${c.kind === 'flotte' ? '' : `<section class="crew-box">
+    <section class="crew-box">
       <h3>Banque commune</h3>
       <div class="bank-amount">${berry(c.bank)}</div>
       <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
         ${can('bankIn') ? '<button class="btn sm" id="bank-in">Déposer</button>' : ''}${can('bankOut') ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div>
-    </section>`}
+    </section>
     <section class="crew-box">
       <h3>Cale ${ship ? `du navire « ${esc(ship.name)} »` : '(sans bateau)'}</h3>
       <div class="gauge" aria-label="Chargement de la cale"><i style="width:${Math.min(100, (load / Math.max(cap, 1)) * 100)}%"></i></div>
@@ -1922,41 +1940,52 @@ function cargoHTML() {
       ${it ? `<div class="xbar">
         ${itemIco(cx.key)}<span class="x-name"><b>${esc(it.name)}</b><small>${G.kg(it.weight || 0)} l’unité · ${selQ} disponible${selQ > 1 ? 's' : ''}</small></span>
         <span class="x-qty"><button class="sq" data-xq="-1" aria-label="Moins">−</button><input id="x-qty" type="number" min="1" max="${selQ}" value="${Math.min(cx.qty, selQ)}" aria-label="Quantité"><button class="sq" data-xq="1" aria-label="Plus">+</button><button class="btn sm ghost" data-xq="all">Tout</button></span>
-        <button class="btn" id="x-go" ${okPerm ? '' : 'disabled title="Ton grade ne le permet pas"'}>${cx.side === 'inv' ? 'Déposer dans la cale →' : '← Prendre'}</button>
+        <button class="btn" id="x-go">${cx.side === 'inv' ? 'Déposer dans la cale →' : '← Prendre'}</button>
       </div>` : '<p class="note" style="margin:0">Clique sur un objet pour choisir la quantité, ou fais glisser une pile entière d’un côté à l’autre.</p>'}
     </section>`;
 }
+/** Bateaux, classés : le bateau attitré du groupe, ses autres bateaux, puis ceux du joueur. */
 function shipsTabHTML() {
-  const c = CREW;
-  const ship = c?.ship ? SHIPS.find((x) => x.id === c.ship) : null;
+  const c = CREW, W = c ? G.crewWords(c) : null;
   const mine = SHIPS.filter((x) => x.owner?.kind === 'player' && x.owner.id === S.uid);
   const crewShips = c ? SHIPS.filter((x) => x.owner?.kind === 'crew' && x.owner.id === c.id) : [];
+  const main = c?.ship ? crewShips.find((x) => x.id === c.ship) || null : null;
+  const others = crewShips.filter((x) => x.id !== c?.ship);
+  const tag = (txt, cls = '') => `<p class="ship-tag ${cls}">${txt}</p>`;
+  const editBtn = (x) => `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>`;
+  const crewCard = (x, label, cls) => shipCard(x, { extra: tag(label, cls), actions: can('ship') ? editBtn(x) : '', upgrade: can('ship') });
   return `
-    ${c ? `<h3 class="ed-h" style="margin-top:0;border:none;padding-top:0">Bateaux ${G.crewWords(c).de}</h3>
-      ${crewShips.length ? `<div class="ships">${crewShips.map((x) => shipCard(x, { extra: x.id === c.ship ? '<p class="note owner">⭐ Bateau attitré (sa cale sert de cale commune)</p>' : '', actions: can('ship') ? `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Modifier</button>` : '', upgrade: can('ship') })).join('')}</div>` : `<p class="note">${G.crewWords(c).Nom === 'Flotte' ? 'La flotte' : 'L’équipage'} n’a pas encore de bateau.</p>`}
-      ${can('ship') && [...mine, ...crewShips].length ? `<div class="mj-row" style="margin-top:10px"><label for="crew-ship">Bateau attitré</label>
-        <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)}, ${G.kg(x.capacity)})</option>`).join('')}</select>
+    ${c ? `<section class="ship-sec">
+      <h3 class="ed-h first">⭐ Bateau attitré ${W.de}</h3>
+      <p class="note" style="margin:0">C’est le navire ${W.de} : sa cale sert de cale commune.</p>
+      ${main ? crewCard(main, `⭐ Bateau attitré · appartient à ${W.le}`, 'main') : `<p class="note">Aucun bateau attitré : la cale commune est limitée à ${G.kg(G.CHEST_BASE)}.</p>`}
+      ${can('ship') && [...crewShips, ...mine].length ? `<div class="mj-row"><label for="crew-ship">Changer de bateau attitré</label>
+        <select id="crew-ship"><option value="">Aucun</option>${[...crewShips, ...mine].map((x) => `<option value="${esc(x.id)}" ${x.id === c.ship ? 'selected' : ''}>${esc(x.name)} (${x.owner?.kind === 'player' ? 'à toi' : W.le}, ${G.kg(x.capacity)})</option>`).join('')}</select>
         <button class="btn sm" id="crew-ship-go">Choisir</button></div>
-        <p class="note">Le bateau attitré donne sa cale à ${G.crewWords(c).le}. Un de tes bateaux choisi ici devient celui ${G.crewWords(c).de}.</p>` : ''}` : ''}
-    <h3 class="ed-h">Mes bateaux</h3>
-    ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { actions: `<button class="btn sm ghost" data-ship-edit="${esc(x.id)}">Nommer, décrire, photo</button>`, upgrade: true })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}`;
+        ${mine.length ? `<p class="note" style="margin:0">Choisir un de tes bateaux personnels le donne à ${W.le}.</p>` : ''}` : ''}
+    </section>` : ''}
+    ${others.length ? `<section class="ship-sec"><h3 class="ed-h">Autres bateaux ${W.de}</h3>
+      <div class="ships">${others.map((x) => crewCard(x, `Appartient à ${W.le}`, '')).join('')}</div></section>` : ''}
+    <section class="ship-sec"><h3 class="ed-h ${c ? '' : 'first'}">Mes bateaux personnels</h3>
+      ${mine.length ? `<div class="ships">${mine.map((x) => shipCard(x, { extra: tag('À toi seul', 'mine'), actions: editBtn(x), upgrade: true })).join('')}</div>` : '<p class="note">Tu n’as pas de bateau à toi. On en trouve dans certaines boutiques.</p>'}
+    </section>`;
 }
 function renderCrew() {
   if (!S || ADMIN) return;
   const c = CREW;
-  // L'écran s'appelle « Flotte » pour un Marine dans une flotte
-  document.querySelector('.scr[data-screen="crew"] span:last-child').textContent = c?.kind === 'flotte' ? 'Flotte' : 'Équipage';
+  // L'écran s'appelle « Escouade » pour un Marine dans une escouade
+  document.querySelector('.scr[data-screen="crew"] span:last-child').textContent = c?.kind === 'flotte' ? 'Escouade' : 'Équipage';
   if (!c && crewTab !== 'ships') crewTab = 'crew';
   const head = c ? `
     <div class="crew-hero">
       <div class="flag">${c.flag ? `<img src="${imgSrc(c.flag)}" alt="${c.kind === 'flotte' ? 'Emblème' : 'Jolly Roger'}" onerror="this.replaceWith(document.createTextNode('☠'))">` : ico(1)}</div>
       <div>
         <h2>${esc(c.name)}</h2>
-        <p class="lede" style="margin:4px 0 0">${c.kind === 'flotte' ? 'Flotte de la Marine · ' : ''}${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ton grade : <b>${esc(G.rankName(c, S.uid))}</b></p>
+        <p class="lede" style="margin:4px 0 0">${c.kind === 'flotte' ? 'Escouade de la Marine · ' : ''}${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ton grade : <b>${esc(G.rankName(c, S.uid))}</b></p>
       </div>
-    </div>` : `<div class="no-shop">${ico(1)}<h2>${S.id.faction === 'Marine' ? 'Pas de flotte' : 'Pas d’équipage'}</h2><p class="note">${S.id.faction === 'Marine' ? 'Tu n’es affecté à aucune flotte. Un commandant peut t’inviter.' : 'Tu ne fais partie d’aucun équipage. Un capitaine peut t’inviter.'}</p></div>`;
+    </div>` : `<div class="no-shop">${ico(1)}<h2>${S.id.faction === 'Marine' ? 'Pas d’escouade' : 'Pas d’équipage'}</h2><p class="note">${S.id.faction === 'Marine' ? 'Tu n’es affecté à aucune escouade. Un commandant peut t’inviter.' : 'Tu ne fais partie d’aucun équipage. Un capitaine peut t’inviter.'}</p></div>`;
   const tabs = `<div class="seg crew-seg" role="group" aria-label="Section">
-    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">${c.kind === 'flotte' ? 'Flotte' : 'Équipage'}</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">${c.kind === 'flotte' ? 'Cale' : 'Cale et banque'}</button>` : ''}
+    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">${c.kind === 'flotte' ? 'Escouade' : 'Équipage'}</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">Cale et banque</button>` : ''}
     <button aria-pressed="${crewTab === 'ships'}" data-ct="ships">Bateaux</button></div>`;
   $('v-crew').innerHTML = `${head}${invitesHTML()}${tabs}
     <div class="crew-body">${crewTab === 'ships' ? shipsTabHTML() : !c ? '' : crewTab === 'cargo' ? cargoHTML() : crewTabHTML()}</div>`;
@@ -2169,7 +2198,7 @@ function renderShipEdit() {
         <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
         <div><label for="sh-space">Espace RP sur Discord</label><select id="sh-space">${Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (d.space || 'post') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`}
         <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
-          <optgroup label="Flottes de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
+          <optgroup label="Escouades de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Équipages">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind !== 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>
         <div><label for="sh-pos">À quai dans le salon (ID)</label><input id="sh-pos" inputmode="numeric" value="${esc(d.positionId ?? d.position?.channelId ?? '')}" placeholder="ID du salon, vide = nulle part"><small class="note">${d.position ? `Actuellement : #${esc(d.position.name || d.position.channelId)}` : 'Pas à quai'}</small></div>`}
@@ -2288,16 +2317,16 @@ $('sh-del').addEventListener('click', async () => {
   }
 });
 
-/* ═══ Marine (panneau admin) : grades, soldes, flottes ═══════════════════ */
+/* ═══ Marine (panneau admin) : grades, soldes, escouades ═════════════════ */
 function renderMarine() {
   if (!tools()) return;
   const marines = players.filter((p) => p.ident.faction === 'Marine').sort((a, b) => G.GRADES.indexOf(b.ident.grade) - G.GRADES.indexOf(a.ident.grade));
   const payroll = marines.reduce((a, p) => a + G.gradeOf(p.ident.grade).pay, 0);
-  const fleets = Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte');
+  const squads = Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte');
   $('v-marine').innerHTML = `
     <div class="sec-head">
       <div><h2>Marine</h2><p class="lede" style="margin:0">${marines.length} Marine${marines.length > 1 ? 's' : ''} · soldes versées : <b>${berry(payroll)}</b> par semaine. Chaque Marine touche sa solde à l’ouverture de l’app, selon son grade.</p></div>
-      <button class="btn" id="marine-fleet">+ Nouvelle flotte</button>
+      <button class="btn" id="marine-fleet">+ Nouvelle escouade</button>
     </div>
     <div class="grade-scale">${[...G.MARINE_GRADES].reverse().map((g) => {
       const n = marines.filter((p) => p.ident.grade === g.name).length;
@@ -2306,9 +2335,9 @@ function renderMarine() {
     <h3 class="ed-h">Effectifs</h3>
     ${marines.length ? `<div class="member-list">${marines.map((p) => {
       const i = G.GRADES.indexOf(p.ident.grade);
-      const fl = p.crewId && fleet.crews?.[p.crewId]?.kind === 'flotte' ? fleet.crews[p.crewId].name : null;
+      const sq = p.crewId && fleet.crews?.[p.crewId]?.kind === 'flotte' ? fleet.crews[p.crewId].name : null;
       return `<div class="member-row marine-row">
-        <span class="m-name"><b>${esc(G.fullName({ id: p.ident }))}</b><small class="note">${fl ? ` · ${esc(fl)}` : ' · sans flotte'}</small></span>
+        <span class="m-name"><b>${esc(G.fullName({ id: p.ident }))}</b><small class="note">${sq ? ` · ${esc(sq)}` : ' · sans escouade'}</small></span>
         <span class="rank-badge">${G.gradeOf(p.ident.grade).medal} ${esc(p.ident.grade)}</span>
         <span class="m-acts">
           <button class="sq" data-promote="${esc(p.uid)}" data-dir="1" ${i >= G.GRADES.length - 1 ? 'disabled' : ''} title="Promouvoir" aria-label="Promouvoir">↑</button>
@@ -2317,12 +2346,15 @@ function renderMarine() {
         </span>
       </div>`;
     }).join('')}</div>` : '<p class="note">Aucun Marine. Un joueur devient Marine quand sa faction est « Marine » (bouton Modifier de sa fiche).</p>'}
-    <h3 class="ed-h">Flottes (${fleets.length})</h3>
-    ${fleets.length ? `<div class="fleet-list">${fleets.map(([id, c]) => `
-      <button class="gest-card" data-crew="${esc(id)}">
+    <h3 class="ed-h">Escouades (${squads.length})</h3>
+    ${squads.length ? `<div class="fleet-list">${squads.map(([id, c]) => {
+      const n = Object.values(fleet.ships || {}).filter((sh) => sh.owner?.kind === 'crew' && sh.owner.id === id).length;
+      const npcs = Object.keys(c.npcs || {}).length;
+      return `<button class="gest-card" data-crew="${esc(id)}">
         <span class="slot-ico">${c.flag ? `<span class="ico item-img"><img src="${imgSrc(c.flag)}" alt=""></span>` : ico(160)}</span>
-        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''}${(() => { const n = Object.values(fleet.ships || {}).filter((sh) => sh.owner?.kind === 'crew' && sh.owner.id === id).length; return ` · ${n} bateau${n > 1 ? 'x' : ''}`; })()}${c.ship && fleet.ships?.[c.ship] ? ` (attitré : ${esc(fleet.ships[c.ship].name)})` : ''}</small></span>
-      </button>`).join('')}</div>` : '<p class="note">Aucune flotte.</p>'}`;
+        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''}${npcs ? ` (dont ${npcs} PNJ)` : ''} · ${berry(c.bank || 0)} · ${n} bateau${n > 1 ? 'x' : ''}${c.ship && fleet.ships?.[c.ship] ? ` (attitré : ${esc(fleet.ships[c.ship].name)})` : ''}</small></span>
+      </button>`;
+    }).join('')}</div>` : '<p class="note">Aucune escouade.</p>'}`;
   paintStatic($('v-marine'));
 }
 $('v-marine').addEventListener('click', async (e) => {
@@ -2354,7 +2386,7 @@ $('v-marine').addEventListener('click', async (e) => {
   }
 });
 
-/* ═══ Flotte (panneau admin) : équipages et bateaux ══════════════════════ */
+/* ═══ Équipages et bateaux (panneau admin) ═══════════════════════════════ */
 let fleet = { crews: null, ships: null };
 async function loadFleet() {
   try {
@@ -2372,11 +2404,11 @@ const ownerName = (o) => {
   if (!o) return 'Sans propriétaire';
   if (o.kind === 'crew') {
     const c = fleet.crews?.[o.id];
-    return `${c?.kind === 'flotte' ? 'Flotte' : 'Équipage'} : ${c?.name ?? '?'}`;
+    return `${c?.kind === 'flotte' ? 'Escouade' : 'Équipage'} : ${c?.name ?? '?'}`;
   }
   return `Joueur : ${G.fullName({ id: players.find((p) => p.uid === o.id)?.ident || {} })}`;
 };
-/** Écran Équipages (panneau admin) : équipages pirates seulement. Les flottes sont dans l'écran Marine. */
+/** Écran Équipages (panneau admin) : équipages seulement. Les escouades sont dans l'écran Marine. */
 function renderFleet() {
   if (!tools()) return;
   const el = $('v-fleet');
@@ -2384,14 +2416,15 @@ function renderFleet() {
   const crews = Object.entries(fleet.crews).filter(([, c]) => c.kind !== 'flotte').sort((a, b) => a[1].name.localeCompare(b[1].name));
   el.innerHTML = `
     <div class="sec-head">
-      <div><h2>Équipages</h2><p class="lede" style="margin:0">Les équipages du RP. Les flottes de la Marine sont dans l’écran Marine.</p></div>
+      <div><h2>Équipages</h2><p class="lede" style="margin:0">Les équipages du RP. Les escouades de la Marine sont dans l’écran Marine.</p></div>
       <button class="btn" id="fleet-new">+ Nouvel équipage</button>
     </div>
     ${crews.length ? `<div class="fleet-list">${crews.map(([id, c]) => {
       const owned = Object.values(fleet.ships).filter((sh) => sh.owner?.kind === 'crew' && sh.owner.id === id).length;
+      const npcs = Object.keys(c.npcs || {}).length;
       return `<button class="gest-card" data-crew="${esc(id)}">
         <span class="slot-ico flag-mini">${c.flag ? `<span class="ico item-img"><img src="${imgSrc(c.flag)}" alt=""></span>` : ico(1)}</span>
-        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''} · ${berry(c.bank || 0)} · ${owned} bateau${owned > 1 ? 'x' : ''}${c.ship && fleet.ships[c.ship] ? ` (attitré : ${esc(fleet.ships[c.ship].name)})` : ''}</small></span>
+        <span><b>${esc(c.name)}</b><small>${c.members.length} membre${c.members.length > 1 ? 's' : ''}${npcs ? ` (dont ${npcs} PNJ)` : ''} · ${berry(c.bank || 0)} · ${owned} bateau${owned > 1 ? 'x' : ''}${c.ship && fleet.ships[c.ship] ? ` (attitré : ${esc(fleet.ships[c.ship].name)})` : ''}</small></span>
       </button>`;
     }).join('')}</div>` : '<p class="note">Aucun équipage.</p>'}`;
   paintStatic(el);
@@ -2409,11 +2442,14 @@ function renderShipsAdmin() {
       <button class="btn" id="ships-new" ${models ? '' : 'disabled title="Crée d’abord un modèle dans Gestion (catégorie Bateau)"'}>+ Nouveau bateau</button>
     </div>
     ${models ? '' : '<p class="note">Aucun modèle de bateau : crée-en un dans Gestion, catégorie « Bateau » (le nom est le type, ex. Voilier).</p>'}
-    ${ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => `
+    ${ships.length ? `<div class="fleet-list">${ships.map(([id, sh]) => {
+      const main = sh.owner?.kind === 'crew' && fleet.crews?.[sh.owner.id]?.ship === id;
+      return `
       <button class="gest-card" data-ship="${esc(id)}">
         <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${imgSrc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
-        <span><b>${esc(sh.name)}</b><small>${esc(sh.type)} · cale ${G.kg(sh.capacity)} · vitesse ${sh.sail ?? 1} · ${sh.berths ?? 4} places · ${sh.cannons} canons<br>${esc(ownerName(sh.owner))}${sh.position ? ` · ⚓ #${esc(sh.position.name || sh.position.channelId)}` : ''}</small></span>
-      </button>`).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
+        <span><b>${main ? '⭐ ' : ''}${esc(sh.name)}</b><small>${esc(sh.type)} · cale ${G.kg(sh.capacity)} · vitesse ${sh.sail ?? 1} · ${sh.berths ?? 4} places · ${sh.cannons} canons<br>${esc(ownerName(sh.owner))}${main ? ' · bateau attitré' : ''}${sh.position ? ` · ⚓ #${esc(sh.position.name || sh.position.channelId)}` : ''}</small></span>
+      </button>`;
+    }).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
   paintStatic(el);
 }
 $('v-fleet').addEventListener('click', (e) => {
@@ -2430,27 +2466,31 @@ $('v-ships').addEventListener('click', (e) => {
   if (sh) return openShipEdit({ id: sh, ...fleet.ships[sh] });
 });
 
-/* Édition d'un équipage */
+/* Édition d'un équipage ou d'une escouade */
 let crewDraft = null, crewDraftId = null, crewQuery = '', fleetKindNew = 'equipage';
 function openCrewEdit(id) {
   crewDraftId = id;
-  crewDraft = structuredClone(id ? fleet.crews[id] : { kind: fleetKindNew, name: '', flag: null, captain: null, members: [], bank: 0, chest: {}, ship: null });
+  crewDraft = structuredClone(id ? fleet.crews[id] : { kind: fleetKindNew, name: '', flag: null, captain: null, members: [], npcs: {}, bank: 0, chest: {}, ship: null });
+  crewDraft.npcs ??= {};
   crewQuery = '';
-  $('cr-title').textContent = id ? crewDraft.name : crewDraft.kind === 'flotte' ? 'Nouvelle flotte' : 'Nouvel équipage';
+  $('cr-title').textContent = id ? crewDraft.name : crewDraft.kind === 'flotte' ? 'Nouvelle escouade' : 'Nouvel équipage';
   $('cr-del').hidden = !id;
   $('cr-err').textContent = '';
   renderCrewEdit();
   openDialog('d-crew');
 }
 function renderCrewEdit() {
-  const d = crewDraft;
+  const d = crewDraft, W = G.crewWords(d);
   const q = normTxt(crewQuery);
   const list = players.filter((p) => (d.kind !== 'flotte' || p.ident.faction === 'Marine' || d.members.includes(p.uid)) && (!q || normTxt(G.fullName({ id: p.ident })).includes(q) || d.members.includes(p.uid)));
+  const npcs = Object.entries(d.npcs || {});
+  const realCount = d.members.filter((u) => !G.isNpc(u)).length;
+  const memberName = (u) => (G.isNpc(u) ? `${d.npcs[u]?.name ?? 'PNJ'} (PNJ)` : G.fullName({ id: players.find((p) => p.uid === u)?.ident || {} }));
   $('cr-body').innerHTML = `
     <div class="form">
       <div class="wide"><label for="cr-name">Nom</label><input id="cr-name" value="${esc(d.name)}" maxlength="60"></div>
       <input type="hidden" id="cr-kind" value="${d.kind || 'equipage'}">
-      ${d.kind === 'flotte' ? '<input type="hidden" id="cr-bank" value="0">' : `<div><label for="cr-bank">Banque (berrys)</label><input id="cr-bank" type="number" min="0" value="${d.bank || 0}"></div>`}
+      <div><label for="cr-bank">Banque (berrys)</label><input id="cr-bank" type="number" min="0" value="${d.bank || 0}"></div>
       <div><label for="cr-ship">Bateau attitré</label><select id="cr-ship"><option value="">Aucun</option>${Object.entries(fleet.ships || {}).map(([sid, sh]) => `<option value="${esc(sid)}" ${d.ship === sid ? 'selected' : ''}>${esc(sh.name)} (${esc(sh.type)}, ${G.kg(sh.capacity)})</option>`).join('')}</select></div>
     </div>
     <div class="img-field" style="margin-top:12px">
@@ -2461,10 +2501,18 @@ function renderCrewEdit() {
         <div class="ph-url-row"><input type="url" id="cr-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="cr-url-go">Utiliser</button></div>
       </div>
     </div>
-    <h3 class="ed-h">Membres (${d.members.length})${d.kind === 'flotte' ? ' <small class="note">Marines uniquement</small>' : ''}</h3>
+    <h3 class="ed-h">Membres joueurs (${realCount})${d.kind === 'flotte' ? ' <small class="note">Marines uniquement</small>' : ''}</h3>
     <input class="mj-search" id="cr-q" type="search" placeholder="Chercher un joueur…" value="${esc(crewQuery)}">
     <div class="member-pick">${list.map((p) => `<label><input type="checkbox" data-member="${esc(p.uid)}" ${d.members.includes(p.uid) ? 'checked' : ''}> ${esc(G.fullName({ id: p.ident }))}${p.crewId && p.crewId !== crewDraftId ? ` <small class="note">(dans ${esc(fleet.crews?.[p.crewId]?.name ?? 'un autre groupe')}, il le quittera)</small>` : ''}</label>`).join('') || '<p class="note">Aucun joueur.</p>'}</div>
-    <div class="field"><label for="cr-cap">${d.kind === 'flotte' ? 'Commandant' : 'Capitaine'}</label><select id="cr-cap">${d.members.map((u) => `<option value="${esc(u)}" ${u === d.captain ? 'selected' : ''}>${esc(G.fullName({ id: players.find((p) => p.uid === u)?.ident || {} }))}</option>`).join('') || '<option value="">Ajoute d’abord des membres</option>'}</select></div>
+    <h3 class="ed-h">Membres PNJ (${npcs.length})</h3>
+    <div class="pax">${npcs.map(([id, n]) => `<span>🤖 ${esc(n.name)}${n.grade ? ` · ${esc(n.grade)}` : ''} <button type="button" class="linklike" data-npc-del="${esc(id)}" aria-label="Retirer ${esc(n.name)}">✕</button></span>`).join('') || '<span class="note">Aucun PNJ.</span>'}</div>
+    <div class="se-row">
+      <input id="cr-npc" placeholder="Nom du PNJ" maxlength="60" aria-label="Nom du PNJ">
+      ${d.kind === 'flotte' ? `<select id="cr-npc-grade" aria-label="Grade du PNJ">${G.GRADES.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('')}</select>` : ''}
+      <button type="button" class="btn sm" id="cr-npc-add">Ajouter le PNJ</button>
+    </div>
+    <p class="note" style="margin:4px 0 0">Un PNJ n’a pas de compte Discord : il apparaît dans la liste des membres et peut être ${W.chef}.</p>
+    <div class="field"><label for="cr-cap">${W.Chef}</label><select id="cr-cap">${d.members.map((u) => `<option value="${esc(u)}" ${u === d.captain ? 'selected' : ''}>${esc(memberName(u))}</option>`).join('') || '<option value="">Ajoute d’abord des membres</option>'}</select></div>
     ${Object.keys(d.chest || {}).length ? `<h3 class="ed-h">Coffre (${G.kg(G.chestWeight(d))})</h3><div class="chest">${Object.entries(d.chest).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>` : ''}`;
 }
 function readCrewEdit() {
@@ -2502,6 +2550,25 @@ $('d-crew').addEventListener('change', async (e) => {
   }
 });
 $('d-crew').addEventListener('click', (e) => {
+  if (e.target.id === 'cr-npc-add') {
+    const name = $('cr-npc').value.trim();
+    if (!name) return void ($('cr-err').textContent = 'Donne un nom au PNJ.');
+    readCrewEdit();
+    const id = `npc-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    crewDraft.npcs = { ...(crewDraft.npcs || {}), [id]: { name, grade: $('cr-npc-grade')?.value || null } };
+    crewDraft.members = [...crewDraft.members, id];
+    if (!crewDraft.captain) crewDraft.captain = id;
+    $('cr-err').textContent = '';
+    return renderCrewEdit();
+  }
+  const nd = e.target.closest('[data-npc-del]')?.dataset.npcDel;
+  if (nd) {
+    readCrewEdit();
+    delete crewDraft.npcs[nd];
+    crewDraft.members = crewDraft.members.filter((u) => u !== nd);
+    if (crewDraft.captain === nd) crewDraft.captain = crewDraft.members[0] ?? null;
+    return renderCrewEdit();
+  }
   if (e.target.id === 'cr-pick') $('cr-file').click();
   if (e.target.id === 'cr-url-go') {
     const v = $('cr-url').value.trim();
@@ -2518,7 +2585,7 @@ $('d-crew').addEventListener('click', (e) => {
 });
 $('cr-save').addEventListener('click', async () => {
   readCrewEdit();
-  if (!crewDraft.name.trim()) return void ($('cr-err').textContent = 'Donne un nom à l’équipage.');
+  if (!crewDraft.name.trim()) return void ($('cr-err').textContent = `Donne un nom à ${G.crewWords(crewDraft).le}.`);
   $('cr-save').disabled = true;
   try {
     const { chest, ...crew } = crewDraft; // le coffre se gère par les joueurs
@@ -2533,7 +2600,8 @@ $('cr-save').addEventListener('click', async () => {
   }
 });
 $('cr-del').addEventListener('click', async () => {
-  if (!(await askConfirm('Les membres n’auront plus d’équipage, la banque et le coffre seront perdus, et ses bateaux n’auront plus de propriétaire.', { title: `Supprimer ${crewDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
+  const W = G.crewWords(crewDraft);
+  if (!(await askConfirm(`Les membres n’auront plus ${W.un === 'une escouade' ? 'd’escouade' : 'd’équipage'}, la banque et le coffre seront perdus, et ses bateaux n’auront plus de propriétaire.`, { title: `Supprimer ${crewDraft.name} ?`, ok: 'Supprimer', danger: true }))) return;
   try {
     const out = await API.staff('crew.delete', { id: crewDraftId });
     closeDialog($('d-crew'));
@@ -2544,6 +2612,67 @@ $('cr-del').addEventListener('click', async () => {
   }
 });
 
+/* ═══ Techniques à valider (panneau admin) ═══════════════════════════════ */
+let pendingTechs = null;
+async function loadPendingTechs() {
+  try {
+    pendingTechs = (await API.staff('techniques')).list;
+  } catch (err) {
+    pendingTechs = [];
+    toast(esc(err.message));
+  }
+  renderPendingTechs();
+}
+function renderPendingTechs() {
+  if (!tools()) return;
+  const label = document.querySelector('#scr-atech span:last-child');
+  if (label) label.textContent = pendingTechs?.length ? `Techniques (${pendingTechs.length})` : 'Techniques';
+  const el = $('v-atech');
+  if (!pendingTechs) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Techniques à valider</h2><p class="lede" style="margin:0">Toutes les techniques proposées par les joueurs. Un refus demande un motif, que le joueur verra sur sa fiche.</p></div>
+      <button class="btn ghost" id="atech-reload">Actualiser</button>
+    </div>
+    ${pendingTechs.length ? `<div class="val-list">${pendingTechs.map(({ uid, player, tech: t }) => `
+      <article class="val-card">
+        ${t.media ? `<div class="val-media"><img src="${imgSrc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.remove()"></div>` : ''}
+        <div class="val-body">
+          <p class="note" style="margin:0 0 4px">Proposée par <b>${esc(player)}</b></p>
+          <h3>${esc(t.name)} <span class="tag ${SRC_CLS[t.src] || ''}">${G.TECH_SOURCES[t.src] || ''}</span></h3>
+          <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
+          <div class="val-acts">
+            <button class="btn sm" data-tv-ok="${esc(uid)}" data-tid="${t.id}">✓ Valider</button>
+            <button class="btn sm ghost" data-tv-no="${esc(uid)}" data-tid="${t.id}">✗ Refuser</button>
+            <button class="btn sm ghost" data-tv-open="${esc(uid)}">Voir la fiche</button>
+          </div>
+        </div>
+      </article>`).join('')}</div>` : '<p class="note">Aucune technique en attente. 🎉</p>'}`;
+}
+$('v-atech').addEventListener('click', async (e) => {
+  if (e.target.closest('#atech-reload')) return void loadPendingTechs();
+  const open = e.target.closest('[data-tv-open]')?.dataset.tvOpen;
+  if (open) return void openPlayer(open, { tab: 't-tech' });
+  const okB = e.target.closest('[data-tv-ok]'), noB = e.target.closest('[data-tv-no]');
+  const b = okB || noB;
+  if (!b) return;
+  const uid = b.dataset.tvOk || b.dataset.tvNo, id = Number(b.dataset.tid);
+  let reason = null;
+  if (noB) {
+    reason = await askRefuseReason();
+    if (!reason) return;
+  }
+  setBusy(1);
+  try {
+    const out = await API.staff('act', { target: uid, action: { type: 'tech.validate', id, ok: !!okB, reason } });
+    toast(esc(out.toast));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+  loadPendingTechs();
+});
 /* ═══ Carte du monde ═════════════════════════════════════════════════════ */
 let MAP = null; // carte vue par le joueur (îles visibles, île où il est, trajets depuis là)
 const LABEL_ZOOM = 1.8; // en dessous, les noms des îles sont cachés (sauf l'île choisie)
@@ -3375,7 +3504,7 @@ function showScreen(name) {
       fillGauges(el);
     }
   });
-  if (name === 'ashop') renderAdminShops();
+  if (name === 'atech') loadPendingTechs();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

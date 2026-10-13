@@ -1298,3 +1298,18 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .map-links .lk.oneway{stroke:#ffd27a}
 .route-dir{grid-template-columns:1fr auto 90px 26px}
 .route-row select{font:inherit;font-size:14px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);padding:2px 4px;max-width:220px}
+
+
+
+
+
+/* ═══ v39 : techniques refusées, PNJ, bateaux classés ═══ */
+.tech .status.refused{color:var(--red)}
+.refused-why{margin:0 16px 10px!important;padding:6px 10px!important;border-left:4px solid var(--red);background:#fde9e6;font-size:15px}
+.npc-badge{font-size:12px;font-weight:800;border:2px solid var(--ink);border-radius:20px;padding:0 8px;background:#e8ecfb;margin-left:6px}
+.ship-sec{display:grid;gap:8px}
+.ship-sec + .ship-sec{margin-top:6px}
+.ship-tag{margin:0 0 6px;font-size:13px;font-weight:800;display:inline-block;border:2px solid var(--ink);border-radius:4px;padding:0 8px;background:#fff7e0}
+.ship-tag.main{background:var(--gold)}
+.ship-tag.mine{background:#e9f7ea}
+.ed-h.first{margin-top:0;border:none;padding-top:0}

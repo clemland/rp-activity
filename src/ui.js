@@ -81,7 +81,7 @@ export const berry = (n) => `<span class="b" role="img" aria-label="berrys"></sp
 export const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const stars = (n, max = 5, big = false) =>
-  `<span class="stars${big ? ' big' : ''}" role="img" aria-label="${n} étoile${n > 1 ? 's' : ''} sur ${max}">${Array.from({ length: max }, (_, i) => ico(i < n ? 125 : 126)).join('')}</span>`;
+  `<span class="stars${big ? ' big' : ''}" role="img" aria-label="${n} étoile${n > 1 ? 's' : ''} sur ${max}">${Array.from({ length: max }, (_, i) => icon(i < n ? 'star-on' : 'star-off')).join('')}</span>`;
 
 export const calm = matchMedia('(prefers-reduced-motion: reduce)');
 export function replay(el, cls) {

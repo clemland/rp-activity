@@ -21,7 +21,7 @@ import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
   openDialog, closeDialog, readAsDataUrl, readImage, askConfirm, askText, setIcons, icon, ICON_SLOTS,
 } from './ui.js';
-import { ICONMAP } from './icons.js';
+import ICON_FILES from 'virtual:icon-list';
 
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
 const itemOf = (k) => G.itemOf(k);
@@ -2688,7 +2688,8 @@ function renderIcons() {
         <span class="icon-prev">${prev}</span>
         <span class="icon-lbl"><b>${esc(label)}</b><small>${ICONS[key] ? '✓ Personnalisée' : 'Par défaut'}</small></span>
         <span class="icon-acts">
-          <button class="btn sm" data-icon-file="${esc(key)}">Fichier</button>
+          <button class="btn sm" data-icon-lib="${esc(key)}">Bibliothèque</button>
+          <button class="btn sm ghost" data-icon-file="${esc(key)}">Fichier</button>
           <button class="btn sm ghost" data-icon-link="${esc(key)}">Lien</button>
           ${ICONS[key] ? `<button class="btn sm ghost" data-icon-reset="${esc(key)}">Par défaut</button>` : ''}
         </span>
@@ -2715,7 +2716,31 @@ async function iconSet(key, img) {
     setBusy(-1);
   }
 }
+/* Bibliothèque : les images du dossier public/icons, servies par le site (rapide) */
+let libKey = null;
+function openIconLib(key) {
+  if (!ICON_FILES.length) return toast('Le dossier activity/public/icons est vide : ajoute des images, puis git push.');
+  libKey = key;
+  $('il-q').value = '';
+  renderIconLib();
+  openDialog('d-iconlib');
+  $('il-q').focus();
+}
+function renderIconLib() {
+  const q = normTxt($('il-q').value);
+  const files = ICON_FILES.filter((f) => !q || normTxt(f).includes(q));
+  $('il-grid').innerHTML = files.map((f) => `<button class="il-item ${ICONS[libKey] === `/icons/${f}` ? 'on' : ''}" data-il="${esc(f)}" title="${esc(f)}"><img src="/icons/${esc(f)}" alt="" loading="lazy" draggable="false"><small>${esc(f.replace(/\.[^.]+$/, ''))}</small></button>`).join('') || '<p class="note">Aucune image ne correspond.</p>';
+}
+$('il-q').addEventListener('input', renderIconLib);
+$('il-grid').addEventListener('click', (e) => {
+  const f = e.target.closest('[data-il]')?.dataset.il;
+  if (!f) return;
+  closeDialog($('d-iconlib'));
+  iconSet(libKey, `/icons/${f}`);
+});
 $('v-aicons').addEventListener('click', async (e) => {
+  const lib = e.target.closest('[data-icon-lib]')?.dataset.iconLib;
+  if (lib) return openIconLib(lib);
   const f = e.target.closest('[data-icon-file]')?.dataset.iconFile;
   if (f) {
     iconKey = f;

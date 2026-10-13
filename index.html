@@ -279,7 +279,18 @@
     </div>
   </div>
 </dialog>
-
+<dialog id="d-iconlib" aria-labelledby="il-title">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="il-title">Bibliothèque d’icônes</h2><p>Les images du dossier <code>activity/public/icons</code>.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <input class="mj-search" id="il-q" type="search" placeholder="Chercher une icône…" autocomplete="off">
+      <div class="il-grid" id="il-grid"></div>
+    </div>
+  </div>
+</dialog>
 <dialog id="d-prompt" aria-labelledby="pr-title" class="confirm">
   <div class="panel">
     <div class="panel-head">

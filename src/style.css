@@ -1326,3 +1326,12 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .icon-lbl small{display:block;color:var(--muted);font-size:12px}
 .icon-acts{display:flex;gap:6px;flex-wrap:wrap}
 .icon-grid{margin-top:4px}
+
+
+/* ═══ v41 : bibliothèque d'icônes ═══ */
+.il-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-top:10px}
+.il-item{display:grid;justify-items:center;gap:4px;padding:8px 4px;border:2px solid var(--ink);border-radius:6px;background:#fffaea;cursor:pointer;font:inherit}
+.il-item:hover{background:#fff1c9}
+.il-item.on{background:var(--gold)}
+.il-item img{width:48px;height:48px;object-fit:contain}
+.il-item small{font-size:11px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -12,7 +12,7 @@ const pos = (id) => {
   const k = ICONMAP[id] ?? 0;
   return `calc(var(--s) * -${k % COLS}) calc(var(--s) * -${Math.floor(k / COLS)})`;
 };
-/* Icônes personnalisées par le staff : { "ico:265": lien, "pic:hammer": lien, "berry": lien } */
+/* Icônes personnalisées par le staff : { "slot:faction-marine": lien, "berry": lien… } */
 let OVR = {};
 let srcOf = (u) => u;
 export function setIcons(map = {}, toSrc) {
@@ -20,13 +20,53 @@ export function setIcons(map = {}, toSrc) {
   if (toSrc) srcOf = toSrc;
   document.documentElement.style.setProperty('--berry-img', OVR.berry ? `url("${srcOf(OVR.berry)}")` : 'url(/assets/berry.png)');
 }
+/**
+ * Emplacements d'icônes : chaque usage a le sien, réglable séparément dans le panneau admin.
+ * [groupe, libellé, icône par défaut (numéro dans la planche, ou nom d'image)]
+ */
+export const ICON_SLOTS = {
+  'nav-fiche': ['Écrans', 'Ma fiche', 121], 'nav-shop': ['Écrans', 'Boutique', 265], 'nav-crew': ['Écrans', 'Équipage / Escouade', 1],
+  'nav-map': ['Écrans', 'Carte', 231], 'nav-nav': ['Écrans', 'Navigation', 188],
+  'nav-admin': ['Écrans', 'Joueurs (admin)', 125], 'nav-atech': ['Écrans', 'Techniques (admin)', 131], 'nav-ashop': ['Écrans', 'Boutiques (admin)', 265],
+  'nav-amap': ['Écrans', 'Carte (admin)', 231], 'nav-marine': ['Écrans', 'Marine (admin)', 160], 'nav-fleet': ['Écrans', 'Équipages (admin)', 1],
+  'nav-ships': ['Écrans', 'Bateaux (admin)', 231], 'nav-gest': ['Écrans', 'Gestion (admin)', 270], 'nav-aicons': ['Écrans', 'Icônes (admin)', 237],
+  'tab-t-perso': ['Onglets de la fiche', 'Stats & compétences', 96], 'tab-t-tech': ['Onglets de la fiche', 'Techniques', 131],
+  'tab-t-inv': ['Onglets de la fiche', 'Inventaire', 270], 'tab-t-job': ['Onglets de la fiche', 'Métier', 279], 'tab-t-mj': ['Onglets de la fiche', 'Édition MJ', 125],
+  'faction-pirate': ['Factions', 'Pirate', 1], 'faction-marine': ['Factions', 'Marine', 160], 'faction-revolutionnaire': ['Factions', 'Révolutionnaire', 96],
+  'faction-chasseur': ['Factions', 'Chasseur de primes', 153], 'faction-civil': ['Factions', 'Civil', 121],
+  'classe-fighter': ['Classes', 'Fighter', 128], 'classe-sabreur': ['Classes', 'Sabreur', 147], 'classe-tireur': ['Classes', 'Tireur', 153],
+  'race-humain': ['Races', 'Humain', 121], 'race-mink': ['Races', 'Mink', 121], 'race-geant': ['Races', 'Géant', 121],
+  'race-shandia': ['Races', 'Shandia', 121], 'race-homme-poisson': ['Races', 'Homme-poisson', 121], 'race-buccaneer': ['Races', 'Buccaneer', 121],
+  'metier-navigateur': ['Métiers', 'Navigateur', 'compass'], 'metier-archeologue': ['Métiers', 'Archéologue', 'tmap'], 'metier-charpentier': ['Métiers', 'Charpentier', 'hammer'],
+  'metier-scientifique': ['Métiers', 'Scientifique', 'potion'], 'metier-medecin': ['Métiers', 'Médecin', 'stetho'], 'metier-aucun': ['Métiers', 'Aucun métier', 121],
+  'stat-force': ['Statistiques', 'Force', 'st_swords'], 'stat-rapidite': ['Statistiques', 'Rapidité', 'st_leg'], 'stat-resistance': ['Statistiques', 'Résistance', 'st_shield'],
+  'stat-sdc': ['Statistiques', 'Technique', 'st_sparkle'], volonte: ['Statistiques', 'Volonté', 'st_angry'],
+  fruit: ['Fruit du démon et Haki', 'Fruit du démon', 'fruit'], 'haki-observation': ['Fruit du démon et Haki', 'Haki de l’observation', 12],
+  'haki-armement': ['Fruit du démon et Haki', 'Haki de l’armement', 13], 'haki-rois': ['Fruit du démon et Haki', 'Haki des rois', 14],
+  'objet-arme': ['Catégories d’objets (sans image)', 'Arme', 147], 'objet-conso': ['Catégories d’objets (sans image)', 'Consommable', 192],
+  'objet-mat': ['Catégories d’objets (sans image)', 'Matériau', 331], 'objet-tresor': ['Catégories d’objets (sans image)', 'Trésor', 270],
+  'objet-objet': ['Catégories d’objets (sans image)', 'Objet', 237], 'objet-bateau': ['Catégories d’objets (sans image)', 'Bateau', 231],
+  'objet-amelioration': ['Catégories d’objets (sans image)', 'Amélioration de bateau', 266],
+  'star-on': ['Divers', 'Étoile pleine', 125], 'star-off': ['Divers', 'Étoile vide', 126], bourse: ['Divers', 'Bourse', 261],
+};
 const custom = (key) => (OVR[key] ? `<span class="ico item-img" aria-hidden="true"><img src="${esc(srcOf(OVR[key]))}" alt="" draggable="false"></span>` : null);
 export const ico = (id) => custom(`ico:${id}`) ?? `<span class="ico" aria-hidden="true" style="background-position:${pos(id)}"></span>`;
 export const pic = (key) => custom(`pic:${key}`) ?? `<span class="ico pic pic-${key}" aria-hidden="true"></span>`;
-export const glyph = (g) => (typeof g === 'string' ? (g.startsWith('<') ? g : pic(g)) : ico(g));
+/** Icône d'un emplacement : celle choisie par le staff, sinon celle par défaut. */
+export function icon(key) {
+  const own = custom(`slot:${key}`);
+  if (own) return own;
+  const d = ICON_SLOTS[key]?.[2] ?? 237;
+  return typeof d === 'number' ? ico(d) : pic(d);
+}
+/** Nombre = icône de la planche ; « @emplacement » = emplacement ; texte = image ; « <… » = HTML tout fait. */
+export const glyph = (g) => (typeof g === 'string' ? (g.startsWith('<') ? g : g.startsWith('@') ? icon(g.slice(1)) : pic(g)) : ico(g));
+/** Icônes écrites dans la page (boutons d'écran, onglets, bourse) : leur emplacement se déduit de leur place. */
 export const paintStatic = (root = document) =>
   root.querySelectorAll('.ico[data-i]').forEach((el) => {
-    const url = OVR[`ico:${el.dataset.i}`];
+    const scr = el.closest('.scr')?.dataset.screen, tab = el.closest('.tab')?.id;
+    const slot = scr ? `nav-${scr}` : tab ? `tab-${tab}` : el.closest('.purse') ? 'bourse' : null;
+    const url = (slot && OVR[`slot:${slot}`]) || OVR[`ico:${el.dataset.i}`];
     if (url) {
       el.classList.add('item-img');
       el.style.backgroundPosition = '';

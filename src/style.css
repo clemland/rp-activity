@@ -1325,3 +1325,4 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .icon-prev .ico{--s:48px}
 .icon-lbl small{display:block;color:var(--muted);font-size:12px}
 .icon-acts{display:flex;gap:6px;flex-wrap:wrap}
+.icon-grid{margin-top:4px}

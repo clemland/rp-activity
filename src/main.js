@@ -19,7 +19,7 @@ import { mediaSrc } from './discord.js';
 const imgSrc = (u) => esc(mediaSrc(u));
 import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
-  openDialog, closeDialog, readAsDataUrl, readImage, askConfirm, askText, setIcons,
+  openDialog, closeDialog, readAsDataUrl, readImage, askConfirm, askText, setIcons, icon, ICON_SLOTS,
 } from './ui.js';
 import { ICONMAP } from './icons.js';
 
@@ -29,7 +29,7 @@ const itemOf = (k) => G.itemOf(k);
 const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231, amelioration: 266 };
 const itemIco = (k) => {
   const it = itemOf(k);
-  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy" draggable="false"></span>` : ico(KIND_ICON[it.kind] ?? 237);
+  return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy" draggable="false"></span>` : icon(`objet-${it.kind}`);
 };
 
 /* ═══ État ═══════════════════════════════════════════════════════════════ */
@@ -181,13 +181,13 @@ const PORTRAIT = `
   <path d="M0 196 Q25 188 50 196 T100 196 T150 196 T200 196" fill="none" stroke="#9fd3ef" stroke-width="3" opacity=".7"/>
 </svg>`;
 const FACTION = {
-  Pirate: { cls: 'f-pirate', icon: 1 },
-  Marine: { cls: 'f-marine', icon: 160 },
-  Révolutionnaire: { cls: 'f-revo', icon: 96 },
-  'Chasseur de primes': { cls: 'f-chasseur', icon: 153 },
-  Civil: { cls: 'f-civil', icon: 121 },
+  Pirate: { cls: 'f-pirate', icon: '@faction-pirate' },
+  Marine: { cls: 'f-marine', icon: '@faction-marine' },
+  Révolutionnaire: { cls: 'f-revo', icon: '@faction-revolutionnaire' },
+  'Chasseur de primes': { cls: 'f-chasseur', icon: '@faction-chasseur' },
+  Civil: { cls: 'f-civil', icon: '@faction-civil' },
 };
-const CLASS_ICON = { Fighter: { icon: 128 }, Sabreur: { icon: 147 }, Tireur: { icon: 153 } };
+const CLASS_ICON = { Fighter: { icon: '@classe-fighter' }, Sabreur: { icon: '@classe-sabreur' }, Tireur: { icon: '@classe-tireur' } };
 
 function photoHTML(p = S) {
   if (!p.photo) return PORTRAIT;
@@ -223,7 +223,7 @@ function renderHero() {
     $('portrait').innerHTML = photoHTML() + (VIEW ? '' : '<span class="cam" aria-hidden="true">📷</span>');
     shown.photo = key;
   }
-  $('h-faction').innerHTML = `<span class="stamp ${f.cls}">${ico(f.icon)}${esc(S.id.faction)}</span>`;
+  $('h-faction').innerHTML = `<span class="stamp ${f.cls}">${glyph(f.icon)}${esc(S.id.faction)}</span>`;
   $('h-name').textContent = fullName();
   $('h-epithet').textContent = S.id.epithet ? `« ${S.id.epithet} »` : '';
   const aff = affiliation();
@@ -235,17 +235,17 @@ function renderHero() {
   const done = S.rp?.day === G.rpDay() ? S.rp.count : 0;
   $('h-rp').innerHTML = `<span class="rp-l">RP aujourd’hui</span><span class="rp-dots" aria-hidden="true">${Array.from({ length: G.RP_DAILY }, (_, i) => `<i class="${i < done ? 'on' : ''}"></i>`).join('')}</span><b>${done} / ${G.RP_DAILY}</b>${done >= G.RP_DAILY ? '<small class="note">limite atteinte, retour à minuit</small>' : `<small class="note">+${G.RP_XP} XP par message de ${G.RP_MIN_CHARS} caractères</small>`}`;
   $('h-rp').setAttribute('aria-label', `Actions RP récompensées aujourd’hui : ${done} sur ${G.RP_DAILY}`);
-  const job = S.job.id ? JOBS[S.job.id] : { name: 'Aucun', pic: null };
+  const job = S.job.id ? JOBS[S.job.id] : { name: 'Aucun' };
   $('h-traits').innerHTML = [
-    ['Race', S.id.race, 121],
-    ['Classe', S.id.classe, CLASS_ICON[S.id.classe]?.icon ?? 147],
-    ['Métier', job.name, job.pic ?? 121],
-    ...(S.fruit ? [['Fruit', S.fruit.name, 'fruit']] : []),
+    ['Race', S.id.race, `@race-${G.slug(S.id.race)}`],
+    ['Classe', S.id.classe, CLASS_ICON[S.id.classe]?.icon ?? '@classe-sabreur'],
+    ['Métier', job.name, `@metier-${S.job.id || 'aucun'}`],
+    ...(S.fruit ? [['Fruit', S.fruit.name, '@fruit']] : []),
   ].map(([k, v, i]) => `<li>${glyph(i)}<span><small>${k}</small>${esc(v)}</span></li>`).join('');
 
   const prevBounty = shown.bounty;
   $('badge-slot').innerHTML = badgeHTML();
-  $('h-will').innerHTML = `${pic('st_angry')}<span class="will-l">Volonté</span>${stars(S.volonte)}`;
+  $('h-will').innerHTML = `${icon('volonte')}<span class="will-l">Volonté</span>${stars(S.volonte)}`;
   $('h-will').setAttribute('aria-label', `Volonté : ${S.volonte} sur 5`);
   const bt = $('h-bounty');
   if (bt && prevBounty != null && prevBounty !== S.id.bounty) {
@@ -490,9 +490,9 @@ function renderPerso() {
   const rows = [];
   HAKI.forEach((h) => {
     const v = S.haki[h.key];
-    if (v) rows.push(skillRow({ glyphHTML: ico(h.icon), name: h.name, v }));
+    if (v) rows.push(skillRow({ glyphHTML: icon(`haki-${h.key}`), name: h.name, v }));
   });
-  if (S.fruit) rows.push(skillRow({ glyphHTML: pic('fruit'), name: esc(S.fruit.name), sub: esc(S.fruit.type), v: S.fruit.stars, req: S.fruit.stars >= 5 ? 'Éveillé' : '' }));
+  if (S.fruit) rows.push(skillRow({ glyphHTML: icon('fruit'), name: esc(S.fruit.name), sub: esc(S.fruit.type), v: S.fruit.stars, req: S.fruit.stars >= 5 ? 'Éveillé' : '' }));
   $('v-perso').innerHTML = `
     <div class="perso-grid">
       <section>
@@ -500,7 +500,7 @@ function renderPerso() {
         ${STATS.map((s) => {
           const add = pending[s.key] || 0, v = S.stats[s.key] + add;
           return `<div class="stat">
-            ${pic(s.pic)}
+            ${icon(`stat-${s.key}`)}
             <span><b>${s.name}</b></span>
             <div class="gauge" role="progressbar" aria-label="${s.name}" aria-valuenow="${v}" aria-valuemin="0" aria-valuemax="${STAT_MAX}"><i style="width:${Math.min(100, (v / STAT_MAX) * 100)}%"></i></div>
             <div class="step">
@@ -698,7 +698,7 @@ function renderInv() {
   }
   // Une seule arme équipée sur trois identiques : seule la première case porte la marque.
   $('v-inv').innerHTML = `
-    <div class="sec-head"><h2>Inventaire</h2><span class="pill">${ico(261)}<b>${berry(S.berry)}</b></span></div>
+    <div class="sec-head"><h2>Inventaire</h2><span class="pill">${icon('bourse')}<b>${berry(S.berry)}</b></span></div>
     <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight">${G.kg(G.invWeight(S))}</span></p>
     <div class="equip">
       ${Object.entries(SLOTS).map(([sl, label]) => {
@@ -847,7 +847,7 @@ function renderJob() {
   const ready = c && Date.now() >= c.end;
   $('v-job').innerHTML = `
     <div class="job-head">
-      <div class="badge">${job ? pic(job.pic) : ico(121)}</div>
+      <div class="badge">${icon(`metier-${S.job.id || 'aucun'}`)}</div>
       <div>
         <h2>${job ? esc(job.name) : 'Aucun métier'} ${job ? `<span class="pips" aria-label="Niveau ${S.job.lvl} sur 3">${[1, 2, 3].map((i) => `<i class="${i <= S.job.lvl ? 'on' : ''}"></i>`).join('')}</span>` : ''}</h2>
         ${job ? `<p class="lede" style="margin:0">${JOB_LEVELS[S.job.lvl - 1]}</p>` : ''}
@@ -2675,44 +2675,29 @@ $('v-atech').addEventListener('click', async (e) => {
   loadPendingTechs();
 });
 
-/* ═══ Icônes (panneau admin) : remplacer les icônes de l'app ═════════════ */
-let ICONS = {}; // icônes personnalisées : { "ico:265": lien, "pic:hammer": lien, "berry": lien }
-let iconShowAll = false, iconKey = null;
-/** Où chaque icône est utilisée (celles qui ne sont pas listées ne servent nulle part pour l'instant). */
-const ICON_USES = {
-  1: 'Faction Pirate, Équipage, Jolly Roger par défaut', 12: 'Haki de l’observation', 13: 'Haki de l’armement', 14: 'Haki des rois',
-  96: 'Faction Révolutionnaire, Statistiques', 121: 'Ma fiche, Faction Civil, Race', 125: 'Étoile pleine, écran Joueurs', 126: 'Étoile vide',
-  128: 'Classe Fighter', 131: 'Techniques', 147: 'Classe Sabreur, Arme', 153: 'Classe Tireur, Chasseur de primes', 160: 'Faction Marine, Escouade',
-  188: 'Navigation', 192: 'Consommable', 206: 'Île sans image', 231: 'Carte, Bateau', 233: 'Pas encore de fiche', 237: 'Objet, écran Icônes',
-  261: 'Bourse', 265: 'Boutique', 266: 'Amélioration de bateau', 270: 'Inventaire, Trésor, Gestion', 279: 'Métier', 331: 'Matériau',
-};
-const PIC_USES = {
-  st_swords: 'Stat Force', st_leg: 'Stat Rapidité', st_shield: 'Stat Résistance', st_sparkle: 'Stat Technique', st_angry: 'Volonté',
-  fruit: 'Fruit du démon', compass: 'Métier Navigateur', tmap: 'Métier Archéologue', hammer: 'Métier Charpentier',
-  potion: 'Métier Scientifique', stetho: 'Métier Médecin', sabre: 'Sabre',
-};
+/* ═══ Icônes (panneau admin) : chaque usage a sa propre icône ════════════ */
+let ICONS = {}; // icônes personnalisées : { "slot:faction-marine": lien, "berry": lien… }
+let iconKey = null;
 function renderIcons() {
   if (!tools()) return;
-  const rows = [
-    { key: 'berry', label: 'Symbole Berry (devant les montants)', prev: '<span class="b big-b"></span>' },
-    ...Object.entries(PIC_USES).map(([k, l]) => ({ key: `pic:${k}`, label: l, prev: pic(k) })),
-    ...Object.keys(ICONMAP).filter((id) => iconShowAll || ICON_USES[id] || ICONS[`ico:${id}`]).map((id) => ({ key: `ico:${id}`, label: ICON_USES[id] || `Icône n° ${id} (inutilisée)`, prev: ico(+id) })),
-  ];
+  const rows = [['berry', 'Divers', 'Symbole Berry (devant les montants)', '<span class="b big-b"></span>'],
+    ...Object.entries(ICON_SLOTS).map(([k, [group, label]]) => [`slot:${k}`, group, label, icon(k)])];
+  const groups = [...new Set(rows.map((r) => r[1]))];
+  const card = ([key, , label, prev]) => `
+      <div class="icon-card ${ICONS[key] ? 'custom' : ''}">
+        <span class="icon-prev">${prev}</span>
+        <span class="icon-lbl"><b>${esc(label)}</b><small>${ICONS[key] ? '✓ Personnalisée' : 'Par défaut'}</small></span>
+        <span class="icon-acts">
+          <button class="btn sm" data-icon-file="${esc(key)}">Fichier</button>
+          <button class="btn sm ghost" data-icon-link="${esc(key)}">Lien</button>
+          ${ICONS[key] ? `<button class="btn sm ghost" data-icon-reset="${esc(key)}">Par défaut</button>` : ''}
+        </span>
+      </div>`;
   $('v-aicons').innerHTML = `
     <div class="sec-head">
-      <div><h2>Icônes</h2><p class="lede" style="margin:0">Remplace n’importe quelle icône de l’app par ta propre image. Le changement s’applique à tout le monde. Conseil : une image carrée, fond transparent (PNG).</p></div>
-      <label class="chk"><input type="checkbox" id="icons-all" ${iconShowAll ? 'checked' : ''}> Afficher aussi les icônes inutilisées</label>
+      <div><h2>Icônes</h2><p class="lede" style="margin:0">Chaque usage a sa propre icône : en changer une ne touche pas les autres. Le changement s’applique à tout le monde. Conseil : une image carrée, fond transparent (PNG).</p></div>
     </div>
-    <div class="icon-grid">${rows.map((r) => `
-      <div class="icon-card ${ICONS[r.key] ? 'custom' : ''}">
-        <span class="icon-prev">${r.prev}</span>
-        <span class="icon-lbl"><b>${esc(r.label)}</b><small>${ICONS[r.key] ? '✓ Personnalisée' : 'Par défaut'}</small></span>
-        <span class="icon-acts">
-          <button class="btn sm" data-icon-file="${esc(r.key)}">Fichier</button>
-          <button class="btn sm ghost" data-icon-link="${esc(r.key)}">Lien</button>
-          ${ICONS[r.key] ? `<button class="btn sm ghost" data-icon-reset="${esc(r.key)}">Par défaut</button>` : ''}
-        </span>
-      </div>`).join('')}</div>`;
+    ${groups.map((g) => `<h3 class="ed-h">${esc(g)}</h3><div class="icon-grid">${rows.filter((r) => r[1] === g).map(card).join('')}</div>`).join('')}`;
   paintStatic($('v-aicons'));
 }
 async function iconSet(key, img) {
@@ -2730,12 +2715,6 @@ async function iconSet(key, img) {
     setBusy(-1);
   }
 }
-$('v-aicons').addEventListener('change', (e) => {
-  if (e.target.id === 'icons-all') {
-    iconShowAll = e.target.checked;
-    renderIcons();
-  }
-});
 $('v-aicons').addEventListener('click', async (e) => {
   const f = e.target.closest('[data-icon-file]')?.dataset.iconFile;
   if (f) {
@@ -3387,7 +3366,7 @@ function openItemEdit(id = null) {
   openDialog('d-item');
 }
 function showItemImg() {
-  $('it-preview').innerHTML = itemDraft.img ? `<img src="${imgSrc(itemDraft.img)}" alt="">` : ico(KIND_ICON[$('it-kind').value] ?? 237);
+  $('it-preview').innerHTML = itemDraft.img ? `<img src="${imgSrc(itemDraft.img)}" alt="">` : icon(`objet-${$('it-kind').value}`);
   $('it-noimg').hidden = !itemDraft.img;
 }
 /** Champs propres à la catégorie : pour un bateau, le nom est le type et il n'y a pas de poids. */

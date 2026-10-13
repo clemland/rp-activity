@@ -76,7 +76,7 @@ export default handler(['POST'], async (req, body) => {
     case 'icons.set': {
       // Icône de l'app remplacée par une image (ou remise par défaut si img est vide)
       const key = String(body.key || '');
-      need(/^(ico:\d{1,4}|pic:[a-z_]{1,30}|berry)$/.test(key), 400, 'Icône inconnue.');
+      need(/^(ico:\d{1,4}|pic:[a-z_]{1,30}|slot:[a-z0-9-]{1,40}|berry)$/.test(key), 400, 'Icône inconnue.');
       const url = body.img ? await ingest(body.img, 'icones', key.replace(/\W/g, '-')) : null;
       return retry(async () => {
         const row = await read('meta', 'icons');

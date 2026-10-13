@@ -77,7 +77,7 @@ async function toImgbb(input, name) {
 export async function ingest(input, folder, owner) {
   if (!input) return null;
   if (typeof input !== 'string') throw new HttpError(400, 'Image invalide.');
-  if (input.startsWith('/media/') || IBB.test(input)) return input;
+  if (input.startsWith('/media/') || input.startsWith('/icons/') || IBB.test(input)) return input;
   if (env.imgbbKey) return toImgbb(input, `${folder}-${owner}-${Date.now().toString(36)}`);
   const { buf, type } = input.startsWith('data:') ? fromDataUrl(input) : await fromUrl(input);
   const path = `${folder}/${owner}-${Date.now().toString(36)}.${TYPES[type]}`;

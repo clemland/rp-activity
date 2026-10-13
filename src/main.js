@@ -19,8 +19,9 @@ import { mediaSrc } from './discord.js';
 const imgSrc = (u) => esc(mediaSrc(u));
 import {
   $, ico, pic, glyph, paintStatic, berry, esc, stars, fmt, calm, replay, countTo, floatText, fillGauges, toast,
-  openDialog, closeDialog, readAsDataUrl, readImage, askConfirm, askText,
+  openDialog, closeDialog, readAsDataUrl, readImage, askConfirm, askText, setIcons,
 } from './ui.js';
+import { ICONMAP } from './icons.js';
 
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
 const itemOf = (k) => G.itemOf(k);
@@ -2673,6 +2674,92 @@ $('v-atech').addEventListener('click', async (e) => {
   }
   loadPendingTechs();
 });
+
+/* ═══ Icônes (panneau admin) : remplacer les icônes de l'app ═════════════ */
+let ICONS = {}; // icônes personnalisées : { "ico:265": lien, "pic:hammer": lien, "berry": lien }
+let iconShowAll = false, iconKey = null;
+/** Où chaque icône est utilisée (celles qui ne sont pas listées ne servent nulle part pour l'instant). */
+const ICON_USES = {
+  1: 'Faction Pirate, Équipage, Jolly Roger par défaut', 12: 'Haki de l’observation', 13: 'Haki de l’armement', 14: 'Haki des rois',
+  96: 'Faction Révolutionnaire, Statistiques', 121: 'Ma fiche, Faction Civil, Race', 125: 'Étoile pleine, écran Joueurs', 126: 'Étoile vide',
+  128: 'Classe Fighter', 131: 'Techniques', 147: 'Classe Sabreur, Arme', 153: 'Classe Tireur, Chasseur de primes', 160: 'Faction Marine, Escouade',
+  188: 'Navigation', 192: 'Consommable', 206: 'Île sans image', 231: 'Carte, Bateau', 233: 'Pas encore de fiche', 237: 'Objet, écran Icônes',
+  261: 'Bourse', 265: 'Boutique', 266: 'Amélioration de bateau', 270: 'Inventaire, Trésor, Gestion', 279: 'Métier', 331: 'Matériau',
+};
+const PIC_USES = {
+  st_swords: 'Stat Force', st_leg: 'Stat Rapidité', st_shield: 'Stat Résistance', st_sparkle: 'Stat Technique', st_angry: 'Volonté',
+  fruit: 'Fruit du démon', compass: 'Métier Navigateur', tmap: 'Métier Archéologue', hammer: 'Métier Charpentier',
+  potion: 'Métier Scientifique', stetho: 'Métier Médecin', sabre: 'Sabre',
+};
+function renderIcons() {
+  if (!tools()) return;
+  const rows = [
+    { key: 'berry', label: 'Symbole Berry (devant les montants)', prev: '<span class="b big-b"></span>' },
+    ...Object.entries(PIC_USES).map(([k, l]) => ({ key: `pic:${k}`, label: l, prev: pic(k) })),
+    ...Object.keys(ICONMAP).filter((id) => iconShowAll || ICON_USES[id] || ICONS[`ico:${id}`]).map((id) => ({ key: `ico:${id}`, label: ICON_USES[id] || `Icône n° ${id} (inutilisée)`, prev: ico(+id) })),
+  ];
+  $('v-aicons').innerHTML = `
+    <div class="sec-head">
+      <div><h2>Icônes</h2><p class="lede" style="margin:0">Remplace n’importe quelle icône de l’app par ta propre image. Le changement s’applique à tout le monde. Conseil : une image carrée, fond transparent (PNG).</p></div>
+      <label class="chk"><input type="checkbox" id="icons-all" ${iconShowAll ? 'checked' : ''}> Afficher aussi les icônes inutilisées</label>
+    </div>
+    <div class="icon-grid">${rows.map((r) => `
+      <div class="icon-card ${ICONS[r.key] ? 'custom' : ''}">
+        <span class="icon-prev">${r.prev}</span>
+        <span class="icon-lbl"><b>${esc(r.label)}</b><small>${ICONS[r.key] ? '✓ Personnalisée' : 'Par défaut'}</small></span>
+        <span class="icon-acts">
+          <button class="btn sm" data-icon-file="${esc(r.key)}">Fichier</button>
+          <button class="btn sm ghost" data-icon-link="${esc(r.key)}">Lien</button>
+          ${ICONS[r.key] ? `<button class="btn sm ghost" data-icon-reset="${esc(r.key)}">Par défaut</button>` : ''}
+        </span>
+      </div>`).join('')}</div>`;
+  paintStatic($('v-aicons'));
+}
+async function iconSet(key, img) {
+  setBusy(1);
+  try {
+    const out = await API.staff('icons.set', { key, img });
+    ICONS = out.icons || {};
+    setIcons(ICONS, mediaSrc);
+    renderAll();
+    renderIcons();
+    toast(esc(out.toast));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+}
+$('v-aicons').addEventListener('change', (e) => {
+  if (e.target.id === 'icons-all') {
+    iconShowAll = e.target.checked;
+    renderIcons();
+  }
+});
+$('v-aicons').addEventListener('click', async (e) => {
+  const f = e.target.closest('[data-icon-file]')?.dataset.iconFile;
+  if (f) {
+    iconKey = f;
+    return $('icon-file').click();
+  }
+  const l = e.target.closest('[data-icon-link]')?.dataset.iconLink;
+  if (l) {
+    const v = await askText('Colle le lien de l’image.', { title: 'Nouvelle icône', ok: 'Utiliser', placeholder: 'https://…', max: 2000 });
+    if (!v) return;
+    if (!/^https?:\/\//.test(v)) return toast('Le lien doit commencer par http:// ou https://');
+    return void iconSet(l, v);
+  }
+  const r = e.target.closest('[data-icon-reset]')?.dataset.iconReset;
+  if (r) iconSet(r, null);
+});
+$('icon-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file?.type.startsWith('image/') || !iconKey) return;
+  if (file.size > 20 * 1024 * 1024) return toast('Image trop lourde (20 Mo maximum).');
+  iconSet(iconKey, await readImage(file, { max: 256 }));
+});
+
 /* ═══ Carte du monde ═════════════════════════════════════════════════════ */
 let MAP = null; // carte vue par le joueur (îles visibles, île où il est, trajets depuis là)
 const LABEL_ZOOM = 1.8; // en dessous, les noms des îles sont cachés (sauf l'île choisie)

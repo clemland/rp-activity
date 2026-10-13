@@ -73,7 +73,20 @@ export default handler(['POST'], async (req, body) => {
       console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
-
+    case 'icons.set': {
+      // Icône de l'app remplacée par une image (ou remise par défaut si img est vide)
+      const key = String(body.key || '');
+      need(/^(ico:\d{1,4}|pic:[a-z_]{1,30}|berry)$/.test(key), 400, 'Icône inconnue.');
+      const url = body.img ? await ingest(body.img, 'icones', key.replace(/\W/g, '-')) : null;
+      return retry(async () => {
+        const row = await read('meta', 'icons');
+        const icons = { ...(row?.data || {}) };
+        if (url) icons[key] = url;
+        else delete icons[key];
+        await write('meta', 'icons', icons, row?.version ?? null);
+        return { icons, toast: url ? 'Icône changée pour tout le monde' : 'Icône remise par défaut' };
+      });
+    }
         case 'techniques': {
       // Toutes les techniques en attente de validation, tous joueurs confondus
       const list = [];
@@ -83,7 +96,7 @@ export default handler(['POST'], async (req, body) => {
       list.sort((a, b) => (a.tech.id || 0) - (b.tech.id || 0));
       return { list };
     }
-    
+
     case 'crews':
       return { crews: await readAll('crews'), ships: await readAll('ships') };
 

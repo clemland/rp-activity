@@ -26,6 +26,7 @@
     <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
     <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
     <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
+        <button class="scr" role="tab" data-screen="aicons" aria-controls="s-aicons" id="scr-aicons" hidden><span class="ico" data-i="237"></span><span>Icônes</span></button>
   </div>
   <div class="wallet-chips">
     <span class="chip purse" title="Ta bourse"><span class="ico" data-i="261"></span><span class="money" id="purse"></span></span>
@@ -127,6 +128,11 @@
 
 <main class="screen" id="s-gest" role="tabpanel" hidden>
   <section class="sheet" id="v-gest"></section>
+</main>
+
+<main class="screen" id="s-aicons" role="tabpanel" hidden>
+  <section class="sheet" id="v-aicons"></section>
+  <input type="file" id="icon-file" accept="image/*" hidden>
 </main>
 
 <footer>

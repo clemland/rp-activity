@@ -100,6 +100,7 @@ function demoHarbor() {
   return { harbor, aboard, requests, names, crewNames };
 }
 const demoState = () => ({
+  icons: structuredClone(store.icons || {}),
   map: G.mapFor(store.map, store.player),
   nav: demoHarbor(),
   ...demoCrewShips(),
@@ -327,6 +328,13 @@ export async function staff(op, payload = {}) {
       store.map = G.normalizeMap(m);
       saveStore();
       return { map: structuredClone(store.map), id, toast };
+    }
+        if (op === 'icons.set') {
+      store.icons ??= {};
+      if (payload.img) store.icons[payload.key] = payload.img;
+      else delete store.icons[payload.key];
+      saveStore();
+      return { icons: structuredClone(store.icons), toast: payload.img ? 'Icône changée' : 'Icône remise par défaut' };
     }
     if (op === 'shops') return { shops: structuredClone(Object.fromEntries(Object.entries(store.shops).filter(([, v]) => v))) };
     if (op === 'shop.save') {

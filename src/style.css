@@ -1313,3 +1313,15 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ship-tag.main{background:var(--gold)}
 .ship-tag.mine{background:#e9f7ea}
 .ed-h.first{margin-top:0;border:none;padding-top:0}
+
+
+/* ═══ v40 : icônes personnalisables ═══ */
+.b{-webkit-mask-image:var(--berry-img,url(/assets/berry.png));mask-image:var(--berry-img,url(/assets/berry.png))}
+.big-b{font-size:34px;color:var(--brown)}
+.icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-top:14px}
+.icon-card{display:grid;grid-template-columns:64px 1fr;grid-template-rows:auto auto;gap:4px 12px;align-items:center;border:2px solid var(--ink);border-radius:8px;background:#fbf0d2;padding:8px 10px}
+.icon-card.custom{background:#e9f7ea}
+.icon-prev{grid-row:span 2;width:64px;height:64px;display:grid;place-items:center;background:#fffaea;border:2px dashed rgba(23,37,94,.35)}
+.icon-prev .ico{--s:48px}
+.icon-lbl small{display:block;color:var(--muted);font-size:12px}
+.icon-acts{display:flex;gap:6px;flex-wrap:wrap}

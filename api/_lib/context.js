@@ -61,7 +61,7 @@ export async function loadCrewAndShips(player) {
       out.crewVersion = row.version;
       const uids = [...out.crew.members, ...out.crew.invites.map((i) => i.uid)];
       const members = await readMany('players', uids);
-      for (const uid of uids) out.memberNames[uid] = members[uid] ? fullName(members[uid].data) : 'Fiche supprimée';
+      for (const uid of uids) out.memberNames[uid] = members[uid] ? fullName(members[uid].data) : out.crew.npcs?.[uid]?.name ?? 'Fiche supprimée';
     }
   }
   const { data, error } = await shipsQuery;

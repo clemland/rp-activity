@@ -1633,7 +1633,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, atech: tools(), amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, atech: tools(), aicons: tools(), amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -3591,7 +3591,7 @@ function showScreen(name) {
       fillGauges(el);
     }
   });
-  if (name === 'atech') loadPendingTechs();
+  if (name === 'aicons') renderIcons();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();
@@ -3622,6 +3622,12 @@ async function refresh() {
   try {
     const st = await API.state();
     G.setCatalog(st.catalog);
+    // Icônes changées par le staff entre-temps : on les applique
+    if (JSON.stringify(st.icons || {}) !== JSON.stringify(ICONS)) {
+      ICONS = st.icons || {};
+      setIcons(ICONS, mediaSrc);
+      renderAll();
+    }
     if (st.openDenied) toast(OPEN_DENIED);
     if (st.open && ME.staff) return void (await enterAdmin(st.open));
     if (ADMIN) return;
@@ -3660,6 +3666,8 @@ document.addEventListener('dragstart', (e) => {
   try {
     st = await API.boot();
     G.setCatalog(st.catalog);
+    ICONS = st.icons || {};
+    setIcons(ICONS, mediaSrc);
     ME = st.me;
     S = st.player;
     SHOP = st.shop;

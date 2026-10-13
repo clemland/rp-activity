@@ -54,5 +54,6 @@ export default handler(['GET'], async (req) => {
     invites: found ? await invitesFor(target) : [],
     nav: found ? await loadHarbor(found.player, cs.crew, channel) : null,
     map: mapFor((await loadMap()).map, found?.player ?? null), ...info,
+    icons: (await read('meta', 'icons'))?.data || {},
   };
 });

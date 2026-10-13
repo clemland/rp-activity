@@ -12,12 +12,30 @@ const pos = (id) => {
   const k = ICONMAP[id] ?? 0;
   return `calc(var(--s) * -${k % COLS}) calc(var(--s) * -${Math.floor(k / COLS)})`;
 };
-export const ico = (id) => `<span class="ico" aria-hidden="true" style="background-position:${pos(id)}"></span>`;
-export const pic = (key) => `<span class="ico pic pic-${key}" aria-hidden="true"></span>`;
+/* Icônes personnalisées par le staff : { "ico:265": lien, "pic:hammer": lien, "berry": lien } */
+let OVR = {};
+let srcOf = (u) => u;
+export function setIcons(map = {}, toSrc) {
+  OVR = map || {};
+  if (toSrc) srcOf = toSrc;
+  document.documentElement.style.setProperty('--berry-img', OVR.berry ? `url("${srcOf(OVR.berry)}")` : 'url(/assets/berry.png)');
+}
+const custom = (key) => (OVR[key] ? `<span class="ico item-img" aria-hidden="true"><img src="${esc(srcOf(OVR[key]))}" alt="" draggable="false"></span>` : null);
+export const ico = (id) => custom(`ico:${id}`) ?? `<span class="ico" aria-hidden="true" style="background-position:${pos(id)}"></span>`;
+export const pic = (key) => custom(`pic:${key}`) ?? `<span class="ico pic pic-${key}" aria-hidden="true"></span>`;
 export const glyph = (g) => (typeof g === 'string' ? (g.startsWith('<') ? g : pic(g)) : ico(g));
 export const paintStatic = (root = document) =>
   root.querySelectorAll('.ico[data-i]').forEach((el) => {
-    el.style.backgroundPosition = pos(el.dataset.i);
+    const url = OVR[`ico:${el.dataset.i}`];
+    if (url) {
+      el.classList.add('item-img');
+      el.style.backgroundPosition = '';
+      el.innerHTML = `<img src="${esc(srcOf(url))}" alt="" draggable="false">`;
+    } else {
+      el.classList.remove('item-img');
+      el.innerHTML = '';
+      el.style.backgroundPosition = pos(el.dataset.i);
+    }
   });
 export const berry = (n) => `<span class="b" role="img" aria-label="berrys"></span>${fmt(n)}`;
 export const esc = (s) =>

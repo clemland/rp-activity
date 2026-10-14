@@ -1354,3 +1354,7 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .hp-lvl-3{color:#c7352c}
 .hp-lvl-4{color:#8e130d}
 .health-row input{flex:1 1 160px;min-width:0}
+
+
+/* ═══ v43 : images lissées (seule la planche d'icônes d'origine reste en pixel art) ═══ */
+img,.ico.item-img,.ico.pic{image-rendering:auto}

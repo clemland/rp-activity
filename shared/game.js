@@ -1615,7 +1615,28 @@ export function islandOf(map, position) {
  * ({ value, via: noms des îles visibles traversées }) ou null s'il n'y a pas de route.
  * Le staff voit tout.
  */
-export function mapFor(map0, player, { staff = false } = {}) {
+/** Position du bateau en mer sur la carte : le long de la route, selon la progression du voyage. */
+export function voyageTrack(map, v) {
+  const t = travelTime(map, v.from, v.to);
+  const pts = (t?.path || [v.from, v.to]).map((id) => map.islands[id]).filter(Boolean).map((i) => ({ x: i.x, y: i.y }));
+  if (pts.length < 2) return null;
+  const f = v.status === 'arrived' ? 1 : Math.min(1, v.done / Math.max(1, v.needed));
+  const seg = [];
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i].x - pts[i - 1].x, (pts[i].y - pts[i - 1].y) * map.ratio);
+    seg.push(d);
+    total += d;
+  }
+  let goal = total * f, i = 0;
+  while (i < seg.length - 1 && goal > seg[i]) {
+    goal -= seg[i];
+    i++;
+  }
+  const k = seg[i] ? goal / seg[i] : 1, A = pts[i], B = pts[i + 1];
+  return { x: A.x + (B.x - A.x) * k, y: A.y + (B.y - A.y) * k };
+}
+export function mapFor(map0, player, { staff = false, aboard = null } = {}) {
   const map = normalizeMap(clone(map0));
   const here = islandOf(map, player?.position);
   if (staff) return { ...map, here };
@@ -1629,7 +1650,13 @@ export function mapFor(map0, player, { staff = false } = {}) {
       travel[id] = t ? { value: t.value, via: t.path.slice(1, -1).filter((s) => islands[s]).map((s) => islands[s].name) } : null;
     }
   }
-  return { bg: map.bg, ratio: map.ratio, islands, here, travel, pace: map.pace };
+  // En mer : le bateau du joueur avance sur la carte (seulement sa position, pas le tracé de la route)
+  const v = aboard?.voyage && aboard.voyage.status !== 'vote' ? aboard.voyage : null;
+  const pt = v ? voyageTrack(map, v) : null;
+  return {
+    bg: map.bg, ratio: map.ratio, islands, here: pt ? null : here, travel, pace: map.pace,
+    voyage: pt ? { x: pt.x, y: pt.y, ship: aboard.name, to: v.to, toName: v.toName, done: v.done, needed: v.needed, status: v.status } : null,
+  };
 }
 
 /* ═══ Mode démo (hors Discord) ═══════════════════════════════════════════ */

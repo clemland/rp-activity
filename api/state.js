@@ -49,12 +49,13 @@ export default handler(['GET'], async (req) => {
   const { shop } = await loadShop(channel);
   const info = { channelId: channel, channelName: pos?.name || '', position: pos };
   const cs = found ? await loadCrewAndShips(found.player) : null;
+  const nav = found ? await loadHarbor(found.player, cs.crew, channel) : null;
   return {
     me: { uid: me.uid, name: me.name, staff, perms }, player: found?.player ?? null, shop, catalog, open, openDenied, salary,
     crew: cs ? publicCrew(cs.crew, cs.memberNames) : null, ships: cs ? shipList(cs.ships) : [],
     invites: found ? await invitesFor(target) : [],
-    nav: found ? await loadHarbor(found.player, cs.crew, channel) : null,
-    map: mapFor((await loadMap()).map, found?.player ?? null), ...info,
+    nav,
+    map: mapFor((await loadMap()).map, found?.player ?? null, { aboard: nav?.aboard }), ...info,
     icons: (await read('meta', 'icons'))?.data || {},
   };
 });

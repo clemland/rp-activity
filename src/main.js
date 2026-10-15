@@ -3253,7 +3253,7 @@ const viewState = {}; // zoom et position de chaque carte, gardés entre deux af
  * Visionneuse de carte : zoom (molette, pincement, boutons) et déplacement
  * (glisser). En mode édition : on fait glisser les îles, on voit les routes.
  */
-function mapViewer(root, map, { editable = false, placing = false, here = null, selected = null, linkFrom = null, showLinks = false, onIsland, onBlank, onPlace, onRatio, onLink } = {}) {
+function mapViewer(root, map, { boat = null, editable = false, placing = false, here = null, selected = null, linkFrom = null, showLinks = false, onIsland, onBlank, onPlace, onRatio, onLink } = {}) {
   let ratio = map.ratio || 0.5625;
   // La carte garde ses proportions (la largeur maximale est réglée dans le CSS).
   const size = (r) => `--r:${r};aspect-ratio:${1 / r}`;
@@ -3295,6 +3295,7 @@ function mapViewer(root, map, { editable = false, placing = false, here = null, 
         ${Object.entries(nodes).map(islandBtn).join('')}
         ${arrowsHtml}
         <div class="isl-labels">${labelsHtml}</div>
+        ${boat ? `<div class="boat-mark" style="left:${boat.x}%;top:${boat.y}%" aria-label="${esc(boat.ship)} en mer"><span class="boat-ico">⛵</span><span class="boat-lbl">${esc(boat.ship)} · ${boat.done}/${boat.needed}</span></div>` : ''}
       </div>
       <div class="map-ctl"><button class="sq" data-z="full" aria-label="Plein écran">⛶</button><button class="sq" data-z="1" aria-label="Zoomer">+</button><button class="sq" data-z="-1" aria-label="Dézoomer">−</button><button class="sq" data-z="0" aria-label="Recentrer">⟲</button></div>
     </div>`;
@@ -3475,14 +3476,14 @@ function renderMap() {
     : t ? ` · Trajet depuis ton île : <b>${t.value}</b>${t.via?.length ? ` (via ${t.via.map(esc).join(', ')})` : ''}`
     : ' · Aucune route connue depuis ton île';
   el.innerHTML = `
-    <div class="sec-head"><div><h2>Carte du monde</h2><p class="lede" style="margin:0">${m.here ? `Tu es sur <b>${esc(m.islands[m.here].name)}</b>.` : 'Ta position n’est sur aucune île de la carte.'} Zoome avec la molette ou deux doigts, fais glisser pour te déplacer.</p></div></div>
+    <div class="sec-head"><div><h2>Carte du monde</h2><p class="lede" style="margin:0">${m.voyage ? `⛵ En mer à bord de <b>${esc(m.voyage.ship)}</b>, vers <b>${esc(m.voyage.toName)}</b> (${m.voyage.done}/${m.voyage.needed}).` : m.here ? `Tu es sur <b>${esc(m.islands[m.here].name)}</b>.` : 'Ta position n’est sur aucune île de la carte.'} Zoome avec la molette ou deux doigts, fais glisser pour te déplacer.</p></div></div>
     <div id="map-player"></div>
     <div class="isl-info" id="isl-info">${isl ? `
       <div class="isl-head">${isl.img ? `<img src="${imgSrc(isl.img)}" alt="">` : ''}<div><h3>${esc(isl.name)}</h3>
         <p class="note" style="margin:0">${mapSel === m.here ? '📍 Tu es ici · ' : ''}${isl.accessible ? 'Accessible' : '⛔ Inaccessible'}${trip}</p></div></div>
       ${isl.desc ? `<p>${esc(isl.desc)}</p>` : ''}
       ${isl.channels.length ? `<div class="pax">${isl.channels.map((c) => `<span>${c.kind === 'forum' ? '🗂️' : '#'} ${esc(c.name)}</span>`).join('')}</div>` : ''}` : '<p class="note" style="margin:0">Clique sur une île pour en savoir plus.</p>'}</div>`;
-  mapViewer($('map-player'), m, { here: m.here, selected: mapSel, onIsland: (id) => ((mapSel = id), renderMap()) });
+  mapViewer($('map-player'), m, { boat: m.voyage, here: m.here, selected: mapSel, onIsland: (id) => ((mapSel = id), renderMap()) });
 }
 
 /* Éditeur du staff */
@@ -4136,6 +4137,7 @@ async function refresh() {
     MAP = st.map || null;
     if (screen === 'crew' && !document.activeElement?.closest('#v-crew')) renderCrew();
     if (screen === 'nav') renderNav();
+    if (screen === 'map') renderMap(); // le bateau avance pendant qu'on regarde la carte
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
     renderHero();
     renderMjTab();

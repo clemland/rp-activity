@@ -373,6 +373,17 @@ export default handler(['POST'], async (req, body) => {
           channels.push({ id, name: ch.name, kind: ch.forum ? 'forum' : 'salon' });
         }
       }
+      // Les salons d'une île deviennent des salons RP (un forum : chacun de ses posts compte)
+      if (channels?.length) {
+        await retry(async () => {
+          const row = await read('meta', 'rp:channels');
+          const list = row?.data.list || [];
+          const missing = channels.filter((c) => !list.some((x) => x.id === c.id));
+          if (!missing.length) return;
+          const added = missing.map((c) => ({ id: c.id, name: c.name, kind: c.kind, by: me.uid, at: Date.now() }));
+          await write('meta', 'rp:channels', { list: [...list, ...added] }, row?.version ?? null);
+        });
+      }
       return retry(async () => {
         const { map, version } = await loadMap();
         let toast = 'Carte mise à jour', id = body.id;

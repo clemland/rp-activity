@@ -133,6 +133,8 @@ export default handler(['POST'], async (req, body) => {
     if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
       const row = await read('ships', String(action.shipId || ''));
       need(row, 404, 'Bateau introuvable.');
+      // Port dans un post de forum (anciens bateaux) : on retrouve le forum grâce à la position du joueur, au même endroit
+      if (row.data.position && !row.data.position.parentId && player.position?.channelId === row.data.position.channelId) row.data.position.parentId = player.position.parentId || null;
       const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now(), map: action.type.startsWith('ship.voyage') ? (await loadMap()).map : null });
       await write('ships', action.shipId, out.ship, row.version);
       // On n'est à bord que d'un bateau à la fois : on descend des autres.

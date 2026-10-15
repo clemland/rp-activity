@@ -15,12 +15,12 @@
  *  - recipe.save { id?, recipe } / recipe.delete { id }  : recettes de fabrication
  */
 import { handler, need } from './_lib/http.js';
-import { userFromRequest, isStaff, channelById } from './_lib/discord.js';
+import { userFromRequest, staffPerms, guildRoles, clearPermsCache, channelById } from './_lib/discord.js';
 import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
-import { normalizeLoot, isNpc, fullName, normalizeIsland, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import { STAFF_PERMS, staffCan, normalizeLoot, isNpc, fullName, normalizeIsland, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -31,7 +31,27 @@ function freeId(base, taken) {
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
-  need(await isStaff(me.uid), 403, 'Réservé au staff.');
+  const perms = await staffPerms(me.uid);
+  need(perms.length, 403, 'Réservé au staff.');
+  // Permission nécessaire selon l'opération (les listes en lecture seule sont ouvertes à tout le staff)
+  const op = String(body.op || '');
+  const gradeOnly = body.action?.type === 'edit' && Object.keys(body.action.patch || {}).join() === 'id' && Object.keys(body.action.patch.id || {}).join() === 'grade';
+  const required =
+    ['players', 'shops', 'crews', 'ships', 'map.get'].includes(op) ? null
+    : op === 'act' ? (body.action?.type === 'tech.validate' ? ['techniques', 'joueurs'] : gradeOnly ? ['joueurs', 'marine'] : ['joueurs'])
+    : op === 'bulk' ? ['joueurs']
+    : op === 'techniques' ? ['techniques']
+    : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
+    : op.startsWith('crew.') ? ['equipages', 'marine']
+    : op.startsWith('ship.') ? ['equipages']
+    : op.startsWith('map.') ? ['carte']
+    : op.startsWith('shop.') ? ['boutiques']
+    : op.startsWith('item.') || op.startsWith('recipe.') ? ['gestion']
+    : op.startsWith('loot.') ? ['butins']
+    : op.startsWith('icons.') ? ['icones']
+    : op.startsWith('perms.') ? ['permissions']
+    : null;
+  need(!required || required.some((p) => staffCan(perms, p)), 403, `Ton rôle ne permet pas ça (permission « ${STAFF_PERMS[required?.[0]] ?? '?'} »).`);
   const catalog = await loadCatalog({ fresh: true });
 
   switch (body.op) {
@@ -73,6 +93,30 @@ export default handler(['POST'], async (req, body) => {
       console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
+    case 'perms.get': {
+      const roles = (await guildRoles())
+        .filter((r) => r.id !== env.guildId && !r.managed) // pas @everyone ni les rôles des bots
+        .sort((a, b) => b.position - a.position)
+        .map((r) => ({ id: r.id, name: r.name, color: r.color, admin: (BigInt(r.permissions) & 0x8n) === 0x8n, staff: env.staffRoles.includes(r.id) }));
+      return { roles, perms: (await read('meta', 'staff:perms'))?.data || {} };
+    }
+
+    case 'perms.set': {
+      const roleId = String(body.roleId || '');
+      need(/^\d{5,25}$/.test(roleId), 400, 'Rôle invalide.');
+      const list = (Array.isArray(body.perms) ? body.perms : []).filter((p) => STAFF_PERMS[p]);
+      const data = await retry(async () => {
+        const row = await read('meta', 'staff:perms');
+        const next = { ...(row?.data || {}) };
+        if (list.length) next[roleId] = list;
+        else delete next[roleId];
+        await write('meta', 'staff:perms', next, row?.version ?? null);
+        return next;
+      });
+      clearPermsCache();
+      return { perms: data, toast: 'Permissions enregistrées' };
+    }
+
     case 'loot.get':
       return { loot: normalizeLoot((await read('meta', 'loot'))?.data || {}) };
 

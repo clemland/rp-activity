@@ -12,6 +12,7 @@
  */
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
+import { staffPerms } from './_lib/discord.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
 import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf } from '../shared/game.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
@@ -81,6 +82,11 @@ export default handler(['POST'], async (req, body) => {
       if (body.by) console.log(`[staff] ${body.by} a supprimé la fiche de ${body.userId} (${fullName(row.data)})`);
       return { name: fullName(row.data) };
     }
+
+    case 'perms':
+      // Permissions staff d'un membre, pour les commandes du bot
+      need(body.userId, 400, 'Membre manquant.');
+      return { perms: await staffPerms(String(body.userId)) };
 
     case 'rp.channels':
       return { channels: (await rpChannels()).list };

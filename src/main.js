@@ -43,6 +43,8 @@ let SHIPS = []; // ses bateaux et ceux de son équipage
 let NAVD = null; // port du salon : bateaux à quai, bateau à bord, demandes d'embarquement
 let ADMIN = false; // panneau admin (/panel admin, /edit profil) ; /profil = vue joueur pure, même pour le staff
 const tools = () => ADMIN && !!ME?.staff;
+/** Permission staff de ce membre (écran Permissions) ; les admins et STAFF_ROLE_IDS ont tout. */
+const staffCan = (p) => G.staffCan(ME?.perms, p);
 let VIEW = null; // uid d'un autre joueur ouvert par le staff (lecture seule pour lui)
 const shown = {};
 const fullName = () => G.fullName(S);
@@ -1681,8 +1683,18 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
+/** Premier écran du panneau admin que ce membre du staff a le droit de voir. */
+function firstStaffScreen() {
+  return scrBtns.find((b) => !b.hidden && b.dataset.screen !== 'fiche')?.dataset.screen || 'admin';
+}
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, atech: tools(), aicons: tools(), aloot: tools(), amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
+  const vis = {
+    fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN,
+    admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
+    amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
+    fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && staffCan('icones'), aperms: tools() && staffCan('permissions'),
+  };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -1847,13 +1859,13 @@ async function enterAdmin({ target = null } = {}) {
   VIEW = null;
   S = null;
   updateNav();
-  showScreen('admin');
+  showScreen(firstStaffScreen());
   renderAll();
   renderAdminHome();
   loadPlayers();
   loadAdminShops();
   loadFleet();
-  loadPendingTechs();
+  if (staffCan('techniques')) loadPendingTechs();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 
@@ -2734,6 +2746,57 @@ $('v-atech').addEventListener('click', async (e) => {
     setBusy(-1);
   }
   loadPendingTechs();
+});
+
+/* ═══ Permissions (panneau admin) : ce que chaque rôle Discord peut faire ═ */
+let permsData = null; // { roles, perms: { roleId: [permissions] } }
+async function loadPerms() {
+  try {
+    permsData = await API.staff('perms.get');
+  } catch (err) {
+    permsData = { roles: [], perms: {} };
+    toast(esc(err.message));
+  }
+  renderPerms();
+}
+function renderPerms() {
+  if (!tools()) return;
+  const el = $('v-aperms');
+  if (!permsData) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const color = (c) => (c ? `#${c.toString(16).padStart(6, '0')}` : 'var(--muted)');
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Permissions</h2><p class="lede" style="margin:0">Coche ce que chaque rôle Discord peut faire dans le panneau admin et avec les commandes du bot. Les administrateurs du serveur, les rôles de STAFF_ROLE_IDS et les propriétaires du bot ont toujours tout.</p></div>
+      <button class="btn ghost" id="perms-reload">Actualiser</button>
+    </div>
+    ${permsData.roles.length ? `<div class="perm-roles">${permsData.roles.map((r) => {
+      const full = r.admin || r.staff;
+      const mine = permsData.perms[r.id] || [];
+      return `<details class="perm-role" ${mine.length ? 'open' : ''}>
+        <summary><span class="perm-dot" style="background:${color(r.color)}"></span><b>${esc(r.name)}</b><small class="note">${full ? (r.admin ? 'Administrateur : tout' : 'STAFF_ROLE_IDS : tout') : mine.length ? `${mine.length} permission${mine.length > 1 ? 's' : ''}` : 'Aucune'}</small><span class="chev" aria-hidden="true">▾</span></summary>
+        ${full ? '<p class="note" style="margin:6px 0 0">Ce rôle a déjà toutes les permissions.</p>' : `<div class="perms">${Object.entries(G.STAFF_PERMS).map(([k, l]) => `<label><input type="checkbox" data-perm-role="${esc(r.id)}" data-perm="${k}" ${mine.includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>`}
+      </details>`;
+    }).join('')}</div>` : '<p class="note">Aucun rôle trouvé. Vérifie GUILD_ID et DISCORD_BOT_TOKEN dans Vercel.</p>'}`;
+}
+$('v-aperms').addEventListener('click', (e) => {
+  if (e.target.closest('#perms-reload')) loadPerms();
+});
+$('v-aperms').addEventListener('change', async (e) => {
+  const roleId = e.target.dataset?.permRole;
+  if (!roleId) return;
+  const perms = [...document.querySelectorAll(`#v-aperms [data-perm-role="${CSS.escape(roleId)}"]`)].filter((c) => c.checked).map((c) => c.dataset.perm);
+  setBusy(1);
+  try {
+    const out = await API.staff('perms.set', { roleId, perms });
+    permsData.perms = out.perms;
+    toast(esc(out.toast));
+    renderPerms();
+  } catch (err) {
+    toast(esc(err.message));
+    loadPerms();
+  } finally {
+    setBusy(-1);
+  }
 });
 
 /* ═══ Butins (panneau admin) : exploration ═══════════════════════════════ */
@@ -3810,6 +3873,7 @@ function showScreen(name) {
   });
   if (name === 'aicons') renderIcons();
   if (name === 'aloot') (lootData ? renderLoot() : loadLoot());
+  if (name === 'aperms') loadPerms();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

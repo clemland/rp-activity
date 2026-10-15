@@ -58,6 +58,23 @@ export const CLASSES = ['Fighter', 'Sabreur', 'Tireur'];
 export const FRUIT_TYPES = ['Paramecia', 'Zoan', 'Logia'];
 export const SLOTS = { arme1: 'Arme 1', arme2: 'Arme 2' };
 export const TECH_SOURCES = { combat: 'Style de combat', fruit: 'Fruit du démon' };
+/** Permissions du staff, attribuables par rôle Discord (écran Permissions du panneau admin). */
+export const STAFF_PERMS = {
+  joueurs: 'Voir et modifier les fiches (XP, objets, santé, actions de groupe)',
+  fiches: 'Créer et supprimer des fiches (/register, /delete profil)',
+  techniques: 'Valider ou refuser les techniques',
+  boutiques: 'Boutiques',
+  gestion: 'Objets et recettes (Gestion)',
+  equipages: 'Équipages et bateaux',
+  marine: 'Marine et escouades',
+  carte: 'Carte du monde',
+  butins: 'Butins (exploration)',
+  salons: 'Salons RP (/rp)',
+  icones: 'Icônes',
+  permissions: 'Gérer les permissions',
+};
+/** Ce membre du staff a-t-il cette permission ? « * » = toutes. */
+export const staffCan = (perms, p) => !!perms && (perms.includes('*') || perms.includes(p));
 /** État de santé : blessures et maladies, cumulables, avec une gravité de 1 (légère) à 4 (critique). */
 export const HEALTH_TYPES = { blessure: 'Blessure', maladie: 'Maladie' };
 export const HEALTH_LEVELS = ['Légère', 'Sérieuse', 'Grave', 'Critique'];

@@ -104,7 +104,7 @@ const demoState = () => ({
   map: G.mapFor(store.map, store.player),
   nav: demoHarbor(),
   ...demoCrewShips(),
-  me: { uid: 'mj-demo', name: 'Démo', staff: true }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
+  me: { uid: 'mj-demo', name: 'Démo', staff: true, perms: ['*'] }, // le MJ de la démo n'est pas le joueur, pour pouvoir tester l'édition
   player: structuredClone(store.player), shop: structuredClone(store.shops.demo ?? null), catalog: structuredClone(store.catalog),
   channelId: store.player.position?.channelId ?? null, channelName: store.player.position?.name ?? '', position: store.player.position ?? null,
 });

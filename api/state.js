@@ -6,14 +6,15 @@
  * autre joueur (&player=ID).
  */
 import { handler, need } from './_lib/http.js';
-import { userFromRequest, isStaff } from './_lib/discord.js';
+import { userFromRequest, staffPerms } from './_lib/discord.js';
 import { findPlayer, loadShop, loadCatalog, loadMap, loadCrewAndShips, publicCrew, shipList, invitesFor, loadHarbor } from './_lib/context.js';
 import { read, remove, write } from './_lib/db.js';
 import { paySalary, mapFor } from '../shared/game.js';
 
 export default handler(['GET'], async (req) => {
   const me = await userFromRequest(req);
-  const staff = await isStaff(me.uid);
+  const perms = await staffPerms(me.uid);
+  const staff = perms.length > 0;
   const catalog = await loadCatalog({ fresh: true });
 
   let target = me.uid, open = null, openDenied = false;
@@ -49,7 +50,7 @@ export default handler(['GET'], async (req) => {
   const info = { channelId: channel, channelName: pos?.name || '', position: pos };
   const cs = found ? await loadCrewAndShips(found.player) : null;
   return {
-    me: { uid: me.uid, name: me.name, staff }, player: found?.player ?? null, shop, catalog, open, openDenied, salary,
+    me: { uid: me.uid, name: me.name, staff, perms }, player: found?.player ?? null, shop, catalog, open, openDenied, salary,
     crew: cs ? publicCrew(cs.crew, cs.memberNames) : null, ships: cs ? shipList(cs.ships) : [],
     invites: found ? await invitesFor(target) : [],
     nav: found ? await loadHarbor(found.player, cs.crew, channel) : null,

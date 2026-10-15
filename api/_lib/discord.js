@@ -1,6 +1,7 @@
 /** Appels à l'API Discord : identité du joueur, droits staff, nom des salons. */
 import { env } from './env.js';
 import { HttpError } from './http.js';
+import { read } from './db.js';
 
 const API = 'https://discord.com/api/v10';
 const cache = new Map(); // vit tant que l'instance Vercel reste chaude
@@ -37,23 +38,38 @@ export async function userFromRequest(req) {
   });
 }
 
-/** Propriétaire du bot, propriétaire/admin du serveur principal ou rôle staff. */
-export async function isStaff(uid) {
-  if (env.owners.includes(uid)) return true;
-  if (!env.guildId || !env.botToken) return false;
-  return cached(`staff:${uid}`, 5 * 60_000, async () => {
-    const [member, guild, roles] = await Promise.all([
-      bot(`/guilds/${env.guildId}/members/${uid}`),
-      cached('guild', 30 * 60_000, () => bot(`/guilds/${env.guildId}`)),
-      cached('roles', 5 * 60_000, () => bot(`/guilds/${env.guildId}/roles`)),
-    ]);
-    if (!member) return false;
-    if (guild?.owner_id === uid) return true;
-    if (member.roles.some((r) => env.staffRoles.includes(r))) return true;
-    const ADMIN = 0x8n;
-    return (roles || []).some((r) => member.roles.includes(r.id) && (BigInt(r.permissions) & ADMIN) === ADMIN);
-  });
+/** Rôles du serveur principal, tels que Discord les donne. */
+export async function guildRoles() {
+  if (!env.guildId || !env.botToken) return [];
+  return (await cached('roles', 5 * 60_000, () => bot(`/guilds/${env.guildId}/roles`))) || [];
 }
+/**
+ * Permissions staff d'un membre. ['*'] (tout) pour les propriétaires du bot, le propriétaire et
+ * les administrateurs du serveur principal et les rôles STAFF_ROLE_IDS ; sinon les permissions
+ * cochées pour ses rôles dans l'écran Permissions. [] = pas staff.
+ */
+export async function staffPerms(uid) {
+  if (env.owners.includes(uid)) return ['*'];
+  if (!env.guildId || !env.botToken) return [];
+  const [member, guild, roles, conf] = await Promise.all([
+    cached(`member:${uid}`, 60_000, () => bot(`/guilds/${env.guildId}/members/${uid}`)),
+    cached('guild', 30 * 60_000, () => bot(`/guilds/${env.guildId}`)),
+    guildRoles(),
+    cached('staffperms', 30_000, async () => (await read('meta', 'staff:perms'))?.data || {}),
+  ]);
+  if (!member) return [];
+  if (guild?.owner_id === uid) return ['*'];
+  if (member.roles.some((r) => env.staffRoles.includes(r))) return ['*'];
+  const ADMIN = 0x8n;
+  if (roles.some((r) => member.roles.includes(r.id) && (BigInt(r.permissions) & ADMIN) === ADMIN)) return ['*'];
+  return [...new Set(member.roles.flatMap((r) => conf[r] || []))];
+}
+/** Fait partie du staff (au moins une permission) ? */
+export async function isStaff(uid) {
+  return (await staffPerms(uid)).length > 0;
+}
+/** Après un changement dans l'écran Permissions : on relit tout de suite. */
+export const clearPermsCache = () => cache.delete('staffperms');
 
 /** Salon Discord par son ID : { name, guildId } ou null s'il n'existe pas / n'est pas visible par le bot. */
 export async function channelById(channelId) {

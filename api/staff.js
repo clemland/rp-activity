@@ -20,7 +20,7 @@ import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
-import { isNpc, fullName, normalizeIsland, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import { normalizeLoot, isNpc, fullName, normalizeIsland, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -73,6 +73,54 @@ export default handler(['POST'], async (req, body) => {
       console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
+    case 'loot.get':
+      return { loot: normalizeLoot((await read('meta', 'loot'))?.data || {}) };
+
+    case 'loot.table.save':
+    case 'loot.table.delete':
+    case 'loot.place.set':
+    case 'loot.place.remove': {
+      // Lieu donné par un ID de salon (post, salon ou forum) : on vérifie qu'il existe et on retrouve son nom
+      let ch = null;
+      if (body.op === 'loot.place.set' && body.channelId) {
+        ch = await channelById(String(body.channelId).trim());
+        need(ch, 400, 'Salon introuvable : vérifie l’ID (clic droit > Copier l’identifiant).');
+      }
+      return retry(async () => {
+        const row = await read('meta', 'loot');
+        const loot = normalizeLoot(row?.data || {});
+        let id = body.id, toast = 'Butins mis à jour';
+        if (body.op === 'loot.table.save') {
+          const name = String(body.table?.name || '').trim().slice(0, 60);
+          need(name, 400, 'Donne un nom à la table.');
+          id = body.id && loot.tables[body.id] ? body.id : freeId(name, loot.tables);
+          loot.tables[id] = { name, entries: body.table.entries || [] };
+          toast = `Table enregistrée : ${name}`;
+        }
+        if (body.op === 'loot.table.delete') {
+          need(loot.tables[body.id], 404, 'Table introuvable.');
+          toast = `Table supprimée : ${loot.tables[body.id].name}`;
+          delete loot.tables[body.id]; // les lieux qui l'utilisaient n'ont plus de butin
+        }
+        if (body.op === 'loot.place.set') {
+          need(loot.tables[body.table], 404, 'Table introuvable.');
+          if (ch) loot.places[`ch:${String(body.channelId).trim()}`] = { table: body.table, name: ch.name, kind: ch.thread ? 'post' : ch.forum ? 'forum' : 'salon' };
+          else {
+            need(body.islandId, 400, 'Choisis une île ou un salon.');
+            loot.places[`isl:${body.islandId}`] = { table: body.table, name: String(body.name || '').slice(0, 100), kind: 'ile' };
+          }
+          toast = 'Lieu ajouté';
+        }
+        if (body.op === 'loot.place.remove') {
+          delete loot.places[body.key];
+          toast = 'Lieu retiré';
+        }
+        const clean = normalizeLoot(loot);
+        await write('meta', 'loot', clean, row?.version ?? null);
+        return { loot: clean, id, toast };
+      });
+    }
+
     case 'icons.set': {
       // Icône de l'app remplacée par une image (ou remise par défaut si img est vide)
       const key = String(body.key || '');

@@ -726,7 +726,7 @@ function renderInv() {
     const [k, q] = selItem, it = itemOf(k), eq = slotEquipped(sel);
     det = `<div class="detail" id="inv-detail">
       <div class="slot-ico">${itemIco(k)}</div>
-      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Poids : ${G.kg((it.weight || 0) * q)}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
+      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span> <span class="tag" style="color:${G.rarityOf(k).color}">${G.rarityOf(k).name}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Poids : ${G.kg((it.weight || 0) * q)}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
       <div class="acts">
         ${G.isWeapon(k) ? `<button class="btn sm" data-equip="${sel}">${eq ? 'Retirer' : 'Équiper'}</button>` : ''}
         <button class="btn sm ghost" data-drop="${sel}" ${eq ? 'disabled title="Retire-la d’abord"' : ''}>Jeter un</button>
@@ -751,7 +751,7 @@ function renderInv() {
         if (!s) return `<div class="cell empty" data-slot="${i}"></div>`;
         const [k, q] = s, it = itemOf(k);
         const eq = slotEquipped(i);
-        return `<button class="cell" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${eq ? ', équipé' : ''}">${itemIco(k)}${eq ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+        return `<button class="cell ${G.rarityOf(k).key !== 'commun' ? 'rar' : ''}" style="--rar:${G.rarityOf(k).color}" data-slot="${i}" aria-pressed="${sel === i}" aria-label="${esc(it.name)}, quantité ${q}${eq ? ', équipé' : ''}">${itemIco(k)}${eq ? '<span class="eq">É</span>' : ''}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
       }).join('')}
     </div>
     ${det}`;
@@ -1682,7 +1682,7 @@ $('mj-banner').addEventListener('click', (e) => e.target.id === 'mj-back' && clo
 /* ═══ Panneau admin (/panel admin, /edit profil) ═════════════════════════ */
 /** Boutons d'écran : vue joueur (fiche, boutique, navigation) ou panneau admin. */
 function updateNav() {
-  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, atech: tools(), aicons: tools(), amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
+  const vis = { fiche: !ADMIN || !!VIEW, shop: !ADMIN, crew: !ADMIN, nav: !ADMIN, map: !ADMIN, admin: ADMIN, atech: tools(), aicons: tools(), aloot: tools(), amap: tools(), marine: tools(), fleet: tools(), ships: tools(), ashop: tools(), gest: tools() };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
   document.body.classList.toggle('admin', ADMIN);
@@ -2736,6 +2736,157 @@ $('v-atech').addEventListener('click', async (e) => {
   loadPendingTechs();
 });
 
+/* ═══ Butins (panneau admin) : exploration ═══════════════════════════════ */
+let lootData = null, lootEdit = null; // lootEdit : table en cours de modification { id, name, entries }
+async function loadLoot() {
+  try {
+    lootData = (await API.staff('loot.get')).loot;
+  } catch (err) {
+    lootData = { tables: {}, places: {} };
+    toast(esc(err.message));
+  }
+  if (!amap) {
+    try {
+      amap = (await API.staff('map.get')).map; // pour choisir une île
+    } catch {}
+  }
+  renderLoot();
+}
+async function lootCall(op, payload) {
+  setBusy(1);
+  try {
+    const out = await API.staff(op, payload);
+    lootData = out.loot;
+    if (out.toast) toast(esc(out.toast));
+    renderLoot();
+    return out;
+  } catch (err) {
+    toast(esc(err.message));
+    return null;
+  } finally {
+    setBusy(-1);
+  }
+}
+const PLACE_KIND = { post: 'Post', forum: 'Forum', salon: 'Salon', ile: 'Île' };
+function renderLoot() {
+  if (!tools()) return;
+  const el = $('v-aloot');
+  if (!lootData) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const tables = Object.entries(lootData.tables);
+  const places = Object.entries(lootData.places).sort((a, b) => a[1].kind.localeCompare(b[1].kind));
+  const islands = Object.entries(amap?.islands || {}).filter(([, i]) => i.kind !== 'waypoint');
+  const total = (t) => Math.round(t.entries.reduce((a, e) => a + e.chance, 0) * 100) / 100;
+  const placeName = (k, p) => (p.kind === 'ile' ? amap?.islands?.[k.slice(4)]?.name || p.name || k.slice(4) : `${p.kind === 'post' ? '' : '#'}${p.name || k.slice(3)}`);
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Butins</h2><p class="lede" style="margin:0">Chaque message RP de 400 caractères ou plus donne un tirage dans la table de l’endroit : le post d’abord, puis son forum ou salon, puis l’île. Au plus un objet par message.</p></div>
+      <button class="btn" id="loot-new">+ Nouvelle table</button>
+    </div>
+    ${lootEdit ? lootEditorHTML() : ''}
+    <h3 class="ed-h">Tables (${tables.length})</h3>
+    ${tables.length ? `<div class="fleet-list">${tables.map(([id, t]) => {
+      const n = places.filter(([, p]) => p.table === id).length;
+      return `<button class="gest-card" data-loot-edit="${esc(id)}"><span class="slot-ico">${t.entries[0] ? itemIco(t.entries[0].key) : icon('objet-mat')}</span><span><b>${esc(t.name)}</b><small>${t.entries.length} objet${t.entries.length > 1 ? 's' : ''} · ${total(t)} % de trouver quelque chose · ${n} lieu${n > 1 ? 'x' : ''}</small></span></button>`;
+    }).join('')}</div>` : '<p class="note">Aucune table. Crée-en une, par exemple « Forêt ».</p>'}
+    <h3 class="ed-h">Lieux (${places.length})</h3>
+    ${places.length ? `<div class="member-list">${places.map(([k, p]) => `<div class="member-row"><span class="m-name"><span class="rank-badge">${PLACE_KIND[p.kind]}</span> <b>${esc(placeName(k, p))}</b></span><span class="note">${esc(lootData.tables[p.table]?.name || '?')}</span><span class="m-acts"><button class="btn sm ghost danger-txt" data-loot-unplace="${esc(k)}">Retirer</button></span></div>`).join('')}</div>` : '<p class="note">Aucun lieu : une table ne sert à rien tant qu’elle n’est attribuée à aucun endroit.</p>'}
+    ${tables.length ? `<div class="crew-box" style="margin-top:12px"><h3>Attribuer une table</h3>
+      <div class="mj-row"><label for="lp-table">Table</label><select id="lp-table">${tables.map(([id, t]) => `<option value="${esc(id)}">${esc(t.name)}</option>`).join('')}</select></div>
+      <div class="mj-row"><label for="lp-ch">Post, salon ou forum</label><input id="lp-ch" inputmode="numeric" placeholder="ID (clic droit > Copier l’identifiant)"><button class="btn sm" id="lp-add-ch">Attribuer</button></div>
+      ${islands.length ? `<div class="mj-row"><label for="lp-isl">ou une île</label><select id="lp-isl">${islands.map(([id, i]) => `<option value="${esc(id)}">${esc(i.name)}</option>`).join('')}</select><button class="btn sm" id="lp-add-isl">Attribuer</button></div>` : ''}
+      <p class="note" style="margin:0">Un post de forum peut avoir sa propre table (forêt, ville…), différente de celle de son forum.</p></div>` : ''}`;
+}
+function lootEditorHTML() {
+  const t = lootEdit;
+  const opts = (sel) => Object.entries(G.ITEMS).filter(([, it]) => it.kind !== 'bateau').sort((a, b) => a[1].name.localeCompare(b[1].name))
+    .map(([k, it]) => `<option value="${esc(k)}" ${k === sel ? 'selected' : ''}>${esc(it.name)} (${G.rarityOf(k).name})</option>`).join('');
+  const total = Math.round(t.entries.reduce((a, e) => a + (+e.chance || 0), 0) * 100) / 100;
+  return `<section class="crew-box loot-editor">
+    <h3>${t.id ? 'Modifier la table' : 'Nouvelle table'}</h3>
+    <div class="mj-row"><label for="le-name">Nom</label><input id="le-name" value="${esc(t.name)}" maxlength="60" placeholder="Ex. Forêt"></div>
+    <div class="loot-rows">
+      <div class="loot-row loot-head"><span>Objet</span><span>Chance (%)</span><span>Quantité</span><span></span></div>
+      ${t.entries.map((e, i) => `<div class="loot-row" data-i="${i}"><select data-f="key" aria-label="Objet">${opts(e.key)}</select><input data-f="chance" type="number" min="0.01" max="100" step="0.01" value="${e.chance}" aria-label="Chance"><span class="loot-qty"><input data-f="min" type="number" min="1" value="${e.min}" aria-label="Minimum"> à <input data-f="max" type="number" min="1" value="${e.max}" aria-label="Maximum"></span><button class="close sm-close" data-le-del="${i}" aria-label="Retirer">×</button></div>`).join('') || '<p class="note">Aucun objet.</p>'}
+    </div>
+    <div class="mj-row"><button class="btn sm ghost" id="le-add">+ Ajouter un objet</button><span class="note">Total : <b>${total} %</b> de trouver quelque chose par message${total > 100 ? ' (au-delà de 100 %, les derniers objets ne sortent jamais)' : ''}.</span></div>
+    <div class="mj-row"><button class="btn" id="le-save">Enregistrer</button><button class="btn ghost" id="le-cancel">Annuler</button>${t.id ? '<button class="btn ghost danger-txt" id="le-delete">Supprimer la table</button>' : ''}</div>
+  </section>`;
+}
+function readLootEdit() {
+  if (!lootEdit) return;
+  lootEdit.name = $('le-name').value;
+  document.querySelectorAll('#v-aloot .loot-row[data-i]').forEach((row) => {
+    const e = lootEdit.entries[+row.dataset.i];
+    e.key = row.querySelector('[data-f=key]').value;
+    e.chance = Math.max(0, +row.querySelector('[data-f=chance]').value || 0);
+    e.min = Math.max(1, Math.round(+row.querySelector('[data-f=min]').value || 1));
+    e.max = Math.max(e.min, Math.round(+row.querySelector('[data-f=max]').value || e.min));
+  });
+}
+$('v-aloot').addEventListener('change', (e) => {
+  if (e.target.closest('.loot-editor')) {
+    readLootEdit();
+    renderLoot();
+  }
+});
+$('v-aloot').addEventListener('click', async (e) => {
+  if (e.target.closest('#loot-new')) {
+    lootEdit = { id: null, name: '', entries: [] };
+    return renderLoot();
+  }
+  const ed = e.target.closest('[data-loot-edit]')?.dataset.lootEdit;
+  if (ed) {
+    lootEdit = { id: ed, ...structuredClone(lootData.tables[ed]) };
+    renderLoot();
+    return $('le-name')?.scrollIntoView({ block: 'center' });
+  }
+  if (e.target.closest('#le-add')) {
+    readLootEdit();
+    const first = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind !== 'bateau');
+    if (!first) return toast('Crée d’abord des objets dans Gestion.');
+    lootEdit.entries.push({ key: first, chance: 10, min: 1, max: 1 });
+    return renderLoot();
+  }
+  const del = e.target.closest('[data-le-del]')?.dataset.leDel;
+  if (del != null) {
+    readLootEdit();
+    lootEdit.entries.splice(+del, 1);
+    return renderLoot();
+  }
+  if (e.target.closest('#le-cancel')) {
+    lootEdit = null;
+    return renderLoot();
+  }
+  if (e.target.closest('#le-save')) {
+    readLootEdit();
+    if (!lootEdit.name.trim()) return toast('Donne un nom à la table.');
+    if (await lootCall('loot.table.save', { id: lootEdit.id, table: { name: lootEdit.name, entries: lootEdit.entries } })) {
+      lootEdit = null;
+      renderLoot();
+    }
+    return;
+  }
+  if (e.target.closest('#le-delete')) {
+    if (!(await askConfirm('Les lieux qui l’utilisent n’auront plus de butin.', { title: `Supprimer « ${lootEdit.name} » ?`, ok: 'Supprimer', danger: true }))) return;
+    if (await lootCall('loot.table.delete', { id: lootEdit.id })) {
+      lootEdit = null;
+      renderLoot();
+    }
+    return;
+  }
+  if (e.target.closest('#lp-add-ch')) {
+    const id = $('lp-ch').value.trim().replace(/\D/g, '');
+    if (!id) return toast('Colle l’ID du post, du salon ou du forum.');
+    return void lootCall('loot.place.set', { table: $('lp-table').value, channelId: id });
+  }
+  if (e.target.closest('#lp-add-isl')) {
+    const isl = $('lp-isl').value;
+    return void lootCall('loot.place.set', { table: $('lp-table').value, islandId: isl, name: amap?.islands?.[isl]?.name || '' });
+  }
+  const un = e.target.closest('[data-loot-unplace]')?.dataset.lootUnplace;
+  if (un) lootCall('loot.place.remove', { key: un });
+});
+
 /* ═══ Icônes (panneau admin) : chaque usage a sa propre icône ════════════ */
 let ICONS = {}; // icônes personnalisées : { "slot:faction-marine": lien, "berry": lien… }
 let iconKey = null;
@@ -3378,7 +3529,7 @@ function renderGestion() {
       ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
           <button class="gest-card" data-item="${esc(id)}">
             <span class="slot-ico">${itemIco(id)}</span>
-            <span><b>${esc(it.name)}</b><small>${KIND[it.kind]} · ${it.value ? berry(it.value) : 'invendable'}${it.kind === 'bateau' ? ` · cale ${G.kg(it.ship.capacity)}, vitesse ${it.ship.sail}, ${it.ship.berths} places${it.ship.cannons ? `, ${it.ship.cannons} canons` : ''}` : ` · ${G.kg(it.weight || 0)}`}${it.kind === 'amelioration' ? ` · +${fmt(it.upgrade.amount)} ${G.UPGRADES[it.upgrade.type].unit}` : ''}</small></span>
+            <span><b ${G.rarityOf(id).key !== 'commun' ? `style="color:${G.rarityOf(id).color}"` : ''}>${esc(it.name)}</b><small>${KIND[it.kind]} · ${G.rarityOf(id).name} · ${it.value ? berry(it.value) : 'invendable'}${it.kind === 'bateau' ? ` · cale ${G.kg(it.ship.capacity)}, vitesse ${it.ship.sail}, ${it.ship.berths} places${it.ship.cannons ? `, ${it.ship.cannons} canons` : ''}` : ` · ${G.kg(it.weight || 0)}`}${it.kind === 'amelioration' ? ` · +${fmt(it.upgrade.amount)} ${G.UPGRADES[it.upgrade.type].unit}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
           <button class="gest-card" data-recipe="${esc(id)}">
@@ -3431,6 +3582,7 @@ function openItemEdit(id = null) {
   $('it-title').textContent = id ? 'Modifier l’objet' : 'Nouvel objet';
   $('it-name').value = itemDraft.name;
   $('it-kind').innerHTML = Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === itemDraft.kind ? 'selected' : ''}>${l}</option>`).join('');
+  $('it-rarity').innerHTML = G.RARITIES.map((r) => `<option value="${r.key}" ${r.key === (itemDraft.rarity || 'commun') ? 'selected' : ''}>${r.name}</option>`).join('');
   $('it-value').value = itemDraft.value;
   $('it-weight').value = itemDraft.weight ?? 0;
   const sh = itemDraft.ship || { cannons: 0, capacity: 100, berths: 4, sail: 1 };
@@ -3489,7 +3641,7 @@ $('it-noimg').addEventListener('click', () => {
 });
 $('it-save').addEventListener('click', () => {
   const item = {
-    name: $('it-name').value, kind: $('it-kind').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
+    name: $('it-name').value, kind: $('it-kind').value, rarity: $('it-rarity').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
     ship: { space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
@@ -3657,6 +3809,7 @@ function showScreen(name) {
     }
   });
   if (name === 'aicons') renderIcons();
+  if (name === 'aloot') (lootData ? renderLoot() : loadLoot());
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

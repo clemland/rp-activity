@@ -354,6 +354,7 @@ export function normalizeItem(x) {
     weight: kind === 'bateau' ? 0 : Math.round(Math.min(1e5, Math.max(0, Number(String(x.weight ?? 0).replace(',', '.')) || 0)) * 10) / 10,
     ...(kind === 'bateau' && { ship: { ...normalizeShipStats(x.ship || {}), type: name } }), // le nom est le type
     ...(kind === 'amelioration' && { upgrade: { type: UPGRADES[x.upgrade?.type] ? x.upgrade.type : 'cale', amount: int(x.upgrade?.amount ?? 1, 1, 1e6) } }),
+    rarity: RARITIES.some((r) => r.key === x.rarity) ? x.rarity : 'commun',
     desc: str(x.desc, 400),
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
   };
@@ -1171,6 +1172,60 @@ export function inviteAction(player, action, ctx = {}) {
   p.crewId = crew.id;
   return { player: p, crew, previous, toast: `Bienvenue dans ${crew.name} !` };
 }
+/* ═══ Exploration : butins ═══════════════════════════════════════════════
+ * Le staff crée des tables de butin (objets + chance + quantité) et les
+ * attribue à un post de forum, un salon ou forum entier, ou une île. Chaque
+ * message RP assez long donne un tirage : au plus un objet par message.
+ */
+export const RARITIES = [
+  { key: 'commun', name: 'Commun', color: '#8a8a8a' },
+  { key: 'peu-commun', name: 'Peu commun', color: '#2f9a55' },
+  { key: 'rare', name: 'Rare', color: '#2f6fd0' },
+  { key: 'epique', name: 'Épique', color: '#8a3fc7' },
+  { key: 'legendaire', name: 'Légendaire', color: '#d98a00' },
+  { key: 'mythique', name: 'Mythique', color: '#d0342c' },
+];
+/** Rareté d'un objet du catalogue (Commun par défaut). */
+export const rarityOf = (k) => RARITIES.find((r) => r.key === ITEMS[k]?.rarity) || RARITIES[0];
+export function normalizeLoot(l = {}) {
+  const tables = {};
+  for (const [id, t] of Object.entries(l.tables || {})) {
+    const name = str(t?.name, 60);
+    if (!name) continue;
+    const entries = (Array.isArray(t.entries) ? t.entries : [])
+      .filter((e) => e && e.key)
+      .map((e) => {
+        const min = int(e.min ?? 1, 1, 999);
+        return { key: String(e.key), chance: Math.round(Math.min(100, Math.max(0, Number(e.chance) || 0)) * 100) / 100, min, max: Math.max(min, int(e.max ?? min, 1, 999)) };
+      })
+      .filter((e) => e.chance > 0)
+      .slice(0, 50);
+    tables[id] = { name, entries };
+  }
+  // Lieux : « ch:ID » (post, salon ou forum) ou « isl:ID » (île) → { table, name, kind }
+  const places = {};
+  for (const [k, p] of Object.entries(l.places || {})) {
+    if (!/^(ch:\d{5,25}|isl:[\w-]{1,40})$/.test(k) || !tables[p?.table]) continue;
+    places[k] = { table: p.table, name: str(p.name, 100), kind: ['post', 'forum', 'salon', 'ile'].includes(p.kind) ? p.kind : 'salon' };
+  }
+  return { tables, places };
+}
+/** Table de butin d'un endroit : le post d'abord, puis son forum ou salon, puis l'île. */
+export function lootTableAt(loot, { channelId, parentId = null, islandId = null } = {}) {
+  const p = loot.places[`ch:${channelId}`] || (parentId && loot.places[`ch:${parentId}`]) || (islandId && loot.places[`isl:${islandId}`]);
+  return p ? loot.tables[p.table] || null : null;
+}
+/** Un tirage : au plus un objet. Les chances s'additionnent (avec 30 % + 8 %, 38 % de trouver quelque chose). */
+export function rollLoot(table, rng = Math.random) {
+  if (!table) return null;
+  let r = rng() * 100;
+  for (const e of table.entries) {
+    if (r < e.chance) return ITEMS[e.key] ? { key: e.key, qty: e.min + Math.floor(rng() * (e.max - e.min + 1)) } : null;
+    r -= e.chance;
+  }
+  return null;
+}
+
 /* ═══ Carte du monde ═════════════════════════════════════════════════════
  * Positions en % de la carte (0 à 100), taille d'une île en % de la largeur.
  * On ne voyage pas en ligne droite : on suit les routes maritimes tracées par

@@ -60,7 +60,7 @@ export async function channelById(channelId) {
   if (!/^\d{15,22}$/.test(String(channelId || '')) || !env.botToken) return null;
   return cached(`chi:${channelId}`, 10 * 60_000, async () => {
     const c = await bot(`/channels/${channelId}`);
-    return c?.id ? { name: c.name || '', guildId: c.guild_id || null, forum: c.type === 15 } : null;
+    return c?.id ? { name: c.name || '', guildId: c.guild_id || null, forum: c.type === 15, thread: c.type === 11 || c.type === 12 } : null;
   });
 }
 

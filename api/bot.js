@@ -13,7 +13,8 @@
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS } from '../shared/game.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf } from '../shared/game.js';
+import { loadCatalog, loadMap } from './_lib/context.js';
 
 const RP_KEY = 'rp:channels';
 const SHIPS_KEY = 'ships:config';
@@ -101,11 +102,24 @@ export default handler(['POST'], async (req, body) => {
       need(body.userId && body.channelId, 400, 'Message incomplet.');
       const row = await read('players', body.userId);
       if (!row) return { noProfile: true }; // pas de fiche : rien à compter
+      // Exploration : un tirage par message RP assez long, selon le butin du post, du salon ou de l'île
+      let drop = null;
+      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+        const loot = normalizeLoot((await read('meta', 'loot'))?.data || {});
+        if (Object.keys(loot.places).length) {
+          await loadCatalog();
+          const pos = { channelId: String(body.channelId), parentId: body.parentId ? String(body.parentId) : null };
+          const islandId = Object.keys(loot.places).some((k) => k.startsWith('isl:')) ? islandOf((await loadMap()).map, pos) : null;
+          drop = rollLoot(lootTableAt(loot, { ...pos, islandId }));
+        }
+      }
       const res = await retry(async () => {
         const fresh = await read('players', body.userId);
         const r = rpMessage(normalize(fresh.data), { channelId: body.channelId, parentId: body.parentId || null, name: body.name, length: Number(body.length) || 0 });
-        if (r.player.position?.channelId !== fresh.data.position?.channelId || r.counted) await write('players', body.userId, r.player, fresh.version);
-        return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player) };
+        const added = drop ? addItem(r.player, drop.key, drop.qty) : false;
+        if (r.player.position?.channelId !== fresh.data.position?.channelId || r.counted || added) await write('players', body.userId, r.player, fresh.version);
+        const found = drop ? { key: drop.key, qty: drop.qty, name: itemOf(drop.key).name, rarity: rarityOf(drop.key).name, color: rarityOf(drop.key).color, full: !added } : null;
+        return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player), found };
       });
       // Agir en RP ailleurs que sur son bateau (son salon, ou le salon où il est à quai) : on descend du bord.
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {

@@ -26,7 +26,8 @@
     <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
     <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
     <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
-        <button class="scr" role="tab" data-screen="aicons" aria-controls="s-aicons" id="scr-aicons" hidden><span class="ico" data-i="237"></span><span>Icônes</span></button>
+        <button class="scr" role="tab" data-screen="aloot" aria-controls="s-aloot" id="scr-aloot" hidden><span class="ico" data-i="331"></span><span>Butins</span></button>
+    <button class="scr" role="tab" data-screen="aicons" aria-controls="s-aicons" id="scr-aicons" hidden><span class="ico" data-i="237"></span><span>Icônes</span></button>
   </div>
   <div class="wallet-chips">
     <span class="chip purse" title="Ta bourse"><span class="ico" data-i="261"></span><span class="money" id="purse"></span></span>
@@ -131,6 +132,10 @@
   <section class="sheet" id="v-gest"></section>
 </main>
 
+<main class="screen" id="s-aloot" role="tabpanel" hidden>
+  <section class="sheet" id="v-aloot"></section>
+</main>
+
 <main class="screen" id="s-aicons" role="tabpanel" hidden>
   <section class="sheet" id="v-aicons"></section>
   <input type="file" id="icon-file" accept="image/*" hidden>
@@ -222,6 +227,7 @@
       <div class="form">
         <div class="wide"><label for="it-name" id="it-name-label">Nom</label><input id="it-name" maxlength="60"></div>
         <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
+        <div><label for="it-rarity">Rareté</label><select id="it-rarity"></select></div>
         <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
         <div id="it-weight-box"><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
         <div class="wide it-ship" id="it-upg" hidden>

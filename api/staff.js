@@ -272,9 +272,26 @@ export default handler(['POST'], async (req, body) => {
         if (pid) {
           const ch = await channelById(pid);
           need(ch, 400, 'Salon introuvable pour la position : vérifie l’ID du salon.');
-          input.position = { channelId: pid, name: ch.name };
+          input.position = { channelId: pid, name: ch.name, parentId: ch.thread ? ch.parentId : null };
+          input.voyage = null; // remis à quai par le staff
         } else input.position = null;
         delete input.positionId;
+      }
+      // Salon RP du bateau, donné par son ID (post ou forum) : il devient aussi un salon RP
+      if ('channelId' in input) {
+        const cid = String(input.channelId || '').trim();
+        if (cid) {
+          const ch = await channelById(cid);
+          need(ch, 400, 'Salon du bateau introuvable : vérifie l’ID.');
+          input.channel = { id: cid, kind: ch.forum ? 'forum' : 'post', name: ch.name };
+          await retry(async () => {
+            const row = await read('meta', 'rp:channels');
+            const list = (row?.data.list || []).filter((c) => c.id !== cid);
+            list.push({ id: cid, name: ch.name, kind: ch.forum ? 'forum' : 'salon', by: me.uid, at: Date.now() });
+            await write('meta', 'rp:channels', { list }, row?.version ?? null);
+          });
+        } else input.channel = null;
+        delete input.channelId;
       }
       const ships = await readAll('ships');
       const existing = body.id && ships[body.id] ? body.id : null;
@@ -337,7 +354,8 @@ export default handler(['POST'], async (req, body) => {
     case 'map.island.delete':
         case 'map.link':
     case 'map.unlink':
-    case 'map.dir': {
+    case 'map.dir':
+    case 'map.pace': {
       // Images d'abord (hors de la boucle de réessai)
       let bg, img;
       if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
@@ -358,6 +376,10 @@ export default handler(['POST'], async (req, body) => {
       return retry(async () => {
         const { map, version } = await loadMap();
         let toast = 'Carte mise à jour', id = body.id;
+        if (body.op === 'map.pace') {
+          map.pace = Number(body.pace) > 0 ? Math.min(10, Number(body.pace)) : 0.5;
+          toast = `Rythme des voyages : ${map.pace}`;
+        }
         if (body.op === 'map.bg') {
           map.bg = bg;
           if (Number(body.ratio) > 0) map.ratio = Number(body.ratio);

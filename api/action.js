@@ -10,7 +10,7 @@ import { userFromRequest, channelName } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
-import { invitesFor, loadHarbor } from './_lib/context.js';
+import { invitesFor, loadHarbor, loadMap } from './_lib/context.js';
 import { RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
 export default handler(['POST'], async (req, body) => {
@@ -133,7 +133,7 @@ export default handler(['POST'], async (req, body) => {
     if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
       const row = await read('ships', String(action.shipId || ''));
       need(row, 404, 'Bateau introuvable.');
-      const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now() });
+      const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now(), map: action.type.startsWith('ship.voyage') ? (await loadMap()).map : null });
       await write('ships', action.shipId, out.ship, row.version);
       // On n'est à bord que d'un bateau à la fois : on descend des autres.
       const boarder = out.boarded ? me.uid : out.accepted;

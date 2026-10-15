@@ -1365,6 +1365,12 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .nail.in{opacity:1}
 .nail-msg{font-weight:800;min-height:1.4em;margin:8px 0 0}
 
+/* ═══ v47 : navigation ═══ */
+.voyage-box{margin-top:10px}
+.voyage-box .gauge i{background-color:#2f6fd0}
+.pace{display:inline-flex;gap:6px;align-items:center;font-size:13px;font-weight:700;margin-left:auto}
+.pace input{width:70px;font:inherit;font-size:14px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:2px 6px}
+
 
 /* ═══ v41 : bibliothèque d'icônes ═══ */
 .il-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-top:10px}

@@ -871,7 +871,18 @@ export function normalizeShip(s) {
   s.photo ??= null;
   s.icon ??= null;
   s.owner = s.owner && ['player', 'crew'].includes(s.owner.kind) && s.owner.id ? { kind: s.owner.kind, id: String(s.owner.id) } : null;
-  s.position = s.position?.channelId ? { channelId: String(s.position.channelId), name: str(s.position.name, 60) } : null; // salon où il est à quai
+  const pos = (x) => (x?.channelId ? { channelId: String(x.channelId), name: str(x.name, 60), parentId: x.parentId ? String(x.parentId) : null } : null);
+  s.position = pos(s.position); // salon où il est à quai (null en mer)
+  // Voyage : 'vote' (départ proposé), 'sea' (en mer), 'arrived' (en vue de l'île, attend la mise à quai)
+  const v = s.voyage;
+  s.voyage = v && ['vote', 'sea', 'arrived'].includes(v.status) && v.to
+    ? {
+        status: v.status, from: String(v.from || ''), to: String(v.to), fromName: str(v.fromName, 60), toName: str(v.toName, 60),
+        needed: int(v.needed, 1, 1000), done: int(v.done, 0, 1000), by: String(v.by || ''),
+        votes: Object.fromEntries(Object.entries(v.votes || {}).filter(([, x]) => x).map(([u]) => [u, true])),
+        port: pos(v.port), at: Number(v.at) || 0,
+      }
+    : null;
   s.passengers = [...new Set((s.passengers || []).map(String))].slice(0, s.berths);
   s.requests = (s.requests || []).filter((r) => r?.uid && !s.passengers.includes(String(r.uid))).slice(-50);
   s.upgrades ??= [];
@@ -1001,6 +1012,32 @@ export function isShipFamily(p, ship, crew) {
 /** Qui gère le bateau (embarquements, améliorations) : propriétaire, ou membre autorisé de l'équipage. */
 export const canManageShip = (p, ship, crew) => canEditShip(p, ship, crew);
 
+/* ═══ Navigation : voyages d'île en île ═══ */
+/** Peut-il proposer une destination ? Propriétaire, ou membre de l'équipage avec « Choisir la destination ». */
+export function canPilot(p, ship, crew) {
+  if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
+  if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'helm');
+  return false;
+}
+/** Actions RP pour une traversée : distance × rythme × √(10 ÷ vitesse), 2 au minimum. */
+export const voyageActions = (distance, speed, pace = 0.5) => Math.max(2, Math.ceil(distance * pace * Math.sqrt(10 / Math.max(1, speed))));
+/** Une action RP pendant la traversée : le bateau avance, et arrive en vue de l'île au bout du compte. */
+export function voyageStep(ship) {
+  if (ship.voyage?.status !== 'sea') return ship;
+  ship.voyage.done = Math.min(ship.voyage.needed, ship.voyage.done + 1);
+  if (ship.voyage.done >= ship.voyage.needed) ship.voyage.status = 'arrived';
+  return ship;
+}
+/** Tous les passagers ont accepté : le bateau quitte le port. */
+function sailIfReady(ship, out) {
+  const v = ship.voyage;
+  if (v?.status !== 'vote' || !ship.passengers.every((u) => v.votes[u])) return;
+  v.status = 'sea';
+  v.port = ship.position;
+  ship.position = null;
+  out.toast = `${ship.name} lève l’ancre vers ${v.toName} ! ${v.needed} actions RP de traversée.`;
+}
+
 /**
  * Embarquement, débarquement, demandes et améliorations.
  * ctx : { crew (équipage du joueur), channelId (salon où l'Activity est ouverte), now }.
@@ -1028,8 +1065,53 @@ export function shipAction(player, ship0, action, ctx = {}) {
       }
       break;
     }
+    case 'ship.voyage.propose': {
+      const map = ctx.map;
+      if (!map) fail('Carte indisponible.');
+      if (!canPilot(p, ship, ctx.crew)) fail('Seul le capitaine (ou un grade avec « Choisir la destination ») choisit la destination.');
+      if (!ship.passengers.includes(p.uid)) fail('Monte d’abord à bord.');
+      if (ship.voyage) fail('Un départ est déjà prévu.');
+      if (!ship.position) fail('Le bateau n’est pas à quai.');
+      if (!ship.channel) fail('Ce bateau n’a pas de salon RP : il en faut un pour naviguer.');
+      const st = shipStats(ship);
+      if (st.damaged) fail('Le bateau est en avarie : fais-le réparer avant de prendre la mer.');
+      const from = islandOf(map, ship.position);
+      if (!from) fail('Ce port n’est sur aucune île de la carte.');
+      const to = map.islands[a.to];
+      if (!to || to.kind !== 'island' || !to.visible || !to.accessible || a.to === from) fail('Destination impossible.');
+      const t = travelTime(map, from, a.to);
+      if (!t) fail('Aucune route connue vers cette île.');
+      const needed = voyageActions(t.value, st.speed, map.pace);
+      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now() };
+      out.toast = `Départ proposé vers ${to.name} (${needed} actions) : les passagers doivent accepter.`;
+      sailIfReady(ship, out);
+      break;
+    }
+    case 'ship.voyage.vote': {
+      const v = ship.voyage;
+      if (v?.status !== 'vote') fail('Aucun départ en attente.');
+      if (!ship.passengers.includes(p.uid)) fail('Tu n’es pas à bord.');
+      if (!a.accept) {
+        ship.voyage = null;
+        out.toast = 'Tu as refusé : le départ est annulé.';
+        break;
+      }
+      v.votes[p.uid] = true;
+      out.toast = 'Tu as accepté le départ.';
+      sailIfReady(ship, out);
+      break;
+    }
+    case 'ship.voyage.cancel': {
+      const v = ship.voyage;
+      if (v?.status !== 'vote') fail('Aucun départ en attente.');
+      if (v.by !== p.uid && !canPilot(p, ship, ctx.crew)) fail('Seul celui qui a proposé le départ peut l’annuler.');
+      ship.voyage = null;
+      out.toast = 'Départ annulé.';
+      break;
+    }
     case 'ship.leave': {
       if (!ship.passengers.includes(p.uid)) fail('Tu n’es pas à bord.');
+      if (ship.voyage && ship.voyage.status !== 'vote') fail('Impossible de descendre en pleine mer.');
       ship.passengers = ship.passengers.filter((u) => u !== p.uid);
       out.left = true;
       out.toast = `Tu descends de ${ship.name}`;
@@ -1093,6 +1175,7 @@ export const CREW_PERMS = {
   ranks: 'Attribuer les grades',
   ship: 'Choisir le bateau',
   shipChannels: 'Gérer les salons des bateaux',
+  helm: 'Choisir la destination du bateau',
   edit: 'Modifier le nom et le Jolly Roger',
 };
 export const DEFAULT_RANK = 'matelot'; // grade de base, renommable mais pas supprimable
@@ -1466,7 +1549,7 @@ export function normalizeMap(m = {}) {
     const kk = routeKey(a, b);
     if (links[kk] !== undefined && (from === a || from === b)) oneway[kk] = from;
   }
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway }; // ratio = hauteur / largeur du fond
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
 }
 /** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {
@@ -1546,7 +1629,7 @@ export function mapFor(map0, player, { staff = false } = {}) {
       travel[id] = t ? { value: t.value, via: t.path.slice(1, -1).filter((s) => islands[s]).map((s) => islands[s].name) } : null;
     }
   }
-  return { bg: map.bg, ratio: map.ratio, islands, here, travel };
+  return { bg: map.bg, ratio: map.ratio, islands, here, travel, pace: map.pace };
 }
 
 /* ═══ Mode démo (hors Discord) ═══════════════════════════════════════════ */

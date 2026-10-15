@@ -1115,6 +1115,36 @@ function ownerLabel(sh) {
   return sh.owner.id === S.uid ? 'À toi' : `À ${esc(NAVD?.names?.[sh.owner.id] ?? '?')}`;
 }
 const navName = (u) => (u === S.uid ? 'toi' : esc(NAVD?.names?.[u] ?? '?'));
+/** Encadré du voyage du bateau où l'on est à bord : départ, vote, traversée, arrivée. */
+function voyageHTML(sh) {
+  const v = sh.voyage, me = S.uid, st = G.shipStats(sh);
+  if (!v) {
+    if (!sh.position) return '';
+    if (!G.canPilot(S, sh, CREW)) return '<p class="note">Seul le capitaine (ou un grade avec « Choisir la destination ») peut proposer un départ.</p>';
+    if (st.damaged) return '<p class="req">⚠️ Le bateau est en avarie : fais-le réparer avant de prendre la mer.</p>';
+    if (!sh.channel) return '<p class="note">Ce bateau n’a pas de salon RP : il en faut un pour naviguer (le staff peut l’indiquer dans l’éditeur de bateau).</p>';
+    const dests = Object.entries(MAP?.travel || {}).filter(([id, t]) => t && MAP.islands[id]?.accessible);
+    if (!MAP?.here || !dests.length) return '<p class="note">Aucune destination connue depuis ce port.</p>';
+    return `<div class="crew-box voyage-box"><h3>⛵ Prendre la mer</h3>
+      <div class="mj-row"><label for="voy-to">Destination</label><select id="voy-to">${dests.map(([id, t]) => `<option value="${esc(id)}">${esc(MAP.islands[id].name)} · ${G.voyageActions(t.value, st.speed, MAP.pace || 0.5)} actions${t.via?.length ? ` (via ${t.via.map(esc).join(', ')})` : ''}</option>`).join('')}</select>
+      <button class="btn sm" data-voy-propose="${esc(sh.id)}">Proposer le départ</button></div>
+      <p class="note" style="margin:0">Tous les passagers à bord devront accepter.</p></div>`;
+  }
+  if (v.status === 'vote') {
+    const pax = sh.passengers;
+    return `<div class="crew-box voyage-box"><h3>⛵ Départ proposé vers ${esc(v.toName)}</h3>
+      <p class="note" style="margin:0">${v.needed} actions RP de traversée · proposé par ${navName(v.by)}</p>
+      <div class="pax">${pax.map((u) => `<span>${v.votes[u] ? '✅' : '⏳'} ${navName(u)}</span>`).join('')}</div>
+      <div class="mj-row">${pax.includes(me) && !v.votes[me] ? `<button class="btn sm" data-voy-yes="${esc(sh.id)}">Accepter</button><button class="btn sm ghost" data-voy-no="${esc(sh.id)}">Refuser</button>` : ''}${v.by === me ? `<button class="btn sm ghost danger-txt" data-voy-cancel="${esc(sh.id)}">Annuler le départ</button>` : ''}</div></div>`;
+  }
+  const pct = Math.round((v.done / Math.max(1, v.needed)) * 100);
+  return `<div class="crew-box voyage-box"><h3>${v.status === 'arrived' ? `⚓ En vue de ${esc(v.toName)} !` : `🌊 En mer vers ${esc(v.toName)}`}</h3>
+    <div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>Traversée depuis ${esc(v.fromName)}</span><span>${v.done} / ${v.needed} actions</span></div>
+    <p class="note" style="margin:0">${v.status === 'arrived' ? `Le premier passager qui écrit un message RP sur ${esc(v.toName)} met le bateau à quai à cet endroit.` : `Chaque message RP de ${G.RP_MIN_CHARS} caractères ou plus d’un passager dans ${sh.channel ? `<b>${esc(sh.channel.name)}</b>` : 'le salon du bateau'} fait avancer le bateau. Écrire ailleurs, c’est passer par-dessus bord !`}</p></div>`;
+}
+$('v-amap').addEventListener('change', (e) => {
+  if (e.target.id === 'amap-pace') mapCall('map.pace', { pace: +e.target.value });
+});
 function renderNav() {
   if (!S || ADMIN) return;
   const n = NAVD || { harbor: [], aboard: null, requests: [] };
@@ -1136,7 +1166,7 @@ function renderNav() {
   $('v-nav').innerHTML = `
     <section class="logbook nav-port">
       <h2>Navigation</h2>
-      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ''} <button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button></div>` : ''}
+      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ' (en mer)'} ${n.aboard.position ? `<button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button>` : ''}</div>${voyageHTML(n.aboard)}` : ''}
       ${n.requests.length ? `<div class="crew-box"><h3>Demandes d’embarquement</h3>${n.requests.map((r) => `<div class="member-row"><span class="m-name"><b>${navName(r.uid)}</b> veut monter sur <b>${esc(r.shipName)}</b></span><span></span><span class="m-acts"><button class="btn sm" data-req-yes="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Accepter</button><button class="btn sm ghost" data-req-no="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Refuser</button></span></div>`).join('')}</div>` : ''}
       <h3 class="ed-h">${POSID ? `À quai à #${esc(CHNAME || POSID)}` : 'À quai'}</h3>
       ${!POSID ? '<p class="note">Tu n’es nulle part pour l’instant : écris un message RP (400 caractères ou plus) dans un salon RP pour t’y trouver.</p>' : harbor ? `<div class="ships">${harbor}</div>` : '<p class="note">Aucun bateau à quai ici.</p>'}
@@ -1145,6 +1175,14 @@ function renderNav() {
   paintStatic($('v-nav'));
 }
 $('v-nav').addEventListener('click', async (e) => {
+  const vp = e.target.closest('[data-voy-propose]')?.dataset.voyPropose;
+  if (vp) return void run({ type: 'ship.voyage.propose', shipId: vp, to: $('voy-to').value });
+  const vy = e.target.closest('[data-voy-yes]')?.dataset.voyYes;
+  if (vy) return void run({ type: 'ship.voyage.vote', shipId: vy, accept: true });
+  const vn = e.target.closest('[data-voy-no]')?.dataset.voyNo;
+  if (vn) return void run({ type: 'ship.voyage.vote', shipId: vn, accept: false });
+  const vc = e.target.closest('[data-voy-cancel]')?.dataset.voyCancel;
+  if (vc) return void run({ type: 'ship.voyage.cancel', shipId: vc });
   const d = (k) => e.target.closest(`[data-${k}]`);
   const id = (k) => d(k)?.getAttribute(`data-${k}`);
   if (id('ship-board')) return void run({ type: 'ship.board', shipId: id('ship-board') });
@@ -2055,7 +2093,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
       ${extra}
-      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.engine ? '<span>🥤 Moteur au cola</span>' : ''}${sh.granit ? '<span>🪨 Granit marin</span>' : ''}${sh.plongee ? '<span>🫧 Plongée</span>' : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
+      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.engine ? '<span>🥤 Moteur au cola</span>' : ''}${sh.granit ? '<span>🪨 Granit marin</span>' : ''}${sh.plongee ? '<span>🫧 Plongée</span>' : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
@@ -2436,6 +2474,7 @@ function renderShipEdit() {
           <optgroup label="Escouades de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Équipages">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind !== 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
           <optgroup label="Joueurs">${players.map((p) => `<option value="player:${esc(p.uid)}" ${ownerVal === `player:${p.uid}` ? 'selected' : ''}>${esc(G.fullName({ id: p.ident }))}</option>`).join('')}</optgroup></select></div>
+        <div><label for="sh-chan">Salon RP du bateau (ID)</label><input id="sh-chan" inputmode="numeric" value="${esc(d.channelId ?? d.channel?.id ?? '')}" placeholder="Post ou forum du bateau"><small class="note">${d.channel ? `Actuellement : ${esc(d.channel.name)}` : 'Aucun : il en faut un pour naviguer'}</small></div>
         <div><label for="sh-pos">À quai dans le salon (ID)</label><input id="sh-pos" inputmode="numeric" value="${esc(d.positionId ?? d.position?.channelId ?? '')}" placeholder="ID du salon, vide = nulle part"><small class="note">${d.position ? `Actuellement : #${esc(d.position.name || d.position.channelId)}` : 'Pas à quai'}</small></div>`}
       ${!shipAsPlayer && !isNew ? `<div class="wide upg-box">
         <b>Améliorer</b>
@@ -2471,6 +2510,7 @@ function readShipEdit() {
     d.space = $('sh-space').value;
   }
   d.positionId = $('sh-pos').value.trim();
+  d.channelId = $('sh-chan').value.trim();
   const o = $('sh-owner').value;
   d.owner = o ? { kind: o.split(':')[0], id: o.slice(o.indexOf(':') + 1) } : null;
 }
@@ -3512,6 +3552,7 @@ function renderAdminMap() {
         <button data-mm="links" aria-pressed="${mapMode === 'links'}">🧭 Tracer des routes</button>
       </div>
       <p class="note" style="margin:0">${help}</p>
+      <label class="pace">Rythme des voyages <input id="amap-pace" type="number" min="0.1" max="10" step="0.1" value="${amap.pace ?? 0.5}" title="Actions RP par unité de distance pour un bateau de vitesse 10"></label>
     </div>
     <div id="map-admin"></div>
     ${ids.length ? `<div class="fleet-list" style="margin-top:12px">${ids.map(card).join('')}</div>` : '<p class="note">Aucune île. Ajoute un fond de carte, puis des îles (PNG transparents).</p>'}`;

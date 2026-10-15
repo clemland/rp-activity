@@ -14,7 +14,7 @@ import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
 import { staffPerms } from './_lib/discord.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf } from '../shared/game.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep } from '../shared/game.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
 
 const RP_KEY = 'rp:channels';
@@ -127,6 +127,41 @@ export default handler(['POST'], async (req, body) => {
         const found = drop ? { key: drop.key, qty: drop.qty, name: itemOf(drop.key).name, rarity: rarityOf(drop.key).name, color: rarityOf(drop.key).color, full: !added } : null;
         return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player), found };
       });
+      // Navigation : une action RP d'un passager dans le salon du bateau fait avancer le voyage ;
+      // à l'arrivée, le premier passager qui écrit sur l'île de destination met le bateau à quai.
+      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+        const here = { channelId: String(body.channelId), parentId: body.parentId ? String(body.parentId) : null, name: String(body.name || '').slice(0, 60) };
+        let carte = null;
+        for (const [sid, raw] of Object.entries(await readAll('ships'))) {
+          const v = raw.voyage;
+          if (!v || !(raw.passengers || []).includes(body.userId)) continue;
+          const inShip = !!raw.channel?.id && [here.channelId, here.parentId].includes(String(raw.channel.id));
+          if (v.status === 'sea' && inShip) {
+            const s = await retry(async () => {
+              const r = await read('ships', sid);
+              const sh = normalizeShip(r.data);
+              if (sh.voyage?.status !== 'sea') return null;
+              voyageStep(sh);
+              await write('ships', sid, sh, r.version);
+              return sh;
+            });
+            if (s) res.voyage = { ship: s.name, done: s.voyage.done, needed: s.voyage.needed, to: s.voyage.toName, arrived: s.voyage.status === 'arrived' };
+          } else if (v.status === 'arrived' && !inShip) {
+            carte ??= (await loadMap()).map;
+            if (islandOf(carte, here) !== v.to) continue;
+            const s = await retry(async () => {
+              const r = await read('ships', sid);
+              const sh = normalizeShip(r.data);
+              if (sh.voyage?.status !== 'arrived') return null;
+              sh.position = { channelId: here.channelId, name: here.name, parentId: here.parentId };
+              sh.voyage = null;
+              await write('ships', sid, sh, r.version);
+              return sh;
+            });
+            if (s) res.docked = { ship: s.name, where: here.name };
+          }
+        }
+      }
       // Agir en RP ailleurs que sur son bateau (son salon, ou le salon où il est à quai) : on descend du bord.
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
         const here = [String(body.channelId), body.parentId ? String(body.parentId) : null];

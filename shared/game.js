@@ -516,6 +516,17 @@ export function playerAction(player, action, ctx = {}) {
       const c = p.craft;
       if (!c) fail('Aucune fabrication en cours.');
       if (now < c.end) fail(`Encore ${duree((c.end - now) / 1000)} de patience.`);
+      if (c.work) {
+        // Travail d'atelier terminé : on l'applique au bateau, ou on sort le bateau construit
+        p.craft = null;
+        if (c.work.type !== 'construire' && !ctx.ship) {
+          out.toast = 'Le bateau n’est plus à toi ni à ton équipage : le travail est perdu.';
+          break;
+        }
+        Object.assign(out, applyWork(p, c.work.type === 'construire' ? null : clone(ctx.ship), c.work, c.recipe, ctx, now));
+        out.shipId = c.work.shipId || null;
+        break;
+      }
       const test = clone(p);
       const isShip = (k) => ITEMS[k]?.kind === 'bateau';
       for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !isShip(k) && !addItem(test, k, q)) fail('Inventaire plein : libère de la place pour récupérer ta fabrication.');
@@ -571,27 +582,14 @@ export function playerAction(player, action, ctx = {}) {
         out.toast = `Travail raté : ${workLabel(w)}. Les matériaux sont perdus.`;
         break;
       }
-      if (w.type === 'construire') {
-        out.newShips = [newShip({ model: w.model, wood: w.wood, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: ctx.channelName || '' } : null }, now)];
-        out.toast = `${itemOf(w.model).name} construit en ${WOODS[w.wood].name.toLowerCase()} : il t’attend à quai !`;
+      // Mini-jeu réussi : le travail prend ensuite le temps de la recette (à récupérer dans l'onglet Métier)
+      const secs = r.seconds || 0;
+      if (secs > 0) {
+        p.craft = { recipe: a.id, name: workLabel(w), gives: {}, start: now, end: now + secs * 1000, work: { ...w, shipId: w.type === 'construire' ? null : ctx.shipId || null } };
+        out.toast = `Mini-jeu réussi ! ${workLabel(w)} : prêt dans ${duree(secs)}.`;
         break;
       }
-      if (w.type === 'voile') ship.sail = w.level;
-      if (w.type === 'canon') ship.guns[w.size] += w.count;
-      if (w.type === 'cale') {
-        ship.capacity += w.amount;
-        ship.holdExt += w.amount;
-      }
-      if (w.type === 'granit') ship.granit = true;
-      if (w.type === 'plongee') ship.plongee = true;
-      if (w.type === 'moteur') ship.engine = true;
-      if (w.type === 'reparation') {
-        const st = shipStats(ship);
-        ship.hull = Math.min(st.hullMax, st.hull + Math.ceil((st.hullMax * w.amount) / 100));
-      }
-      ship.upgrades = [...(ship.upgrades || []), { type: w.type, amount: w.level ?? w.count ?? w.amount ?? 1, item: a.id, by: p.uid, at: now }].slice(-100);
-      out.ship = normalizeShip(ship);
-      out.toast = `${workLabel(w)} : travail réussi sur ${ship.name} !`;
+      Object.assign(out, applyWork(p, ship, w, a.id, ctx, now));
       break;
     }
     case 'tech.save': {
@@ -921,6 +919,7 @@ export function workLabel(w) {
 /** Pourquoi ce travail est impossible (null s'il est possible). ship : null pour une construction. */
 export function workBlock(p, recipe, ship) {
   const w = recipe.work;
+  if (p.craft) return 'Ton atelier est déjà occupé : récupère ou annule le travail en cours.';
   const why = craftBlock(p, recipe);
   if (why) return why;
   if (w.type === 'voile' && p.job.lvl < sailRank(w.level)) return `Voile niveau ${w.level} : demande le niveau ${JOB_LEVELS[sailRank(w.level) - 1]}.`;
@@ -944,6 +943,30 @@ export function workDifficulty(recipe, p) {
   }[w.type] ?? 0.5;
   const d = Math.min(1, base), lvl = p.job?.lvl || 1;
   return { speed: 0.6 + d * 1.4, zone: Math.max(6, 22 - d * 14 + (lvl - 1) * 4), nails: 5, strikes: 6 + lvl };
+}
+/** Applique un travail d'atelier réussi : construit le bateau, ou modifie celui donné. Renvoie { ship?, newShips?, toast }. */
+function applyWork(p, ship, w, recipeId, ctx, now) {
+  if (w.type === 'construire') {
+    return {
+      newShips: [newShip({ model: w.model, wood: w.wood, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: ctx.channelName || '' } : null }, now)],
+      toast: `${itemOf(w.model).name} construit en ${WOODS[w.wood].name.toLowerCase()} : il t’attend à quai !`,
+    };
+  }
+  if (w.type === 'voile') ship.sail = w.level;
+  if (w.type === 'canon') ship.guns[w.size] += w.count;
+  if (w.type === 'cale') {
+    ship.capacity += w.amount;
+    ship.holdExt += w.amount;
+  }
+  if (w.type === 'granit') ship.granit = true;
+  if (w.type === 'plongee') ship.plongee = true;
+  if (w.type === 'moteur') ship.engine = true;
+  if (w.type === 'reparation') {
+    const st = shipStats(ship);
+    ship.hull = Math.min(st.hullMax, st.hull + Math.ceil((st.hullMax * w.amount) / 100));
+  }
+  ship.upgrades = [...(ship.upgrades || []), { type: w.type, amount: w.level ?? w.count ?? w.amount ?? 1, item: recipeId, by: p.uid, at: now }].slice(-100);
+  return { ship: normalizeShip(ship), toast: `${workLabel(w)} : travail terminé sur ${ship.name} !` };
 }
 export function canEditShip(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;

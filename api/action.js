@@ -113,7 +113,7 @@ export default handler(['POST'], async (req, body) => {
       const sid = r?.work?.type === 'construire' ? null : String(action.shipId || '');
       const ship = sid ? cs.ships[sid] : null;
       if (sid) need(ship, 404, 'Bateau introuvable : il doit être à toi ou à ton équipage.');
-      const out = playerAction(player, action, { ...ctx, ship, crew: cs.crew, channelName: player.position?.name || '' });
+      const out = playerAction(player, action, { ...ctx, ship, shipId: sid, crew: cs.crew, channelName: player.position?.name || '' });
       const extra = { ships: {} };
       if (out.ship) {
         await write('ships', sid, out.ship, cs.shipVersions[sid]);
@@ -168,9 +168,15 @@ export default handler(['POST'], async (req, body) => {
       shopV = s.version;
     }
     if (action.type === 'craft.collect' && channelId) ctx.channelName = player.position?.name || (await channelName(channelId));
+    // Travail d'atelier terminé : il faut le bateau concerné (à lui ou à son équipage)
+    if (action.type === 'craft.collect' && player.craft?.work?.shipId) ctx.ship = cs.ships[player.craft.work.shipId] || null;
     const out = playerAction(player, action, ctx);
     if (out.shop) await write('shops', channelId, out.shop, shopV);
     const extra = {};
+    if (out.ship && out.shipId) {
+      await write('ships', out.shipId, out.ship, cs.shipVersions[out.shipId]);
+      extra.ships = { [out.shipId]: out.ship };
+    }
     // Bateaux fabriqués : ils apparaissent dans « Mes bateaux », à quai dans ce salon.
     for (const ship of out.newShips || []) {
       let id = slug(ship.name), n = 2;

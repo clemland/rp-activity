@@ -894,7 +894,7 @@ function renderJob() {
     </div>
 
     ${c ? `<div class="craft-now ${ready ? 'ready' : ''}">
-      <div class="craft-gives">${Object.entries(c.gives).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>
+      <div class="craft-gives">${c.work ? `<span class="need">${icon('metier-charpentier')}${esc(c.name)}</span>` : ''}${Object.entries(c.gives).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>
       <div class="craft-info">
         <b>${esc(c.name)}</b>
         ${ready ? '<span class="ok">Prête à récupérer !</span>' : `<span>Encore <b id="craft-left">${fmtEnd(c.end)}</b></span>`}

@@ -21,7 +21,8 @@ export function handler(methods, fn) {
       if (err instanceof GameError) return res.status(400).json({ error: err.message });
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
       console.error(err);
-      return res.status(500).json({ error: 'Erreur interne du serveur.' });
+      // On renvoie le vrai message : bien plus simple à corriger qu'une erreur muette
+      return res.status(500).json({ error: `Erreur interne du serveur : ${err?.message || err}` });
     }
   };
 }

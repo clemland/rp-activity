@@ -880,7 +880,7 @@ function needChip([k, q], have = true) {
 function renderJob() {
   if (!S) return;
   const job = S.job.id ? JOBS[S.job.id] : null;
-  const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.job || r.job === S.job.id);
+  const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.work && (!r.job || r.job === S.job.id));
   const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r)) : recs;
   const c = S.craft;
   const ready = c && Date.now() >= c.end;
@@ -927,7 +927,7 @@ function renderJob() {
           <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
         </div>
       </article>`;
-    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}`;
+    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}`;
 }
 $('v-job').addEventListener('click', async (e) => {
   const cf = e.target.closest('[data-cf]')?.dataset.cf;
@@ -951,6 +951,162 @@ setInterval(() => {
   const bar = $('craft-bar');
   if (bar) bar.style.width = `${Math.min(100, ((Date.now() - c.start) / (c.end - c.start)) * 100)}%`;
 }, 1000);
+
+/* ═══ Atelier naval du charpentier ═══════════════════════════════════════ */
+let atelierShip = null;
+/** Les trois statistiques d'un bateau et sa coque. */
+function shipStatsHTML(sh) {
+  const st = G.shipStats(sh);
+  const pct = Math.round((st.hull / Math.max(1, st.hullMax)) * 100);
+  return `<div class="ship-trio"><span title="Vitesse">⛵ <b>${st.speed}</b><small>Vitesse</small></span><span title="Robustesse">🛡️ <b>${st.robust}</b><small>Robustesse</small></span><span title="Puissance offensive">💥 <b>${st.power}</b><small>Puissance</small></span></div>
+    <div class="gauge hull ${st.damaged ? 'bad' : ''}" aria-label="Coque"><i style="width:${pct}%"></i></div>
+    <div class="gauge-cap"><span>Coque${st.damaged ? ' · ⚠️ en avarie' : ''}</span><span>${st.hull} / ${st.hullMax}</span></div>`;
+}
+/** Section « Atelier naval » de l'onglet Métier, pour les charpentiers. */
+function atelierHTML() {
+  if (S.job.id !== 'charpentier') return '';
+  const works = Object.entries(G.RECIPES).filter(([, r]) => r.work);
+  if (!works.length) return '';
+  const ships = SHIPS.filter((sh) => G.canManageShip(S, sh, CREW));
+  if (!ships.some((x) => x.id === atelierShip)) atelierShip = ships[0]?.id ?? null;
+  const ship = ships.find((x) => x.id === atelierShip) || null;
+  const st = ship ? G.shipStats(ship) : null;
+  return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">⚓ Atelier naval</h2></div>
+    <p class="note">Choisis un bateau et un travail. Les matériaux sont pris au début : réussis le mini-jeu pour que le travail tienne.</p>
+    ${ships.length ? `<div class="mj-row"><label for="atelier-ship">Bateau</label><select id="atelier-ship">${ships.map((x) => `<option value="${esc(x.id)}" ${x.id === atelierShip ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)})</option>`).join('')}</select>${st ? `<span class="note">Vitesse ${st.speed} · Robustesse ${st.robust} · Puissance ${st.power} · Coque ${st.hull}/${st.hullMax}</span>` : ''}</div>` : '<p class="note">Tu n’as pas de bateau à travailler (à toi, ou à ton équipage avec la permission « Choisir le bateau »). Tu peux quand même en construire un.</p>'}
+    <div class="recipes">${works.map(([id, r]) => {
+      const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship);
+      return `<article class="recipe ${why ? 'locked' : ''}">
+        <h3 class="rc-title">${icon(r.work.type === 'construire' ? 'objet-bateau' : 'metier-charpentier')}${esc(G.workLabel(r.work))}</h3>
+        <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>
+        ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
+        <b>Il faut</b>
+        <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
+        <div class="recipe-foot">${why ? `<span class="req">${esc(why)}</span>` : '<span></span>'}<button class="btn sm" data-work="${esc(id)}" ${why ? 'disabled' : ''}>Travailler</button></div>
+      </article>`;
+    }).join('')}</div>`;
+}
+$('v-job').addEventListener('change', (e) => {
+  if (e.target.id === 'atelier-ship') {
+    atelierShip = e.target.value;
+    renderJob();
+  }
+});
+$('v-job').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-work]')?.dataset.work;
+  if (id) startWork(id);
+});
+async function startWork(id) {
+  const r = G.RECIPES[id];
+  if (!r?.work) return;
+  const label = G.workLabel(r.work);
+  if (!(await askConfirm('Les matériaux seront pris tout de suite. Si tu rates le mini-jeu, ils sont perdus.', { title: `${label} ?`, ok: 'Commencer' }))) return;
+  const success = await nailGame(G.workDifficulty(r, S), label);
+  await run({ type: 'ship.work', id, shipId: r.work.type === 'construire' ? null : atelierShip, success });
+}
+/** Mini-jeu du marteau : planter les clous quand le curseur passe dans la zone dorée. Renvoie true si réussi. */
+function nailGame(diff, title) {
+  return new Promise((resolve) => {
+    const d = $('d-nail'), board = $('nail-board'), cur = $('nail-cursor'), zone = $('nail-zone');
+    $('nail-title').textContent = title;
+    let pos = 0, dir = 1, last = performance.now(), raf = 0, hits = 0, left = diff.strikes, done = false, zx = 0;
+    const placeZone = () => {
+      zx = 10 + Math.random() * (80 - diff.zone);
+      zone.style.left = `${zx}%`;
+      zone.style.width = `${diff.zone}%`;
+    };
+    const paint = () => {
+      $('nail-row').innerHTML = Array.from({ length: diff.nails }, (_, i) => `<span class="nail ${i < hits ? 'in' : ''}">${i < hits ? '🔩' : '◦'}</span>`).join('') + `<small class="note">${left} coup${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''}</small>`;
+    };
+    const stop = () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', key);
+    };
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      stop();
+      $('nail-msg').textContent = ok ? 'Travail solide !' : 'Raté…';
+      setTimeout(() => {
+        if (d.open) closeDialog(d);
+        resolve(ok);
+      }, 900);
+    };
+    const hit = () => {
+      if (done) return;
+      left--;
+      if (pos >= zx && pos <= zx + diff.zone) {
+        hits++;
+        $('nail-msg').textContent = 'Bien planté !';
+        placeZone();
+      } else {
+        replay(board, 'shake');
+        $('nail-msg').textContent = 'À côté…';
+      }
+      paint();
+      if (hits >= diff.nails) return finish(true);
+      if (hits + left < diff.nails) finish(false);
+    };
+    const key = (e) => {
+      if (e.code !== 'Space' || e.repeat || e.target.closest?.('button')) return;
+      e.preventDefault();
+      hit();
+    };
+    const tick = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      pos += dir * diff.speed * 100 * dt;
+      if (pos >= 100) { pos = 100; dir = -1; }
+      if (pos <= 0) { pos = 0; dir = 1; }
+      cur.style.left = `${pos}%`;
+      raf = requestAnimationFrame(tick);
+    };
+    $('nail-hit').onclick = hit;
+    board.onclick = hit;
+    d.addEventListener('close', () => {
+      if (done) return;
+      done = true;
+      stop();
+      resolve(false); // fenêtre fermée en cours de route : travail abandonné
+    }, { once: true });
+    document.addEventListener('keydown', key);
+    $('nail-msg').textContent = '';
+    placeZone();
+    paint();
+    openDialog('d-nail');
+    raf = requestAnimationFrame((t) => {
+      last = t;
+      tick(t);
+    });
+  });
+}
+/** Champs « Travail sur bateau » de l'éditeur de recette. */
+function workFieldsHTML(r) {
+  const w = r.work || null;
+  const models = Object.entries(G.ITEMS).filter(([, it]) => it.kind === 'bateau');
+  const sel = (id, obj, cur) => `<select id="${id}">${Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(typeof v === 'string' ? v : v.name)}</option>`).join('')}</select>`;
+  return `<div class="wide work-box"><label for="rc-work">Travail sur bateau (atelier du charpentier)</label>
+    <select id="rc-work"><option value="">Aucun : recette normale</option>${Object.entries(G.SHIP_WORKS).map(([k, l]) => `<option value="${k}" ${w?.type === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    ${w?.type === 'construire' ? `<div class="mj-row"><label for="rc-w-model">Type</label><select id="rc-w-model">${models.map(([k, it]) => `<option value="${esc(k)}" ${k === w.model ? 'selected' : ''}>${esc(it.name)}</option>`).join('') || '<option value="">Crée d’abord un modèle (Gestion, catégorie Bateau)</option>'}</select><label for="rc-w-wood">Bois</label>${sel('rc-w-wood', G.WOODS, w.wood)}</div>` : ''}
+    ${w?.type === 'voile' ? `<div class="mj-row"><label for="rc-w-level">Niveau de voile obtenu</label><input id="rc-w-level" type="number" min="1" max="10" value="${w.level}"><span class="note">1-3 Apprenti · 4-6 Confirmé · 7-10 Maître. La voile doit être au niveau précédent.</span></div>` : ''}
+    ${w?.type === 'canon' ? `<div class="mj-row"><label for="rc-w-size">Calibre</label>${sel('rc-w-size', G.CANNONS, w.size)}<label for="rc-w-count">Nombre</label><input id="rc-w-count" type="number" min="1" max="20" value="${w.count}"></div>` : ''}
+    ${w?.type === 'cale' ? `<div class="mj-row"><label for="rc-w-amount">Cale ajoutée (kg)</label><input id="rc-w-amount" type="number" min="10" value="${w.amount}"></div>` : ''}
+    ${w?.type === 'reparation' ? `<div class="mj-row"><label for="rc-w-amount">Coque réparée (%)</label><input id="rc-w-amount" type="number" min="1" max="100" value="${w.amount}"></div>` : ''}
+    ${w ? '<p class="note" style="margin:4px 0 0">Un travail s’applique directement au bateau choisi, après le mini-jeu : retire la ligne « Résultat » ci-dessous si tu ne veux pas qu’il donne aussi un objet. Choisis le métier Charpentier.</p>' : ''}
+  </div>`;
+}
+function readWorkFields(r) {
+  const t = $('rc-work')?.value;
+  if (!t) return void (r.work = null);
+  const prev = r.work?.type === t ? r.work : {};
+  r.work = G.normalizeWork({
+    ...prev, type: t,
+    model: $('rc-w-model')?.value ?? prev.model, wood: $('rc-w-wood')?.value ?? prev.wood,
+    level: $('rc-w-level')?.value ?? prev.level, size: $('rc-w-size')?.value ?? prev.size,
+    count: $('rc-w-count')?.value ?? prev.count, amount: $('rc-w-amount')?.value ?? prev.amount,
+  });
+  if (t === 'construire' && !r.work.model) r.work.model = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind === 'bateau') || '';
+}
 
 /* ═══ Navigation : le port du salon ═════════════════════════════════════ */
 function ownerLabel(sh) {
@@ -1883,6 +2039,8 @@ function shipPic(sh) {
 /** Améliorations de bateau dans l'inventaire : [case, objet]. */
 const upgradeSlots = () => (S ? S.inv.map((x, i) => [i, x]).filter(([, x]) => x && G.ITEMS[x[0]]?.kind === 'amelioration') : []);
 function upgradeControl(sh) {
+  return ''; // les améliorations passent désormais par l'atelier du charpentier
+  // eslint-disable-next-line no-unreachable
   const ups = upgradeSlots();
   if (!ups.length) return '';
   return `<div class="mj-row upg-row"><select data-upg-sel="${esc(sh.id)}" aria-label="Amélioration à installer">${ups.map(([i, x]) => {
@@ -1897,7 +2055,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
       ${extra}
-      <div class="ship-stats"><span>${esc(sh.type)}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>${sh.cannons} canon${sh.cannons > 1 ? 's' : ''}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
+      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.engine ? '<span>🥤 Moteur au cola</span>' : ''}${sh.granit ? '<span>🪨 Granit marin</span>' : ''}${sh.plongee ? '<span>🫧 Plongée</span>' : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
@@ -2266,7 +2424,10 @@ function renderShipEdit() {
       ${shipAsPlayer ? '' : `
         ${isNew ? `<p class="note wide" style="margin:0">Type, cale, vitesse, places et canons viennent du modèle. Les améliorations les feront évoluer.</p>` : `
         <div><label>Type</label><input value="${esc(d.type)}" disabled></div>
-        <div><label for="sh-cannons">Canons</label><input id="sh-cannons" type="number" min="0" value="${d.cannons}"></div>
+        <div><label for="sh-wood">Bois de charpente</label><select id="sh-wood">${Object.entries(G.WOODS).map(([k, w]) => `<option value="${k}" ${k === (d.wood || 'standard') ? 'selected' : ''}>${w.name}</option>`).join('')}</select></div>
+        ${Object.entries(G.CANNONS).map(([k, c]) => `<div><label for="sh-gun-${k}">Canons ${c.name}s</label><input id="sh-gun-${k}" type="number" min="0" value="${d.guns?.[k] ?? (k === 'leger' ? d.cannons || 0 : 0)}"></div>`).join('')}
+        <div><label for="sh-hull">Coque (sur ${G.shipStats(d).hullMax})</label><input id="sh-hull" type="number" min="0" max="${G.shipStats(d).hullMax}" value="${G.shipStats(d).hull}"></div>
+        <div class="isl-flags"><label class="chk"><input type="checkbox" id="sh-engine" ${d.engine ? 'checked' : ''}> Moteur au cola</label><label class="chk"><input type="checkbox" id="sh-granit" ${d.granit ? 'checked' : ''}> Granit marin</label><label class="chk"><input type="checkbox" id="sh-plongee" ${d.plongee ? 'checked' : ''}> Plongée</label></div>
         <div><label for="sh-cap">Cale (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
         <div><label for="sh-berths">Places (personnes)</label><input id="sh-berths" type="number" min="1" value="${d.berths ?? 4}"></div>
         <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
@@ -2297,8 +2458,13 @@ function readShipEdit() {
   d.name = $('sh-name').value;
   d.desc = $('sh-desc').value;
   if (shipAsPlayer) return;
-  if ($('sh-cannons')) {
-    d.cannons = Math.max(0, Math.round(+$('sh-cannons').value || 0));
+  if ($('sh-wood')) {
+    d.wood = $('sh-wood').value;
+    d.guns = Object.fromEntries(Object.keys(G.CANNONS).map((k) => [k, Math.max(0, Math.round(+$(`sh-gun-${k}`).value || 0))]));
+    d.hull = Math.max(0, Math.round(+$('sh-hull').value || 0));
+    d.engine = $('sh-engine').checked;
+    d.granit = $('sh-granit').checked;
+    d.plongee = $('sh-plongee').checked;
     d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
     d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
     d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
@@ -2334,7 +2500,7 @@ $('d-ship').addEventListener('click', async (e) => {
     try {
       const out = await API.staff('ship.upgrade', { id: shipDraftId, type, amount: n });
       // on garde les champs déjà modifiés, on reprend les chiffres du serveur
-      Object.assign(shipDraft, { capacity: out.ship.capacity, cannons: out.ship.cannons, sail: out.ship.sail, upgrades: out.ship.upgrades });
+      Object.assign(shipDraft, { capacity: out.ship.capacity, cannons: out.ship.cannons, guns: out.ship.guns, hull: out.ship.hull, sail: out.ship.sail, upgrades: out.ship.upgrades });
       renderShipEdit();
       toast(esc(out.toast));
       loadFleet();
@@ -3653,6 +3819,8 @@ function openItemEdit(id = null) {
   $('it-cap').value = sh.capacity;
   $('it-berths').value = sh.berths ?? 4;
   $('it-sail').value = sh.sail ?? 1;
+  $('it-speed').value = sh.speed ?? 10;
+  $('it-robust').value = sh.robust ?? 10;
   $('it-space').innerHTML = Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (sh.space || 'post') ? 'selected' : ''}>${l}</option>`).join('');
   syncItemKind(itemDraft.kind);
   const up = itemDraft.upgrade || { type: 'cale', amount: 100 };
@@ -3705,7 +3873,7 @@ $('it-noimg').addEventListener('click', () => {
 $('it-save').addEventListener('click', () => {
   const item = {
     name: $('it-name').value, kind: $('it-kind').value, rarity: $('it-rarity').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
-    ship: { space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
+    ship: { speed: +$('it-speed').value || 10, robust: +$('it-robust').value || 10, space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');
@@ -3745,6 +3913,7 @@ function renderRecipeEdit() {
       <div><label for="rc-lvl">Maîtrise requise</label><select id="rc-lvl" ${r.job ? '' : 'disabled'}>${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div><label for="rc-time">Temps de fabrication</label><div class="rc-time"><input id="rc-time" type="number" min="0" value="${r.seconds / unit}"><select id="rc-unit">${Object.entries(UNITS).map(([u, l]) => `<option value="${u}" ${+u === unit ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div class="wide"><label for="rc-desc">Description (facultative)</label><input id="rc-desc" value="${esc(r.desc)}" maxlength="400"></div>
+      ${workFieldsHTML(r)}
     </div>
     <h3 class="ed-h">Résultat</h3>
     <div class="se-items">${rows(r.gives, 'gives')}</div>
@@ -3759,6 +3928,7 @@ function readRecipeEdit() {
   r.lvl = +$('rc-lvl').value || 1;
   r.seconds = Math.round((+$('rc-time').value || 0) * +$('rc-unit').value);
   r.desc = $('rc-desc').value;
+  readWorkFields(r);
   for (const kind of ['needs', 'gives']) {
     const next = {};
     document.querySelectorAll(`#rc-body .rc-row[data-kind="${kind}"]`).forEach((row) => {
@@ -3792,7 +3962,7 @@ $('d-recipe').addEventListener('click', (e) => {
 });
 $('rc-save').addEventListener('click', () => {
   readRecipeEdit();
-  if (!Object.keys(recipeDraft.gives).length) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet.');
+  if (!Object.keys(recipeDraft.gives).length && !recipeDraft.work) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet, ou être un travail sur bateau.');
   gestCall('recipe.save', { id: recipeDraftId, recipe: recipeDraft }, $('d-recipe'));
 });
 $('rc-del').addEventListener('click', async () => {

@@ -377,7 +377,7 @@ export function normalizeItem(x) {
   };
 }
 /** Une recette se désigne par ce qu'elle produit : « 2 × Planche, 1 × Clou ». */
-export const recipeLabel = (r) => Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
+export const recipeLabel = (r) => r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
 export function normalizeRecipe(x) {
   const items = (o) =>
     Object.fromEntries(
@@ -386,13 +386,15 @@ export function normalizeRecipe(x) {
         .filter(([k, q]) => q > 0 && ITEMS[k]),
     );
   const gives = items(x.gives);
-  if (!Object.keys(gives).length) fail('La recette doit produire au moins un objet.');
+  const work = normalizeWork(x.work);
+  if (!Object.keys(gives).length && !work) fail('La recette doit produire au moins un objet, ou être un travail sur bateau.');
   return {
     job: x.job && JOBS[x.job] ? x.job : null,
     lvl: int(x.lvl, 1, 3),
     seconds: int(x.seconds, 0, CRAFT_MAX_SECONDS),
     needs: items(x.needs),
     gives,
+    work,
     desc: str(x.desc, 400),
   };
 }
@@ -549,6 +551,47 @@ export function playerAction(player, action, ctx = {}) {
       if ('photo' in a) ship.photo = a.photo ? str(a.photo, 600000) : null;
       out.ship = ship;
       out.toast = `Bateau mis à jour : ${ship.name}`;
+      break;
+    }
+    case 'ship.work': {
+      // Atelier du charpentier : matériaux pris d'abord ; le travail ne tient que si le mini-jeu est réussi.
+      const r = RECIPES[a.id];
+      if (!r?.work) fail('Ce travail n’existe pas.');
+      const w = r.work;
+      const ship = w.type === 'construire' ? null : clone(ctx.ship);
+      if (w.type !== 'construire') {
+        if (!ship) fail('Bateau introuvable.');
+        if (!canManageShip(p, ship, ctx.crew)) fail('Tu ne peux pas travailler sur ce bateau.');
+      }
+      const why = workBlock(p, r, ship);
+      if (why) fail(why);
+      for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
+      if (!a.success) {
+        out.failed = true;
+        out.toast = `Travail raté : ${workLabel(w)}. Les matériaux sont perdus.`;
+        break;
+      }
+      if (w.type === 'construire') {
+        out.newShips = [newShip({ model: w.model, wood: w.wood, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: ctx.channelName || '' } : null }, now)];
+        out.toast = `${itemOf(w.model).name} construit en ${WOODS[w.wood].name.toLowerCase()} : il t’attend à quai !`;
+        break;
+      }
+      if (w.type === 'voile') ship.sail = w.level;
+      if (w.type === 'canon') ship.guns[w.size] += w.count;
+      if (w.type === 'cale') {
+        ship.capacity += w.amount;
+        ship.holdExt += w.amount;
+      }
+      if (w.type === 'granit') ship.granit = true;
+      if (w.type === 'plongee') ship.plongee = true;
+      if (w.type === 'moteur') ship.engine = true;
+      if (w.type === 'reparation') {
+        const st = shipStats(ship);
+        ship.hull = Math.min(st.hullMax, st.hull + Math.ceil((st.hullMax * w.amount) / 100));
+      }
+      ship.upgrades = [...(ship.upgrades || []), { type: w.type, amount: w.level ?? w.count ?? w.amount ?? 1, item: a.id, by: p.uid, at: now }].slice(-100);
+      out.ship = normalizeShip(ship);
+      out.toast = `${workLabel(w)} : travail réussi sur ${ship.name} !`;
       break;
     }
     case 'tech.save': {
@@ -765,6 +808,42 @@ export function staffAction(player, action) {
 /* ═══ Bateaux ════════════════════════════════════════════════════════════ */
 /** Espace RP d'un bateau sur Discord : un post dans le forum commun, un forum à lui, ou rien. */
 export const SHIP_SPACES = { post: 'Un post dans le forum des bateaux', forum: 'Un forum à lui', none: 'Aucun' };
+/* Bateaux v2 : bois de charpente, canons par calibre, travaux de l'atelier du charpentier */
+export const WOODS = {
+  standard: { name: 'Bois standard', mult: 1 },
+  robuste: { name: 'Bois robuste', mult: 1.25 },
+  deul: { name: 'Bois de Deul', mult: 1.5 },
+  adam: { name: 'Bois d’Adam', mult: 2 },
+};
+export const CANNONS = {
+  leger: { name: 'léger', power: 1, slow: 0.2 },
+  moyen: { name: 'moyen', power: 2, slow: 0.5 },
+  lourd: { name: 'lourd', power: 4, slow: 1 },
+};
+export const SHIP_WORKS = {
+  construire: 'Construire un bateau',
+  voile: 'Renforcer la voile',
+  canon: 'Ajouter des canons',
+  cale: 'Agrandir la cale',
+  granit: 'Coque en granit marin',
+  plongee: 'Revêtement de plongée',
+  moteur: 'Moteur au cola',
+  reparation: 'Réparer la coque',
+};
+/** Rang de charpentier nécessaire pour un niveau de voile : 1-3 Apprenti, 4-6 Confirmé, 7-10 Maître. */
+export const sailRank = (level) => (level <= 3 ? 1 : level <= 6 ? 2 : 3);
+/** Statistiques calculées d'un bateau : vitesse, robustesse, puissance, coque. */
+export function shipStats(s) {
+  const wood = WOODS[s.wood] || WOODS.standard;
+  const g = s.guns || { leger: s.cannons || 0 };
+  const slow = Object.entries(CANNONS).reduce((a, [k, c]) => a + (g[k] || 0) * c.slow, 0) + (s.holdExt || 0) / 200;
+  const speed = Math.max(1, Math.round(((s.speed ?? 10) + (s.sail ?? 1) * 2 + (s.engine ? 6 : 0) - slow) * 10) / 10);
+  const robust = Math.round((s.robust ?? 10) * wood.mult + (s.granit ? 10 : 0));
+  const power = Object.entries(CANNONS).reduce((a, [k, c]) => a + (g[k] || 0) * c.power, 0);
+  const hullMax = robust * 10;
+  const hull = Math.max(0, Math.min(hullMax, s.hull ?? hullMax));
+  return { speed, robust, power, hullMax, hull, damaged: hull < hullMax * 0.25 };
+}
 /** Caractéristiques enregistrées à la création : type, canons, capacité (kg), espace RP. */
 export function normalizeShipStats(x) {
   return {
@@ -773,17 +852,19 @@ export function normalizeShipStats(x) {
     cannons: int(x.cannons, 0, 500),
     capacity: Math.round(Math.min(1e7, Math.max(0, Number(x.capacity) || 0))),
     berths: int(x.berths ?? 4, 1, 1000), // places (personnes à bord)
-    sail: int(x.sail ?? 1, 1, 100), // niveau de voile = vitesse (pour la navigation)
+    speed: int(x.speed ?? 10, 1, 200), // vitesse de base du type
+    robust: int(x.robust ?? 10, 1, 1000), // robustesse de base du type
+    sail: int(x.sail ?? 1, 1, 100), // niveau de voile (renforcé à l'atelier, jusqu'à 10)
   };
 }
 /** Nouveau bateau, à partir d'un modèle (objet « Bateau ») ou de caractéristiques libres. */
-export function newShip({ model = null, name, desc, photo, type, cannons, capacity, berths, sail, owner = null, position = null } = {}, now = Date.now()) {
+export function newShip({ model = null, name, desc, photo, type, cannons, capacity, berths, sail, wood, engine, owner = null, position = null } = {}, now = Date.now()) {
   const m = model ? ITEMS[model] : null;
   if (model && m?.kind !== 'bateau') fail('Ce modèle de bateau n’existe pas.');
   const given = { type, cannons, capacity, berths, sail };
   for (const k of Object.keys(given)) if (given[k] == null) delete given[k];
   const stats = normalizeShipStats(m ? { ...m.ship, ...given } : given);
-  return normalizeShip({ name: str(name, 60) || stats.type || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, owner, position, created: now });
+  return normalizeShip({ name: str(name, 60) || stats.type || m?.name || 'Bateau sans nom', desc: str(desc ?? m?.desc ?? '', 600), photo: photo || null, icon: m?.img || null, model, ...stats, wood, engine: !!engine, owner, position, created: now });
 }
 export function normalizeShip(s) {
   Object.assign(s, normalizeShipStats(s));
@@ -796,6 +877,17 @@ export function normalizeShip(s) {
   s.passengers = [...new Set((s.passengers || []).map(String))].slice(0, s.berths);
   s.requests = (s.requests || []).filter((r) => r?.uid && !s.passengers.includes(String(r.uid))).slice(-50);
   s.upgrades ??= [];
+  // Bateaux v2 : bois, canons par calibre (les anciens canons comptent comme légers), revêtements, moteur, coque
+  s.wood = WOODS[s.wood] ? s.wood : 'standard';
+  const gunsIn = s.guns || { leger: int(s.cannons, 0, 500) };
+  s.guns = Object.fromEntries(Object.keys(CANNONS).map((k) => [k, int(gunsIn[k] ?? 0, 0, 500)]));
+  s.cannons = Object.values(s.guns).reduce((a, n) => a + n, 0);
+  s.engine = !!s.engine;
+  s.granit = !!s.granit;
+  s.plongee = !!s.plongee;
+  s.holdExt = int(s.holdExt ?? 0, 0, 1e7);
+  const hullMax = shipStats(s).hullMax;
+  s.hull = s.hull == null ? hullMax : int(s.hull, 0, hullMax);
   // Salon RP du bateau sur Discord (créé avec /bateau salon)
   s.channel = s.channel?.id ? { id: String(s.channel.id), kind: s.channel.kind === 'forum' ? 'forum' : 'post', name: str(s.channel.name, 100) } : null;
   return s;
@@ -805,6 +897,53 @@ export function canManageShipChannels(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
   if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'shipChannels');
   return false;
+}
+/** Travail sur bateau d'une recette (atelier du charpentier), ou null. */
+export function normalizeWork(w) {
+  if (!w || !SHIP_WORKS[w.type]) return null;
+  const t = w.type;
+  if (t === 'construire') return { type: t, model: String(w.model || ''), wood: WOODS[w.wood] ? w.wood : 'standard' };
+  if (t === 'voile') return { type: t, level: int(w.level ?? 1, 1, 10) };
+  if (t === 'canon') return { type: t, size: CANNONS[w.size] ? w.size : 'leger', count: int(w.count ?? 1, 1, 20) };
+  if (t === 'cale') return { type: t, amount: int(w.amount ?? 100, 10, 100000) };
+  if (t === 'reparation') return { type: t, amount: int(w.amount ?? 25, 1, 100) };
+  return { type: t };
+}
+export function workLabel(w) {
+  if (!w) return '';
+  if (w.type === 'construire') return `Construire : ${itemOf(w.model).name} (${WOODS[w.wood].name.toLowerCase()})`;
+  if (w.type === 'voile') return `Voile niveau ${w.level}`;
+  if (w.type === 'canon') return `${w.count} canon${w.count > 1 ? 's' : ''} ${CANNONS[w.size].name}${w.count > 1 ? 's' : ''}`;
+  if (w.type === 'cale') return `Cale +${fmt(w.amount)} kg`;
+  if (w.type === 'reparation') return `Réparer la coque (+${w.amount} %)`;
+  return SHIP_WORKS[w.type];
+}
+/** Pourquoi ce travail est impossible (null s'il est possible). ship : null pour une construction. */
+export function workBlock(p, recipe, ship) {
+  const w = recipe.work;
+  const why = craftBlock(p, recipe);
+  if (why) return why;
+  if (w.type === 'voile' && p.job.lvl < sailRank(w.level)) return `Voile niveau ${w.level} : demande le niveau ${JOB_LEVELS[sailRank(w.level) - 1]}.`;
+  if (w.type === 'construire') return ITEMS[w.model]?.kind === 'bateau' ? null : 'Ce modèle de bateau n’existe plus.';
+  if (!ship) return 'Choisis un bateau.';
+  if (w.type === 'voile' && ship.sail !== w.level - 1) return `La voile doit d’abord être au niveau ${w.level - 1} (elle est au niveau ${ship.sail}).`;
+  if (w.type === 'granit' && ship.granit) return 'Déjà en granit marin.';
+  if (w.type === 'plongee' && ship.plongee) return 'Revêtement de plongée déjà posé.';
+  if (w.type === 'moteur' && ship.engine) return 'Moteur au cola déjà installé.';
+  if (w.type === 'reparation' && shipStats(ship).hull >= shipStats(ship).hullMax) return 'La coque est intacte.';
+  return null;
+}
+/** Difficulté du mini-jeu : vitesse du curseur, largeur de la zone (%), clous à planter, coups permis. */
+export function workDifficulty(recipe, p) {
+  const w = recipe.work || {};
+  const base = {
+    construire: 0.5 + Object.keys(WOODS).indexOf(w.wood) * 0.15,
+    voile: 0.3 + (w.level || 1) * 0.07,
+    canon: { leger: 0.4, moyen: 0.55, lourd: 0.7 }[w.size] ?? 0.5,
+    cale: 0.4, granit: 0.8, plongee: 0.85, moteur: 0.7, reparation: 0.3,
+  }[w.type] ?? 0.5;
+  const d = Math.min(1, base), lvl = p.job?.lvl || 1;
+  return { speed: 0.6 + d * 1.4, zone: Math.max(6, 22 - d * 14 + (lvl - 1) * 4), nails: 5, strikes: 6 + lvl };
 }
 export function canEditShip(p, ship, crew) {
   if (ship.owner?.kind === 'player') return ship.owner.id === p.uid;
@@ -821,7 +960,10 @@ export function upgradeShip(ship, type, amount, { by = null, item = null, now = 
   const n = int(amount, -1e6, 1e6);
   if (!n) fail('Indique une valeur.');
   if (type === 'cale') ship.capacity = Math.max(0, ship.capacity + n);
-  if (type === 'canons') ship.cannons = Math.max(0, ship.cannons + n);
+  if (type === 'canons') {
+    ship.guns = { ...(ship.guns || {}), leger: Math.max(0, (ship.guns?.leger ?? ship.cannons ?? 0) + n) };
+    normalizeShip(ship);
+  }
   if (type === 'voile') ship.sail = Math.max(1, ship.sail + n);
   ship.upgrades = [...(ship.upgrades || []), { type, amount: n, item, by, at: now }].slice(-100);
   return ship;

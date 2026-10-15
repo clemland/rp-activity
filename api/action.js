@@ -11,7 +11,7 @@ import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipLi
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { invitesFor, loadHarbor } from './_lib/context.js';
-import { playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
+import { RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
@@ -105,6 +105,28 @@ export default handler(['POST'], async (req, body) => {
       if (out.left) return { ...out, crew: null, ships: shipList(Object.fromEntries(Object.entries(cs.ships).filter(([, sh]) => sh.owner?.kind === 'player'))), invites: await invitesFor(me.uid) };
       const names = { ...cs.memberNames };
       return reply(out, { crew: { ...out.crew, memberNames: names }, ships: out.ships });
+    }
+
+    // Atelier du charpentier : travail sur un bateau (à lui ou à son équipage), ou construction
+    if (action.type === 'ship.work') {
+      const r = RECIPES[action.id];
+      const sid = r?.work?.type === 'construire' ? null : String(action.shipId || '');
+      const ship = sid ? cs.ships[sid] : null;
+      if (sid) need(ship, 404, 'Bateau introuvable : il doit être à toi ou à ton équipage.');
+      const out = playerAction(player, action, { ...ctx, ship, crew: cs.crew, channelName: player.position?.name || '' });
+      const extra = { ships: {} };
+      if (out.ship) {
+        await write('ships', sid, out.ship, cs.shipVersions[sid]);
+        extra.ships[sid] = out.ship;
+      }
+      for (const s of out.newShips || []) {
+        let id = slug(s.name), n = 2;
+        while (await read('ships', id)) id = `${slug(s.name)}-${n++}`;
+        await write('ships', id, s, null);
+        extra.ships[id] = s;
+      }
+      await write('players', me.uid, out.player, version);
+      return reply(out, extra);
     }
 
     // Bateau : embarquer, débarquer, demandes, améliorations

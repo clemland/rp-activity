@@ -14,7 +14,7 @@ import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
 import { staffPerms } from './_lib/discord.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep } from '../shared/game.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep, dockShip } from '../shared/game.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
 
 const RP_KEY = 'rp:channels';
@@ -145,7 +145,7 @@ export default handler(['POST'], async (req, body) => {
               await write('ships', sid, sh, r.version);
               return sh;
             });
-            if (s) res.voyage = { ship: s.name, done: s.voyage.done, needed: s.voyage.needed, to: s.voyage.toName, arrived: s.voyage.status === 'arrived' };
+            if (s) res.voyage = { ship: s.name, done: s.voyage.done, needed: s.voyage.needed, to: s.voyage.unknown && s.voyage.status !== 'arrived' ? '???' : s.voyage.toName, arrived: s.voyage.status === 'arrived' };
           } else if (v.status === 'arrived' && !inShip) {
             carte ??= (await loadMap()).map;
             if (islandOf(carte, here) !== v.to) continue;
@@ -153,12 +153,21 @@ export default handler(['POST'], async (req, body) => {
               const r = await read('ships', sid);
               const sh = normalizeShip(r.data);
               if (sh.voyage?.status !== 'arrived') return null;
-              sh.position = { channelId: here.channelId, name: here.name, parentId: here.parentId };
-              sh.voyage = null;
+              dockShip(sh, here, carte, Date.now());
               await write('ships', sid, sh, r.version);
               return sh;
             });
-            if (s) res.docked = { ship: s.name, where: here.name };
+            if (s) {
+              res.docked = { ship: s.name, where: here.name };
+              // Les passagers découvrent l'île : elle apparaît sur leur carte
+              for (const uid of s.passengers) {
+                await retry(async () => {
+                  const r = await read('players', uid);
+                  if (!r || (r.data.discovered || []).includes(v.to)) return;
+                  await write('players', uid, { ...r.data, discovered: [...(r.data.discovered || []), v.to] }, r.version);
+                });
+              }
+            }
           }
         }
       }

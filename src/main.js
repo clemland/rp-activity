@@ -1115,9 +1115,22 @@ function ownerLabel(sh) {
   return sh.owner.id === S.uid ? 'À toi' : `À ${esc(NAVD?.names?.[sh.owner.id] ?? '?')}`;
 }
 const navName = (u) => (u === S.uid ? 'toi' : esc(NAVD?.names?.[u] ?? '?'));
+/** Log Pose : sur une île de Grand Line, un navigateur à bord peut le suivre une fois rechargé. */
+function logPoseHTML(sh) {
+  if (sh.voyage || !sh.position || !MAP?.here) return '';
+  const isl = MAP.islands[MAP.here];
+  if (!isl?.grandLine) return '';
+  const lp = sh.logPose?.island === MAP.here ? sh.logPose : null;
+  const left = lp ? lp.ready - Date.now() : 0;
+  const ready = left <= 0;
+  return `<div class="crew-box voyage-box"><h3>🧭 Log Pose</h3>
+    <p class="note" style="margin:0">${ready ? 'Rechargé : il pointe vers l’île suivante de Grand Line, encore inconnue.' : `En charge : encore ${G.duree(left / 1000)} sur ${esc(isl.name)}.`}</p>
+    ${ready ? (S.job.id === 'navigateur' ? `<div class="mj-row"><button class="btn sm" data-voy-logpose="${esc(sh.id)}">Suivre le Log Pose</button></div>` : '<p class="note" style="margin:0">Il faut qu’un navigateur à bord le suive.</p>') : ''}</div>`;
+}
 /** Encadré du voyage du bateau où l'on est à bord : départ, vote, traversée, arrivée. */
 function voyageHTML(sh) {
-  const v = sh.voyage, me = S.uid, st = G.shipStats(sh);
+  const v = sh.voyage ? { ...sh.voyage } : null, me = S.uid, st = G.shipStats(sh);
+  if (v?.unknown && v.status !== 'arrived') v.toName = '???'; // destination du Log Pose : inconnue jusqu’à l’arrivée (affichage)
   if (!v) {
     if (!sh.position) return '';
     if (!G.canPilot(S, sh, CREW)) return '<p class="note">Seul le capitaine (ou un grade avec « Choisir la destination ») peut proposer un départ.</p>';
@@ -1166,7 +1179,7 @@ function renderNav() {
   $('v-nav').innerHTML = `
     <section class="logbook nav-port">
       <h2>Navigation</h2>
-      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ' (en mer)'} ${n.aboard.position ? `<button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button>` : ''}</div>${voyageHTML(n.aboard)}` : ''}
+      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ' (en mer)'} ${n.aboard.position ? `<button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button>` : ''}</div>${logPoseHTML(n.aboard)}${voyageHTML(n.aboard)}` : ''}
       ${n.requests.length ? `<div class="crew-box"><h3>Demandes d’embarquement</h3>${n.requests.map((r) => `<div class="member-row"><span class="m-name"><b>${navName(r.uid)}</b> veut monter sur <b>${esc(r.shipName)}</b></span><span></span><span class="m-acts"><button class="btn sm" data-req-yes="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Accepter</button><button class="btn sm ghost" data-req-no="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Refuser</button></span></div>`).join('')}</div>` : ''}
       <h3 class="ed-h">${POSID ? `À quai à #${esc(CHNAME || POSID)}` : 'À quai'}</h3>
       ${!POSID ? '<p class="note">Tu n’es nulle part pour l’instant : écris un message RP (400 caractères ou plus) dans un salon RP pour t’y trouver.</p>' : harbor ? `<div class="ships">${harbor}</div>` : '<p class="note">Aucun bateau à quai ici.</p>'}
@@ -1175,6 +1188,8 @@ function renderNav() {
   paintStatic($('v-nav'));
 }
 $('v-nav').addEventListener('click', async (e) => {
+  const vl = e.target.closest('[data-voy-logpose]')?.dataset.voyLogpose;
+  if (vl) return void run({ type: 'ship.voyage.logpose', shipId: vl });
   const vp = e.target.closest('[data-voy-propose]')?.dataset.voyPropose;
   if (vp) return void run({ type: 'ship.voyage.propose', shipId: vp, to: $('voy-to').value });
   const vy = e.target.closest('[data-voy-yes]')?.dataset.voyYes;
@@ -3662,7 +3677,8 @@ function renderIslandEdit() {
       <div class="isl-flags">
         <label class="chk"><input type="checkbox" id="isl-visible" ${d.visible ? 'checked' : ''}> Visible par tous</label>
         <label class="chk"><input type="checkbox" id="isl-access" ${d.accessible ? 'checked' : ''}> Accessible</label>
-      </div>`}
+      </div>
+      ${glFieldsHTML(d)}`}
     </div>
     ${wp ? '<p class="note">Invisible pour les joueurs : il sert à forcer le chemin des routes (entrée de Reverse Mountain, traversée de la Calm Belt…). Pour que les joueurs voient « via Reverse Mountain », fais-en plutôt une île.</p>' : `
     <div class="img-field" style="margin-top:12px">
@@ -3690,6 +3706,15 @@ function renderIslandEdit() {
       }).join('')}</div>` : ''}`
     : '<p class="note">Enregistre d’abord, puis trace ses routes.</p>'}`;
 }
+/** Réglages Grand Line d'une île : Log Pose, recharge, île(s) suivante(s). */
+function glFieldsHTML(d) {
+  const others = Object.entries(amap.islands).filter(([id, i]) => id !== islandDraftId && i.kind !== 'waypoint');
+  return `<div class="wide work-box"><label class="chk"><input type="checkbox" id="isl-gl" ${d.grandLine ? 'checked' : ''}> 🧭 Île de Grand Line (Log Pose)</label>
+    ${d.grandLine ? `<div class="mj-row"><label for="isl-recharge">Recharge du Log Pose (heures)</label><input id="isl-recharge" type="number" min="0" max="720" value="${d.recharge ?? 12}"></div>
+    <b style="font-size:14px">Île(s) suivante(s) indiquée(s) par le Log Pose</b>
+    <div class="perms">${others.map(([id, i]) => `<label><input type="checkbox" data-gl-next="${esc(id)}" ${(d.next || []).includes(id) ? 'checked' : ''}> ${esc(i.name)}</label>`).join('') || '<span class="note">Aucune autre île.</span>'}</div>
+    <p class="note" style="margin:0">Plusieurs îles cochées : le Log Pose en choisit une au hasard à chaque escale. Décoche « Visible par tous » sur les îles à découvrir.</p>` : ''}</div>`;
+}
 function readIslandEdit() {
   const d = islandDraft;
   d.name = $('isl-name').value;
@@ -3699,6 +3724,9 @@ function readIslandEdit() {
   d.size = +$('isl-size').value;
   d.rot = +$('isl-rot').value;
   d.visible = $('isl-visible').checked;
+  d.grandLine = !!$('isl-gl')?.checked;
+  if ($('isl-recharge')) d.recharge = Math.max(0, Math.round(+$('isl-recharge').value || 0));
+  if (document.querySelector('#isl-body [data-gl-next]')) d.next = [...document.querySelectorAll('#isl-body [data-gl-next]')].filter((c) => c.checked).map((c) => c.dataset.glNext);
 }
 /** Change une route depuis la fiche d'une île, puis réaffiche la fiche. */
 async function segCall(op, payload) {
@@ -3710,6 +3738,10 @@ $('d-island').addEventListener('input', (e) => {
     if (e.target.id === 'isl-rot') $('isl-rot-v').textContent = e.target.value;
 });
 $('d-island').addEventListener('change', async (e) => {
+  if (e.target.id === 'isl-gl') {
+    readIslandEdit();
+    return renderIslandEdit();
+  }
   const dirTo = e.target.dataset?.dir;
   if (dirTo) {
     const v = e.target.value;

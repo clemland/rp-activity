@@ -190,6 +190,7 @@ export function normalize(p) {
   p.crewId ??= null;
   p.position ??= null; // dernier salon RP où il a écrit
     p.health = (Array.isArray(p.health) ? p.health : []).filter((h) => h && str(h.label, 80)).map(normalizeHealth).slice(0, 30);
+  p.discovered = [...new Set((Array.isArray(p.discovered) ? p.discovered : []).map(String))].slice(0, 500); // îles découvertes
   // Courbe d'XP changée : le surplus d'une ancienne fiche devient des niveaux (avec leurs points).
   if (typeof p.level === 'number' && typeof p.xp === 'number') {
     p.level = Math.min(MAX_LEVEL, Math.max(1, p.level));
@@ -880,9 +881,11 @@ export function normalizeShip(s) {
         status: v.status, from: String(v.from || ''), to: String(v.to), fromName: str(v.fromName, 60), toName: str(v.toName, 60),
         needed: int(v.needed, 1, 1000), done: int(v.done, 0, 1000), by: String(v.by || ''),
         votes: Object.fromEntries(Object.entries(v.votes || {}).filter(([, x]) => x).map(([u]) => [u, true])),
-        port: pos(v.port), at: Number(v.at) || 0,
+        port: pos(v.port), at: Number(v.at) || 0, unknown: !!v.unknown,
       }
     : null;
+  // Log Pose : rechargé sur l'île de Grand Line où le bateau est à quai
+  s.logPose = s.logPose?.island ? { island: String(s.logPose.island), target: s.logPose.target ? String(s.logPose.target) : null, ready: Number(s.logPose.ready) || 0 } : null;
   s.passengers = [...new Set((s.passengers || []).map(String))].slice(0, s.berths);
   s.requests = (s.requests || []).filter((r) => r?.uid && !s.passengers.includes(String(r.uid))).slice(-50);
   s.upgrades ??= [];
@@ -1028,6 +1031,17 @@ export function voyageStep(ship) {
   if (ship.voyage.done >= ship.voyage.needed) ship.voyage.status = 'arrived';
   return ship;
 }
+/** Mise à quai à l'arrivée : position, fin du voyage, et Log Pose qui se recharge sur une île de Grand Line. */
+export function dockShip(ship, here, map, now = Date.now()) {
+  const isl = islandOf(map, here);
+  const i = isl && map.islands[isl];
+  ship.position = { channelId: here.channelId, name: here.name, parentId: here.parentId || null };
+  ship.voyage = null;
+  ship.logPose = i?.grandLine
+    ? { island: isl, target: i.next.length ? i.next[Math.floor(Math.random() * i.next.length)] : null, ready: now + (i.recharge ?? 12) * 3_600_000 }
+    : null;
+  return ship;
+}
 /** Tous les passagers ont accepté : le bateau quitte le port. */
 function sailIfReady(ship, out) {
   const v = ship.voyage;
@@ -1035,7 +1049,7 @@ function sailIfReady(ship, out) {
   v.status = 'sea';
   v.port = ship.position;
   ship.position = null;
-  out.toast = `${ship.name} lève l’ancre vers ${v.toName} ! ${v.needed} actions RP de traversée.`;
+  out.toast = `${ship.name} lève l’ancre vers ${v.unknown ? 'une île inconnue' : v.toName} ! ${v.needed} actions RP de traversée.`;
 }
 
 /**
@@ -1078,12 +1092,38 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const from = islandOf(map, ship.position);
       if (!from) fail('Ce port n’est sur aucune île de la carte.');
       const to = map.islands[a.to];
-      if (!to || to.kind !== 'island' || !to.visible || !to.accessible || a.to === from) fail('Destination impossible.');
+      if (!to || to.kind !== 'island' || (!to.visible && !(p.discovered || []).includes(a.to)) || !to.accessible || a.to === from) fail('Destination impossible.');
       const t = travelTime(map, from, a.to);
       if (!t) fail('Aucune route connue vers cette île.');
       const needed = voyageActions(t.value, st.speed, map.pace);
       ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now() };
       out.toast = `Départ proposé vers ${to.name} (${needed} actions) : les passagers doivent accepter.`;
+      sailIfReady(ship, out);
+      break;
+    }
+    case 'ship.voyage.logpose': {
+      // Grand Line : un navigateur à bord suit le Log Pose rechargé, vers une île encore inconnue
+      const map = ctx.map;
+      if (!map) fail('Carte indisponible.');
+      if (p.job?.id !== 'navigateur') fail('Seul un navigateur sait lire le Log Pose.');
+      if (!ship.passengers.includes(p.uid)) fail('Monte d’abord à bord.');
+      if (ship.voyage) fail('Un départ est déjà prévu.');
+      if (!ship.position) fail('Le bateau n’est pas à quai.');
+      if (!ship.channel) fail('Ce bateau n’a pas de salon RP : il en faut un pour naviguer.');
+      const st = shipStats(ship);
+      if (st.damaged) fail('Le bateau est en avarie : fais-le réparer avant de prendre la mer.');
+      const from = islandOf(map, ship.position);
+      const isl = from && map.islands[from];
+      if (!isl?.grandLine) fail('Ce n’est pas une île de Grand Line.');
+      const now = ctx.now || Date.now();
+      if (ship.logPose?.island !== from) ship.logPose = { island: from, target: isl.next.length ? isl.next[Math.floor(Math.random() * isl.next.length)] : null, ready: now };
+      if (now < ship.logPose.ready) fail(`Le Log Pose se recharge encore : ${duree((ship.logPose.ready - now) / 1000)}.`);
+      const target = ship.logPose.target;
+      if (!target || !map.islands[target]) fail('Le Log Pose ne pointe vers aucune île : le staff doit définir l’île suivante.');
+      const t = travelTime(map, from, target);
+      const needed = voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace);
+      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true };
+      out.toast = `Le Log Pose pointe vers une île inconnue (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;
     }
@@ -1518,6 +1558,10 @@ export function normalizeIsland(x = {}) {
     ly: x.ly != null && x.ly !== '' && Number.isFinite(+x.ly) ? Math.round(Math.min(3, Math.max(-3, +x.ly)) * 100) / 100 : 0.45,
     visible: wp ? false : x.visible !== false,
     accessible: x.accessible !== false,
+    // Grand Line : le Log Pose se recharge ici (heures), puis pointe vers l'une des îles suivantes
+    grandLine: !wp && !!x.grandLine,
+    next: wp ? [] : (Array.isArray(x.next) ? x.next.map(String) : []).slice(0, 10),
+    recharge: int(x.recharge ?? 12, 0, 720),
     channels: wp ? [] : (Array.isArray(x.channels) ? x.channels : [])
       .filter((c) => c && /^[\w-]{1,30}$/.test(String(c.id)))
       .map((c) => ({ id: String(c.id), name: str(c.name, 100), kind: c.kind === 'forum' ? 'forum' : 'salon' }))
@@ -1533,6 +1577,7 @@ export function normalizeMap(m = {}) {
       islands[id] = normalizeIsland(isl);
     } catch {}
   }
+  for (const i of Object.values(islands)) i.next = i.next.filter((n) => islands[n]?.kind === 'island');
   // Routes : { "a|b": temps choisi, ou null = selon la longueur }
   const links = {};
   const add = (k, v) => {
@@ -1640,7 +1685,7 @@ export function mapFor(map0, player, { staff = false, aboard = null } = {}) {
   const map = normalizeMap(clone(map0));
   const here = islandOf(map, player?.position);
   if (staff) return { ...map, here };
-  const ids = Object.keys(map.islands).filter((id) => map.islands[id].kind === 'island' && (map.islands[id].visible || id === here));
+  const ids = Object.keys(map.islands).filter((id) => map.islands[id].kind === 'island' && (map.islands[id].visible || id === here || (player?.discovered || []).includes(id)));
   const islands = Object.fromEntries(ids.map((id) => [id, map.islands[id]]));
   const travel = {};
   if (here) {
@@ -1653,9 +1698,10 @@ export function mapFor(map0, player, { staff = false, aboard = null } = {}) {
   // En mer : le bateau du joueur avance sur la carte (seulement sa position, pas le tracé de la route)
   const v = aboard?.voyage && aboard.voyage.status !== 'vote' ? aboard.voyage : null;
   const pt = v ? voyageTrack(map, v) : null;
+  const hide = v?.unknown && v.status === 'sea'; // destination du Log Pose : inconnue jusqu'à l'arrivée
   return {
     bg: map.bg, ratio: map.ratio, islands, here: pt ? null : here, travel, pace: map.pace,
-    voyage: pt ? { x: pt.x, y: pt.y, ship: aboard.name, to: v.to, toName: v.toName, done: v.done, needed: v.needed, status: v.status } : null,
+    voyage: pt ? { x: pt.x, y: pt.y, ship: aboard.name, to: hide ? null : v.to, toName: hide ? '???' : v.toName, done: v.done, needed: v.needed, status: v.status } : null,
   };
 }
 

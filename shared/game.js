@@ -1038,7 +1038,7 @@ export function dockShip(ship, here, map, now = Date.now()) {
   ship.position = { channelId: here.channelId, name: here.name, parentId: here.parentId || null };
   ship.voyage = null;
   ship.logPose = i?.grandLine
-    ? { island: isl, target: i.next.length ? i.next[Math.floor(Math.random() * i.next.length)] : null, ready: now + (i.recharge ?? 12) * 3_600_000 }
+    ? { island: isl, target: !i.choose && i.next.length ? i.next[Math.floor(Math.random() * i.next.length)] : null, ready: now + (i.recharge ?? 12) * 3_600_000 }
     : null;
   return ship;
 }
@@ -1116,9 +1116,10 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const isl = from && map.islands[from];
       if (!isl?.grandLine) fail('Ce n’est pas une île de Grand Line.');
       const now = ctx.now || Date.now();
-      if (ship.logPose?.island !== from) ship.logPose = { island: from, target: isl.next.length ? isl.next[Math.floor(Math.random() * isl.next.length)] : null, ready: now };
+      if (ship.logPose?.island !== from) ship.logPose = { island: from, target: !isl.choose && isl.next.length ? isl.next[Math.floor(Math.random() * isl.next.length)] : null, ready: now };
       if (now < ship.logPose.ready) fail(`Le Log Pose se recharge encore : ${duree((ship.logPose.ready - now) / 1000)}.`);
-      const target = ship.logPose.target;
+      // Embranchement : le navigateur choisit le chemin (sans savoir où il mène)
+      const target = isl.choose ? isl.next[int(a.choice ?? 0, 0, 99)] : ship.logPose.target;
       if (!target || !map.islands[target]) fail('Le Log Pose ne pointe vers aucune île : le staff doit définir l’île suivante.');
       const t = travelTime(map, from, target);
       const needed = voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace);
@@ -1562,6 +1563,7 @@ export function normalizeIsland(x = {}) {
     grandLine: !wp && !!x.grandLine,
     next: wp ? [] : (Array.isArray(x.next) ? x.next.map(String) : []).slice(0, 10),
     recharge: int(x.recharge ?? 12, 0, 720),
+    choose: !wp && !!x.choose, // embranchement : le navigateur choisit son chemin parmi les îles suivantes
     channels: wp ? [] : (Array.isArray(x.channels) ? x.channels : [])
       .filter((c) => c && /^[\w-]{1,30}$/.test(String(c.id)))
       .map((c) => ({ id: String(c.id), name: str(c.name, 100), kind: c.kind === 'forum' ? 'forum' : 'salon' }))
@@ -1686,7 +1688,8 @@ export function mapFor(map0, player, { staff = false, aboard = null } = {}) {
   const here = islandOf(map, player?.position);
   if (staff) return { ...map, here };
   const ids = Object.keys(map.islands).filter((id) => map.islands[id].kind === 'island' && (map.islands[id].visible || id === here || (player?.discovered || []).includes(id)));
-  const islands = Object.fromEntries(ids.map((id) => [id, map.islands[id]]));
+  // Côté joueur : on ne dit pas où mènent les chemins du Log Pose, seulement combien il y en a
+  const islands = Object.fromEntries(ids.map((id) => [id, { ...map.islands[id], next: map.islands[id].next.length }]));
   const travel = {};
   if (here) {
     for (const id of ids) {

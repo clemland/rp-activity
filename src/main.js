@@ -1124,8 +1124,8 @@ function logPoseHTML(sh) {
   const left = lp ? lp.ready - Date.now() : 0;
   const ready = left <= 0;
   return `<div class="crew-box voyage-box"><h3>🧭 Log Pose</h3>
-    <p class="note" style="margin:0">${ready ? 'Rechargé : il pointe vers l’île suivante de Grand Line, encore inconnue.' : `En charge : encore ${G.duree(left / 1000)} sur ${esc(isl.name)}.`}</p>
-    ${ready ? (S.job.id === 'navigateur' ? `<div class="mj-row"><button class="btn sm" data-voy-logpose="${esc(sh.id)}">Suivre le Log Pose</button></div>` : '<p class="note" style="margin:0">Il faut qu’un navigateur à bord le suive.</p>') : ''}</div>`;
+    <p class="note" style="margin:0">${ready ? (isl.choose && isl.next > 1 ? `Rechargé : ${isl.next} chemins s’offrent à vous, chacun vers une île inconnue.` : 'Rechargé : il pointe vers l’île suivante de Grand Line, encore inconnue.') : `En charge : encore ${G.duree(left / 1000)} sur ${esc(isl.name)}.`}</p>
+    ${ready ? (S.job.id === 'navigateur' ? `<div class="mj-row">${isl.choose && isl.next > 1 ? `<label for="voy-path">Chemin</label><select id="voy-path">${Array.from({ length: isl.next }, (_, i) => `<option value="${i}">Chemin ${i + 1}</option>`).join('')}</select>` : ''}<button class="btn sm" data-voy-logpose="${esc(sh.id)}">${isl.choose && isl.next > 1 ? 'Prendre ce chemin' : 'Suivre le Log Pose'}</button></div>${isl.choose && isl.next > 1 ? '<p class="note" style="margin:0">Une fois engagé, pas de retour en arrière.</p>' : ''}` : '<p class="note" style="margin:0">Il faut qu’un navigateur à bord le suive.</p>') : ''}</div>`;
 }
 /** Encadré du voyage du bateau où l'on est à bord : départ, vote, traversée, arrivée. */
 function voyageHTML(sh) {
@@ -1189,7 +1189,7 @@ function renderNav() {
 }
 $('v-nav').addEventListener('click', async (e) => {
   const vl = e.target.closest('[data-voy-logpose]')?.dataset.voyLogpose;
-  if (vl) return void run({ type: 'ship.voyage.logpose', shipId: vl });
+  if (vl) return void run({ type: 'ship.voyage.logpose', shipId: vl, choice: +($('voy-path')?.value ?? 0) });
   const vp = e.target.closest('[data-voy-propose]')?.dataset.voyPropose;
   if (vp) return void run({ type: 'ship.voyage.propose', shipId: vp, to: $('voy-to').value });
   const vy = e.target.closest('[data-voy-yes]')?.dataset.voyYes;
@@ -3711,6 +3711,7 @@ function glFieldsHTML(d) {
   const others = Object.entries(amap.islands).filter(([id, i]) => id !== islandDraftId && i.kind !== 'waypoint');
   return `<div class="wide work-box"><label class="chk"><input type="checkbox" id="isl-gl" ${d.grandLine ? 'checked' : ''}> 🧭 Île de Grand Line (Log Pose)</label>
     ${d.grandLine ? `<div class="mj-row"><label for="isl-recharge">Recharge du Log Pose (heures)</label><input id="isl-recharge" type="number" min="0" max="720" value="${d.recharge ?? 12}"></div>
+    <label class="chk"><input type="checkbox" id="isl-choose" ${d.choose ? 'checked' : ''}> Embranchement : le navigateur choisit son chemin (ex. Reverse Mountain)</label>
     <b style="font-size:14px">Île(s) suivante(s) indiquée(s) par le Log Pose</b>
     <div class="perms">${others.map(([id, i]) => `<label><input type="checkbox" data-gl-next="${esc(id)}" ${(d.next || []).includes(id) ? 'checked' : ''}> ${esc(i.name)}</label>`).join('') || '<span class="note">Aucune autre île.</span>'}</div>
     <p class="note" style="margin:0">Plusieurs îles cochées : le Log Pose en choisit une au hasard à chaque escale. Décoche « Visible par tous » sur les îles à découvrir.</p>` : ''}</div>`;
@@ -3725,6 +3726,7 @@ function readIslandEdit() {
   d.rot = +$('isl-rot').value;
   d.visible = $('isl-visible').checked;
   d.grandLine = !!$('isl-gl')?.checked;
+  if ($('isl-choose')) d.choose = $('isl-choose').checked;
   if ($('isl-recharge')) d.recharge = Math.max(0, Math.round(+$('isl-recharge').value || 0));
   if (document.querySelector('#isl-body [data-gl-next]')) d.next = [...document.querySelectorAll('#isl-body [data-gl-next]')].filter((c) => c.checked).map((c) => c.dataset.glNext);
 }

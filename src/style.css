@@ -1367,6 +1367,19 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 
 /* ═══ v47 : navigation ═══ */
 .voyage-box{margin-top:10px}
+
+/* ═══ v48 : médecin ═══ */
+.care-req{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:14px;background:#e8ecfb;border:2px solid var(--ink);border-radius:8px;padding:4px 10px}
+.care-row select{font:inherit;font-size:13px;color:var(--brown);background:#fffaea;border:2px solid var(--ink);border-radius:5px;padding:2px 4px;max-width:260px}
+.op-vit i{background-color:#2f9a55}
+.op-vit.bad i{background-color:var(--red)}
+.op-step{margin:10px 0 6px}
+.op-dose{background:repeating-linear-gradient(90deg,#e9f4fb 0 40px,#dbeaf5 40px 42px)}
+.op-ok{background:rgba(47,154,85,.45);border-color:#2f9a55}
+.op-cv{display:block;width:100%;max-width:460px;aspect-ratio:460/160;border:3px solid var(--ink);border-radius:6px;background:#f6e3d3;touch-action:none;cursor:crosshair}
+.op-sut{position:relative;height:170px;border:3px solid var(--ink);border-radius:6px;background:#f6e3d3}
+.op-pt{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:2px solid var(--ink);background:#fff;font-weight:800;cursor:pointer}
+.op-pt.done{background:#2f9a55;color:#fff}
 .boat-mark{position:absolute;z-index:5;transform:translate(-50%,-50%) scale(calc(1 / var(--z, 1)));display:grid;justify-items:center;pointer-events:none}
 .boat-ico{font-size:28px;line-height:1;filter:drop-shadow(0 2px 2px rgba(0,0,0,.5));animation:boatbob 2.4s ease-in-out infinite}
 @keyframes boatbob{50%{transform:translateY(-3px) rotate(-5deg)}}

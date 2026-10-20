@@ -265,7 +265,7 @@ function renderHero() {
     const hh = $('h-health');
   if (hh) {
     const open = hh.querySelector('details')?.open; // garder le détail déplié au rafraîchissement
-    hh.innerHTML = healthHTML(S);
+    hh.innerHTML = healthHTML(S) + careInHTML();
     if (open) hh.querySelector('details')?.setAttribute('open', '');
   }
   const pos = $('h-pos');
@@ -880,7 +880,7 @@ function needChip([k, q], have = true) {
 function renderJob() {
   if (!S) return;
   const job = S.job.id ? JOBS[S.job.id] : null;
-  const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.work && (!r.job || r.job === S.job.id));
+  const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.work && !r.care && (!r.job || r.job === S.job.id));
   const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r)) : recs;
   const c = S.craft;
   const ready = c && Date.now() >= c.end;
@@ -927,7 +927,7 @@ function renderJob() {
           <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
         </div>
       </article>`;
-    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}`;
+    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}`;
 }
 $('v-job').addEventListener('click', async (e) => {
   const cf = e.target.closest('[data-cf]')?.dataset.cf;
@@ -1016,7 +1016,7 @@ function nailGame(diff, title) {
       zone.style.width = `${diff.zone}%`;
     };
     const paint = () => {
-      $('nail-row').innerHTML = Array.from({ length: diff.nails }, (_, i) => `<span class="nail ${i < hits ? 'in' : ''}">${i < hits ? '🔩' : '◦'}</span>`).join('') + `<small class="note">${left} coup${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''}</small>`;
+      $('nail-row').innerHTML = Array.from({ length: diff.nails }, (_, i) => `<span class="nail ${i < hits ? 'in' : ''}">${i < hits ? diff.icon || '🔩' : '◦'}</span>`).join('') + `<small class="note">${left} coup${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''}</small>`;
     };
     const stop = () => {
       cancelAnimationFrame(raf);
@@ -1061,6 +1061,7 @@ function nailGame(diff, title) {
       cur.style.left = `${pos}%`;
       raf = requestAnimationFrame(tick);
     };
+    $('nail-hit').textContent = diff.verb || '🔨 Frapper';
     $('nail-hit').onclick = hit;
     board.onclick = hit;
     d.addEventListener('close', () => {
@@ -1106,6 +1107,241 @@ function readWorkFields(r) {
     count: $('rc-w-count')?.value ?? prev.count, amount: $('rc-w-amount')?.value ?? prev.amount,
   });
   if (t === 'construire' && !r.work.model) r.work.model = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind === 'bateau') || '';
+}
+
+/* ═══ Cabinet médical : soigner les blessures ════════════════════════════ */
+let cabinet = { patients: null };
+/** Demandes de soin reçues, affichées sous l'état de santé de la fiche. */
+function careInHTML() {
+  const list = S.careIn || [];
+  if (!list.length || VIEW) return '';
+  return list.map((q) => `<div class="care-req">🩺 <b>${esc(q.doctorName)}</b> ${q.accepted ? 'va soigner' : 'propose de soigner'} « ${esc(q.label)} »${q.accepted ? '' : ` <button class="btn sm" data-care-yes="${esc(q.id)}">Accepter</button><button class="btn sm ghost" data-care-no="${esc(q.id)}">Refuser</button>`}</div>`).join('');
+}
+$('h-health').addEventListener('click', (e) => {
+  const y = e.target.closest('[data-care-yes]')?.dataset.careYes;
+  if (y) return void run({ type: 'care.answer', id: y, accept: true });
+  const n = e.target.closest('[data-care-no]')?.dataset.careNo;
+  if (n) run({ type: 'care.answer', id: n, accept: false });
+});
+/** Section « Cabinet médical » de l'onglet Métier, pour les médecins. */
+function cabinetHTML() {
+  if (S.job.id !== 'medecin') return '';
+  const cares = Object.entries(G.RECIPES).filter(([, r]) => r.care);
+  const reach = ['les blessures légères', 'les blessures jusqu’aux graves', 'toutes les blessures'][S.job.lvl - 1];
+  return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🩺 Cabinet médical</h2><button class="btn sm ghost" id="cab-refresh">Voir les blessés autour de moi</button></div>
+    <p class="note">${JOB_LEVELS[S.job.lvl - 1]} : tu soignes ${reach}. Le patient doit être au même endroit que toi (le dernier salon RP où vous avez écrit) et accepter.</p>
+    ${cares.length ? '' : '<p class="note">Aucun soin n’existe encore : le staff les crée dans Gestion > Recettes (champ « Soin »).</p>'}
+    ${S.careOut.length ? `<div class="crew-box"><h3>Mes demandes</h3>${S.careOut.map((q) => `<div class="member-row"><span class="m-name"><b>${esc(q.patientName)}</b> · ${esc(q.label)} <span class="hp-lvl-${q.level}">${G.HEALTH_LEVELS[q.level - 1]}</span></span><span class="note">${q.accepted ? 'accepté' : 'en attente'}</span><span class="m-acts">${q.accepted ? `<button class="btn sm" data-care-go="${esc(q.id)}">Soigner</button>` : ''}</span></div>`).join('')}</div>` : ''}
+    ${cabinet.patients ? patientsHTML(cares) : ''}`;
+}
+function patientsHTML(cares) {
+  const list = cabinet.patients.filter((p) => p.health.length);
+  if (!list.length) return '<p class="note">Aucun blessé au même endroit que toi.</p>';
+  return `<div class="crew-box"><h3>Blessés autour de toi</h3>${list.map((p) => p.health.map((h) => {
+    const ok = cares.filter(([, r]) => r.care.level >= h.level);
+    const self = p.uid === S.uid, key = `${p.uid}:${h.id}`;
+    return `<div class="member-row care-row"><span class="m-name"><b>${esc(p.name)}</b>${self ? ' (toi)' : ''} · ${esc(h.label)} <span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span></span>
+      <select data-care-rec="${esc(key)}" aria-label="Soin">${ok.map(([id, r]) => `<option value="${esc(id)}">${esc(G.recipeLabel(r))} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans matériel'}</option>`).join('') || '<option value="">Aucun soin assez fort</option>'}</select>
+      <span class="m-acts"><button class="btn sm" data-care-ask="${esc(key)}" ${ok.length ? '' : 'disabled'}>${self ? 'Me soigner' : 'Proposer le soin'}</button></span></div>`;
+  }).join('')).join('')}</div>`;
+}
+$('v-job').addEventListener('click', async (e) => {
+  if (e.target.closest('#cab-refresh')) {
+    const out = await run({ type: 'care.patients' });
+    if (out?.patients) {
+      cabinet.patients = out.patients;
+      renderJob();
+    }
+    return;
+  }
+  const ask = e.target.closest('[data-care-ask]')?.dataset.careAsk;
+  if (ask) {
+    const [uid, healthId] = ask.split(':');
+    const recipe = document.querySelector(`[data-care-rec="${CSS.escape(ask)}"]`)?.value;
+    if (!recipe) return;
+    if (uid === S.uid) return void careSelf(healthId, recipe);
+    return void run({ type: 'care.request', uid, healthId, recipe });
+  }
+  const go = e.target.closest('[data-care-go]')?.dataset.careGo;
+  if (go) {
+    const q = S.careOut.find((x) => x.id === go);
+    if (!q) return;
+    if (!(await askConfirm('Le matériel est pris tout de suite. Si tu rates, il est perdu (tu pourras réessayer).', { title: `Soigner « ${q.label} » ?`, ok: 'Commencer' }))) return;
+    const success = await careGame(q.level, q.label);
+    await run({ type: 'care.do', id: go, success });
+    cabinet.patients = null;
+  }
+});
+async function careSelf(healthId, recipe) {
+  const h = S.health.find((x) => x.id === healthId);
+  if (!h) return;
+  if (!(await askConfirm('Le matériel est pris tout de suite. Si tu rates, il est perdu.', { title: `Soigner « ${h.label} » ?`, ok: 'Commencer' }))) return;
+  const success = await careGame(h.level, h.label);
+  await run({ type: 'care.do', self: true, healthId, recipe, success });
+  cabinet.patients = null;
+}
+/** Bandage pour une blessure légère, opération au-delà. */
+function careGame(level, label) {
+  if (level <= 1) return nailGame({ speed: 0.9, zone: 24 + (S.job.lvl - 1) * 3, nails: 3, strikes: 5 + S.job.lvl, icon: '🩹', verb: '🩹 Serrer' }, `Bandage : ${label}`);
+  return opGame(level, `Opération : ${label}`);
+}
+/** Opération en trois étapes (anesthésie, incision, suture) pendant que les constantes baissent. */
+function opGame(level, title) {
+  return new Promise((resolve) => {
+    const d = $('d-op'), area = $('op-area');
+    $('op-title').textContent = title;
+    $('op-msg').textContent = '';
+    let vit = 100, step = -1, done = false, raf = 0, last = performance.now();
+    const drain = Math.max(1, 1.5 + level * 1.2 - (S.job.lvl - G.careRank(level)) * 0.8); // % par seconde
+    let cur = 0, dir = 1, zx = 0, drawing = false, dev = [], next = 1;
+    const zw = Math.max(8, 20 - level * 3), total = 3 + level;
+    const hurt = (n, msg) => {
+      vit -= n;
+      $('op-msg').textContent = msg;
+    };
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(raf);
+      $('op-msg').textContent = ok ? 'Opération réussie : le patient est sauvé !' : 'Les constantes se sont effondrées : opération ratée.';
+      setTimeout(() => {
+        if (d.open) closeDialog(d);
+        resolve(ok);
+      }, 1100);
+    };
+    const yAt = (x) => 80 + Math.sin((x / 460) * Math.PI * (1 + level)) * 45;
+    const steps = [
+      () => {
+        zx = 15 + Math.random() * (70 - zw);
+        area.innerHTML = `<p class="op-step">1/3 · <b>Anesthésie</b> : injecte quand l’aiguille est dans la zone verte.</p>
+          <div class="nail-board op-dose" id="op-board"><div class="nail-zone op-ok" style="left:${zx}%;width:${zw}%"></div><div class="nail-cursor" id="op-cur"></div></div>
+          <div class="form-actions"><button type="button" class="btn" id="op-act">💉 Injecter</button></div>`;
+        $('op-act').onclick = () => {
+          if (cur >= zx && cur <= zx + zw) go();
+          else {
+            replay($('op-board'), 'shake');
+            hurt(12, 'Mauvaise dose : le patient réagit mal !');
+          }
+        };
+      },
+      () => {
+        area.innerHTML = `<p class="op-step">2/3 · <b>Incision</b> : pars du point vert et suis le tracé en pointillés jusqu’au bout, sans lâcher.</p><canvas id="op-cv" class="op-cv" width="460" height="160"></canvas>`;
+        const cv = $('op-cv'), g = cv.getContext('2d');
+        const drawPath = () => {
+          g.clearRect(0, 0, 460, 160);
+          g.setLineDash([6, 6]);
+          g.strokeStyle = '#17255e';
+          g.lineWidth = 2;
+          g.beginPath();
+          for (let x = 10; x <= 450; x += 5) (x === 10 ? g.moveTo(x, yAt(x)) : g.lineTo(x, yAt(x)));
+          g.stroke();
+          g.setLineDash([]);
+          g.fillStyle = '#2f9a55';
+          g.beginPath();
+          g.arc(10, yAt(10), 7, 0, 7);
+          g.fill();
+        };
+        drawPath();
+        const pt = (e) => {
+          const r = cv.getBoundingClientRect();
+          return { x: ((e.clientX - r.left) / r.width) * 460, y: ((e.clientY - r.top) / r.height) * 160 };
+        };
+        cv.onpointerdown = (e) => {
+          const p = pt(e);
+          if (p.x > 30) return void ($('op-msg').textContent = 'Commence au point vert, à gauche.');
+          drawing = true;
+          dev = [];
+          cv.setPointerCapture(e.pointerId);
+          drawPath();
+          g.strokeStyle = '#c7352c';
+          g.lineWidth = 3;
+          g.beginPath();
+          g.moveTo(p.x, p.y);
+        };
+        cv.onpointermove = (e) => {
+          if (!drawing) return;
+          const p = pt(e);
+          dev.push(Math.abs(p.y - yAt(p.x)));
+          g.lineTo(p.x, p.y);
+          g.stroke();
+          if (p.x >= 445) {
+            drawing = false;
+            const avg = dev.reduce((a, b) => a + b, 0) / Math.max(1, dev.length);
+            if (avg > 10) hurt(Math.min(35, (avg - 10) * 2), 'Incision imprécise…');
+            else $('op-msg').textContent = 'Incision propre.';
+            go();
+          }
+        };
+        cv.onpointerup = () => {
+          if (!drawing) return;
+          drawing = false;
+          hurt(8, 'Tu as lâché le scalpel : recommence l’incision.');
+          drawPath();
+        };
+      },
+      () => {
+        area.innerHTML = `<p class="op-step">3/3 · <b>Suture</b> : clique les points dans l’ordre.</p><div class="op-sut" id="op-sut">${Array.from({ length: total }, (_, i) => `<button type="button" class="op-pt" data-pt="${i + 1}" style="left:${6 + (i * 84) / total + Math.random() * 5}%;top:${12 + Math.random() * 66}%">${i + 1}</button>`).join('')}</div>`;
+        $('op-sut').onclick = (e) => {
+          const b = e.target.closest('[data-pt]');
+          if (!b || b.disabled) return;
+          if (+b.dataset.pt === next) {
+            b.classList.add('done');
+            b.disabled = true;
+            next++;
+            if (next > total) finish(true);
+          } else {
+            replay(b, 'shake');
+            hurt(8, 'Mauvais point !');
+          }
+        };
+      },
+    ];
+    const go = () => {
+      step++;
+      if (step < steps.length) steps[step]();
+    };
+    const tick = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      vit -= drain * dt;
+      if (step === 0) {
+        cur += dir * (0.8 + level * 0.25) * 100 * dt;
+        if (cur >= 100) { cur = 100; dir = -1; }
+        if (cur <= 0) { cur = 0; dir = 1; }
+        const c = $('op-cur');
+        if (c) c.style.left = `${cur}%`;
+      }
+      const v = Math.max(0, vit);
+      $('op-vit').style.width = `${v}%`;
+      $('op-vit-n').textContent = `${Math.round(v)} %`;
+      $('op-vit').parentElement.classList.toggle('bad', v < 30);
+      if (vit <= 0) return finish(false);
+      if (!done) raf = requestAnimationFrame(tick);
+    };
+    d.addEventListener('close', () => {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(raf);
+      resolve(false); // fenêtre fermée : opération abandonnée
+    }, { once: true });
+    openDialog('d-op');
+    go();
+    raf = requestAnimationFrame((t) => {
+      last = t;
+      tick(t);
+    });
+  });
+}
+/** Champ « Soin » de l'éditeur de recette. */
+function careFieldsHTML(r) {
+  return `<div class="wide work-box"><label for="rc-care">Soin (cabinet du médecin)</label>
+    <select id="rc-care"><option value="">Aucun</option>${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.care?.level === i + 1 ? 'selected' : ''}>Soigne les blessures jusqu’à : ${l}</option>`).join('')}</select>
+    ${r.care ? '<p class="note" style="margin:0">Un soin s’utilise dans le cabinet du médecin : retire la ligne « Résultat » et choisis le métier Médecin. Le rang nécessaire dépend de la gravité soignée (Légère : Apprenti, Sérieuse et Grave : Confirmé, Critique : Maître).</p>' : ''}
+  </div>`;
+}
+function readCareFields(r) {
+  const v = $('rc-care')?.value;
+  r.care = v ? { level: +v } : null;
 }
 
 /* ═══ Navigation : le port du salon ═════════════════════════════════════ */
@@ -3990,6 +4226,7 @@ function renderRecipeEdit() {
       <div><label for="rc-time">Temps de fabrication</label><div class="rc-time"><input id="rc-time" type="number" min="0" value="${r.seconds / unit}"><select id="rc-unit">${Object.entries(UNITS).map(([u, l]) => `<option value="${u}" ${+u === unit ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div class="wide"><label for="rc-desc">Description (facultative)</label><input id="rc-desc" value="${esc(r.desc)}" maxlength="400"></div>
       ${workFieldsHTML(r)}
+      ${careFieldsHTML(r)}
     </div>
     <h3 class="ed-h">Résultat</h3>
     <div class="se-items">${rows(r.gives, 'gives')}</div>
@@ -4005,6 +4242,7 @@ function readRecipeEdit() {
   r.seconds = Math.round((+$('rc-time').value || 0) * +$('rc-unit').value);
   r.desc = $('rc-desc').value;
   readWorkFields(r);
+  readCareFields(r);
   for (const kind of ['needs', 'gives']) {
     const next = {};
     document.querySelectorAll(`#rc-body .rc-row[data-kind="${kind}"]`).forEach((row) => {
@@ -4174,6 +4412,7 @@ async function refresh() {
     if (screen === 'map') renderMap(); // le bateau avance pendant qu'on regarde la carte
     if (screen === 'shop' && !document.querySelector('#v-shop .ask-range:active')) renderShop();
     renderHero();
+    renderJob(); // demandes de soin acceptées, fabrications terminées
     renderMjTab();
     paintStatic();
   } catch {
@@ -4230,7 +4469,7 @@ document.addEventListener('dragstart', (e) => {
   let tick = 0;
   setInterval(() => {
     tick++;
-    if (ME.staff || (screen !== 'fiche' && tick % 2 === 0)) refresh();
+    if (ME.staff || tick % 2 === 0) refresh(); // toutes les 10 s : demandes de soin, voyages, boutique…
   }, 5_000);
   document.addEventListener('visibilitychange', () => !document.hidden && refresh());
 })();

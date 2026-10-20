@@ -11,7 +11,7 @@ import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipLi
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { invitesFor, loadHarbor, loadMap } from './_lib/context.js';
-import { RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
+import { normalize, careBlock, newWid, removeItem, RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
@@ -43,6 +43,81 @@ export default handler(['POST'], async (req, body) => {
       cs
         ? { ...out, ...extra, crew: publicCrew(extra.crew ?? cs.crew, cs.memberNames), ships: shipList({ ...cs.ships, ...(extra.ships || {}) }) }
         : { ...out, ...extra };
+
+    // Médecin : soins des blessures (le patient doit être au même endroit et accepter)
+    if (action.type.startsWith('care.')) {
+      const now = Date.now();
+      if (action.type === 'care.patients') {
+        need(player.job.id === 'medecin', 403, 'Réservé aux médecins.');
+        need(player.position?.channelId, 400, 'Tu n’es nulle part : écris d’abord un message RP.');
+        const all = await readAll('players');
+        const patients = Object.entries(all)
+          .filter(([, d]) => d.position?.channelId === player.position.channelId)
+          .map(([uid, d]) => ({ uid, name: fullName(d), health: normalize(structuredClone(d)).health }));
+        return { patients };
+      }
+      if (action.type === 'care.request') {
+        need(String(action.uid) !== me.uid, 400, 'Pour toi-même, pas besoin de demande : soigne-toi directement.');
+        const prow = await read('players', String(action.uid || ''));
+        need(prow, 404, 'Patient introuvable.');
+        const patient = normalize(prow.data);
+        const h = patient.health.find((x) => x.id === action.healthId);
+        const why = careBlock(player, patient, h, RECIPES[action.recipe]);
+        need(!why, 400, why);
+        const req = { id: newWid(), doctor: me.uid, doctorName: fullName(player), patient: patient.uid, patientName: fullName(patient), healthId: h.id, label: h.label, level: h.level, recipe: action.recipe, accepted: false, at: now };
+        patient.careIn = [...patient.careIn.filter((x) => !(x.doctor === me.uid && x.healthId === h.id)), req].slice(-10);
+        player.careOut = [...player.careOut.filter((x) => !(x.patient === patient.uid && x.healthId === h.id)), req].slice(-10);
+        await write('players', patient.uid, patient, prow.version);
+        await write('players', me.uid, player, version);
+        return { player, toast: `Demande de soin envoyée à ${req.patientName} : il doit accepter sur sa fiche.` };
+      }
+      if (action.type === 'care.answer') {
+        const req = player.careIn.find((x) => x.id === action.id);
+        need(req, 404, 'Cette demande n’existe plus.');
+        player.careIn = action.accept ? player.careIn.map((x) => (x.id === req.id ? { ...x, accepted: true } : x)) : player.careIn.filter((x) => x.id !== req.id);
+        const drow = await read('players', req.doctor);
+        if (drow) {
+          const doctor = normalize(drow.data);
+          doctor.careOut = action.accept ? doctor.careOut.map((x) => (x.id === req.id ? { ...x, accepted: true } : x)) : doctor.careOut.filter((x) => x.id !== req.id);
+          await write('players', req.doctor, doctor, drow.version);
+        }
+        await write('players', me.uid, player, version);
+        return { player, toast: action.accept ? `Tu acceptes les soins de ${req.doctorName}.` : 'Soin refusé.' };
+      }
+      if (action.type === 'care.do') {
+        // Le médecin a joué le mini-jeu : le matériel est pris ; si c'est réussi, la blessure est soignée
+        const self = action.self === true;
+        let req, prow = null, patient;
+        if (self) {
+          patient = player;
+          req = { healthId: action.healthId, recipe: action.recipe };
+        } else {
+          req = player.careOut.find((x) => x.id === action.id);
+          need(req?.accepted, 400, 'Le patient n’a pas (encore) accepté.');
+          prow = await read('players', req.patient);
+          need(prow, 404, 'Patient introuvable.');
+          patient = normalize(prow.data);
+        }
+        const r = RECIPES[req.recipe];
+        const h = patient.health.find((x) => x.id === req.healthId);
+        const why = careBlock(player, patient, h, r);
+        need(!why, 400, why);
+        for (const [k, q] of Object.entries(r.needs)) removeItem(player, k, q);
+        let toast = `Soin raté : « ${h.label} » n’est pas soigné. Le matériel est perdu.`;
+        if (action.success) {
+          patient.health = patient.health.filter((x) => x.id !== h.id);
+          toast = `Blessure soignée : « ${h.label} »${self ? '' : ` (${fullName(patient)})`} !`;
+          if (!self) {
+            player.careOut = player.careOut.filter((x) => x.id !== req.id);
+            patient.careIn = patient.careIn.filter((x) => x.id !== req.id);
+          }
+        }
+        if (prow) await write('players', patient.uid, patient, prow.version);
+        await write('players', me.uid, player, version);
+        return { player, toast };
+      }
+      need(false, 400, 'Action inconnue.');
+    }
 
     // Recherche de joueurs à inviter (lecture seule)
     if (action.type === 'crew.search') {

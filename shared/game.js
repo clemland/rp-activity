@@ -76,8 +76,27 @@ export const STAFF_PERMS = {
 /** Ce membre du staff a-t-il cette permission ? « * » = toutes. */
 export const staffCan = (perms, p) => !!perms && (perms.includes('*') || perms.includes(p));
 /** État de santé : blessures et maladies, cumulables, avec une gravité de 1 (légère) à 4 (critique). */
-export const HEALTH_TYPES = { blessure: 'Blessure', maladie: 'Maladie' };
+export const HEALTH_TYPES = { blessure: 'Blessure' }; // les maladies ont été retirées : seules restent les blessures
 export const HEALTH_LEVELS = ['Légère', 'Sérieuse', 'Grave', 'Critique'];
+/** Rang de médecin nécessaire : Légère → Apprenti, Sérieuse et Grave → Confirmé, Critique → Maître. */
+export const careRank = (level) => (level <= 1 ? 1 : level <= 3 ? 2 : 3);
+/** Soin d'une recette : soigne les blessures jusqu'à cette gravité (1 à 4), ou null. */
+export function normalizeCare(c) {
+  return c && c.level ? { level: int(c.level, 1, 4) } : null;
+}
+/** Pourquoi ce soin est impossible (null s'il est possible). */
+export function careBlock(doctor, patient, h, recipe) {
+  if (doctor.job?.id !== 'medecin') return 'Seul un médecin peut soigner.';
+  if (!recipe?.care) return 'Ce soin n’existe pas.';
+  if (!h) return 'Cette blessure n’existe plus (déjà soignée ?).';
+  const g = HEALTH_LEVELS[h.level - 1].toLowerCase();
+  if (h.level > recipe.care.level) return `Ce soin ne suffit pas pour une blessure ${g}.`;
+  if (doctor.job.lvl < careRank(h.level)) return `Une blessure ${g} demande le niveau ${JOB_LEVELS[careRank(h.level) - 1]}.`;
+  if (doctor.uid === patient.uid && h.level > 1) return 'On ne s’opère pas soi-même : seules les blessures légères se soignent seul.';
+  if (doctor.uid !== patient.uid && (!doctor.position?.channelId || doctor.position.channelId !== patient.position?.channelId)) return 'Le patient doit être au même endroit que toi (le dernier salon RP où vous avez écrit).';
+  if (Object.entries(recipe.needs).some(([k, q]) => count(doctor, k) < q)) return 'Matériel manquant.';
+  return null;
+}
 export function normalizeHealth(h = {}) {
   return {
     id: str(h.id, 20) || newWid(),
@@ -191,6 +210,9 @@ export function normalize(p) {
   p.position ??= null; // dernier salon RP où il a écrit
     p.health = (Array.isArray(p.health) ? p.health : []).filter((h) => h && str(h.label, 80)).map(normalizeHealth).slice(0, 30);
   p.discovered = [...new Set((Array.isArray(p.discovered) ? p.discovered : []).map(String))].slice(0, 500); // îles découvertes
+  const freshReq = (l) => (Array.isArray(l) ? l : []).filter((x) => x?.id && Date.now() - (x.at || 0) < 3_600_000).slice(-10);
+  p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
+  p.careOut = freshReq(p.careOut); // demandes de soin envoyées
   // Courbe d'XP changée : le surplus d'une ancienne fiche devient des niveaux (avec leurs points).
   if (typeof p.level === 'number' && typeof p.xp === 'number') {
     p.level = Math.min(MAX_LEVEL, Math.max(1, p.level));
@@ -378,7 +400,7 @@ export function normalizeItem(x) {
   };
 }
 /** Une recette se désigne par ce qu'elle produit : « 2 × Planche, 1 × Clou ». */
-export const recipeLabel = (r) => r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
+export const recipeLabel = (r) => r?.care ? `Soin : blessure ${HEALTH_LEVELS[r.care.level - 1].toLowerCase()} au plus` : r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
 export function normalizeRecipe(x) {
   const items = (o) =>
     Object.fromEntries(
@@ -388,7 +410,8 @@ export function normalizeRecipe(x) {
     );
   const gives = items(x.gives);
   const work = normalizeWork(x.work);
-  if (!Object.keys(gives).length && !work) fail('La recette doit produire au moins un objet, ou être un travail sur bateau.');
+  const care = normalizeCare(x.care);
+  if (!Object.keys(gives).length && !work && !care) fail('La recette doit produire au moins un objet, ou être un travail sur bateau, ou un soin.');
   return {
     job: x.job && JOBS[x.job] ? x.job : null,
     lvl: int(x.lvl, 1, 3),
@@ -396,6 +419,7 @@ export function normalizeRecipe(x) {
     needs: items(x.needs),
     gives,
     work,
+    care,
     desc: str(x.desc, 400),
   };
 }

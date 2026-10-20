@@ -228,18 +228,18 @@ function healthHTML(p) {
     const n = list.filter((h) => h.type === t).length;
     return n ? `${n} ${w}${n > 1 ? 's' : ''}` : '';
   };
-  const sum = [nb('blessure', 'blessure'), nb('maladie', 'maladie')].filter(Boolean).join(', ');
+  const sum = `${list.length} blessure${list.length > 1 ? 's' : ''}`;
   return `<details class="health"><summary class="hp-tag lvl-${worst}">${worst >= 3 ? '🩸' : '🩹'} ${sum} · ${G.HEALTH_LEVELS[worst - 1]}</summary>
-    <ul>${list.map((h) => `<li><b>${h.type === 'maladie' ? '🤒' : '🩹'} ${esc(h.label)}</b><span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.desc ? `<br><small>${esc(h.desc)}</small>` : ''}</li>`).join('')}</ul></details>`;
+    <ul>${list.map((h) => `<li><b>🩹 ${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small><span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.desc ? `<br><small>${esc(h.desc)}</small>` : ''}</li>`).join('')}</ul></details>`;
 }
 /** Section « État de santé » de l'onglet Édition MJ. */
 function healthToolsHTML() {
   const list = S.health || [];
   return `<h3 class="ed-h">État de santé</h3>
     <div class="mj-tools">
-      ${list.length ? `<div class="member-list">${list.map((h) => `<div class="member-row"><span class="m-name">${h.type === 'maladie' ? '🤒' : '🩹'} <b>${esc(h.label)}</b>${h.desc ? ` <small class="note">${esc(h.desc)}</small>` : ''}</span><span class="rank-badge hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span><span class="m-acts"><button class="btn sm ghost" data-health-del="${esc(h.id)}">Guérir</button></span></div>`).join('')}</div>` : '<p class="note" style="margin:0">💚 Intact : aucune blessure, aucune maladie.</p>'}
+      ${list.length ? `<div class="member-list">${list.map((h) => `<div class="member-row"><span class="m-name">🩹 <b>${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small>${h.desc ? ` <small class="note">${esc(h.desc)}</small>` : ''}</span><span class="rank-badge hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span><span class="m-acts"><button class="btn sm ghost" data-health-del="${esc(h.id)}">Guérir</button></span></div>`).join('')}</div>` : '<p class="note" style="margin:0">💚 Intact : aucune blessure, aucune maladie.</p>'}
       <div class="mj-row health-row">
-        <select id="mjh-type" aria-label="Type">${Object.entries(G.HEALTH_TYPES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+        <select id="mjh-type" aria-label="Catégorie">${Object.entries(G.injuryTypes()).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
         <select id="mjh-level" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
         <input id="mjh-label" maxlength="80" placeholder="Ex. Bras cassé, Fièvre…" aria-label="Description courte">
         <input id="mjh-desc" maxlength="300" placeholder="Détail (facultatif)" aria-label="Détail">
@@ -1138,9 +1138,9 @@ function patientsHTML(cares) {
   const list = cabinet.patients.filter((p) => p.health.length);
   if (!list.length) return '<p class="note">Aucun blessé au même endroit que toi.</p>';
   return `<div class="crew-box"><h3>Blessés autour de toi</h3>${list.map((p) => p.health.map((h) => {
-    const ok = cares.filter(([, r]) => r.care.level >= h.level);
+    const ok = cares.filter(([, r]) => r.care.level >= h.level && (!r.care.type || r.care.type === h.type));
     const self = p.uid === S.uid, key = `${p.uid}:${h.id}`;
-    return `<div class="member-row care-row"><span class="m-name"><b>${esc(p.name)}</b>${self ? ' (toi)' : ''} · ${esc(h.label)} <span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span></span>
+    return `<div class="member-row care-row"><span class="m-name"><b>${esc(p.name)}</b>${self ? ' (toi)' : ''} · ${esc(h.label)} <small class="note">${esc(G.injuryName(h.type))}</small> <span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span></span>
       <select data-care-rec="${esc(key)}" aria-label="Soin">${ok.map(([id, r]) => `<option value="${esc(id)}">${esc(G.recipeLabel(r))} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans matériel'}</option>`).join('') || '<option value="">Aucun soin assez fort</option>'}</select>
       <span class="m-acts"><button class="btn sm" data-care-ask="${esc(key)}" ${ok.length ? '' : 'disabled'}>${self ? 'Me soigner' : 'Proposer le soin'}</button></span></div>`;
   }).join('')).join('')}</div>`;
@@ -1336,12 +1336,13 @@ function opGame(level, title) {
 function careFieldsHTML(r) {
   return `<div class="wide work-box"><label for="rc-care">Soin (cabinet du médecin)</label>
     <select id="rc-care"><option value="">Aucun</option>${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.care?.level === i + 1 ? 'selected' : ''}>Soigne les blessures jusqu’à : ${l}</option>`).join('')}</select>
+    ${r.care ? `<select id="rc-care-type" aria-label="Catégorie soignée"><option value="">Toutes les catégories</option>${Object.entries(G.INJURIES).map(([k, c]) => `<option value="${esc(k)}" ${r.care.type === k ? 'selected' : ''}>${esc(c.name)} seulement</option>`).join('')}</select>` : ''}
     ${r.care ? '<p class="note" style="margin:0">Un soin s’utilise dans le cabinet du médecin : retire la ligne « Résultat » et choisis le métier Médecin. Le rang nécessaire dépend de la gravité soignée (Légère : Apprenti, Sérieuse et Grave : Confirmé, Critique : Maître).</p>' : ''}
   </div>`;
 }
 function readCareFields(r) {
   const v = $('rc-care')?.value;
-  r.care = v ? { level: +v } : null;
+  r.care = v ? { level: +v, type: $('rc-care-type') ? $('rc-care-type').value || null : r.care?.type || null } : null;
 }
 
 /* ═══ Navigation : le port du salon ═════════════════════════════════════ */
@@ -2219,7 +2220,7 @@ function renderBulk() {
     </div>
     <div class="mj-row prog-row health-row">
       <label for="blk-hlabel">Santé</label>
-      <select id="blk-htype" aria-label="Type">${Object.entries(G.HEALTH_TYPES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+      <select id="blk-htype" aria-label="Catégorie">${Object.entries(G.injuryTypes()).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
       <select id="blk-hlevel" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
       <input id="blk-hlabel" maxlength="80" placeholder="Ex. Brûlures, Scorbut…">
       <button class="btn sm" id="blk-health">Ajouter à tous</button>
@@ -2236,7 +2237,7 @@ async function loadPlayers() {
   renderPlayerList();
   if (screen === 'marine') renderMarine();
 }
-const describe = (a) => a.type === 'health.add' ? `ajouter « ${a.label} » (${a.kind === 'maladie' ? 'maladie' : 'blessure'} ${G.HEALTH_LEVELS[a.level - 1].toLowerCase()})` :
+const describe = (a) => a.type === 'health.add' ? `ajouter « ${a.label} » (${G.injuryName(a.kind).toLowerCase()} ${G.HEALTH_LEVELS[a.level - 1].toLowerCase()})` :
   a.type === 'give' || a.type === 'take'
     ? `${a.type === 'give' ? 'donner' : 'retirer'} ${a.qty} × ${itemOf(a.key).name}`
     : `${a.amount > 0 ? 'ajouter' : 'retirer'} ${fmt(Math.abs(a.amount))} ${a.type === 'xp' ? 'XP' : a.type === 'levels' ? `niveau${Math.abs(a.amount) > 1 ? 'x' : ''}` : 'berrys'}`;
@@ -4062,11 +4063,12 @@ function renderGestion() {
       <div class="seg" role="group" aria-label="Section">
         <button aria-pressed="${gestTab === 'items'}" data-gt="items">Objets (${Object.keys(G.ITEMS).length})</button>
         <button aria-pressed="${gestTab === 'recipes'}" data-gt="recipes">Recettes (${Object.keys(G.RECIPES).length})</button>
+        <button aria-pressed="${gestTab === 'injuries'}" data-gt="injuries">Blessures (${Object.keys(G.INJURIES).length})</button>
       </div>
       <input class="mj-search gest-search" id="gest-q" type="search" placeholder="Chercher…" value="${esc(gestQuery)}" aria-label="Chercher">
-      <button class="btn" id="gest-new">${gestTab === 'items' ? '+ Nouvel objet' : '+ Nouvelle recette'}</button>
+      <button class="btn" id="gest-new">${gestTab === 'items' ? '+ Nouvel objet' : gestTab === 'injuries' ? '+ Nouvelle catégorie' : '+ Nouvelle recette'}</button>
     </div>
-    ${gestTab === 'items'
+    ${gestTab === 'injuries' ? injuriesHTML() : gestTab === 'items'
       ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
           <button class="gest-card" data-item="${esc(id)}">
             <span class="slot-ico">${itemIco(id)}</span>
@@ -4093,12 +4095,35 @@ $('v-gest').addEventListener('click', (e) => {
     gestTab = gt;
     return renderGestion();
   }
+  const ren = e.target.closest('[data-inj-ren]')?.dataset.injRen;
+  if (ren) {
+    return void askText('Nouveau nom de la catégorie.', { title: 'Renommer', ok: 'Renommer', value: G.INJURIES[ren]?.name || '', max: 40 })
+      .then((name) => name && gestCall('injury.save', { id: ren, name }));
+  }
+  const del = e.target.closest('[data-inj-del]')?.dataset.injDel;
+  if (del) {
+    return void askConfirm('Les blessures et les soins de cette catégorie redeviendront de simples « Blessures ».', { title: `Supprimer « ${G.INJURIES[del]?.name} » ?`, ok: 'Supprimer', danger: true })
+      .then((ok) => ok && gestCall('injury.delete', { id: del }));
+  }
+  if (e.target.closest('#gest-new') && gestTab === 'injuries') {
+    return void askText('Nom de la catégorie de blessure.', { title: 'Nouvelle catégorie', ok: 'Créer', placeholder: 'Ex. Fracture, Brûlure, Plaie…', max: 40 })
+      .then((name) => name && gestCall('injury.save', { name }));
+  }
   if (e.target.closest('#gest-new')) return gestTab === 'items' ? openItemEdit() : openRecipeEdit();
   const it = e.target.closest('[data-item]')?.dataset.item;
   if (it) return openItemEdit(it);
   const rc = e.target.closest('[data-recipe]')?.dataset.recipe;
   if (rc) return openRecipeEdit(rc);
 });
+/** Onglet « Blessures » de Gestion : catégories de blessures. */
+function injuriesHTML() {
+  const list = Object.entries(G.INJURIES).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  return `<p class="note">Les catégories de blessures (fracture, brûlure, plaie…). Chaque soin du médecin peut viser une catégorie précise : une brûlure ne se soigne pas avec une attelle.</p>
+    ${list.length ? `<div class="gest-grid">${list.map(([id, c]) => {
+      const n = Object.values(G.RECIPES).filter((r) => r.care?.type === id).length;
+      return `<div class="gest-card inj-card"><span class="slot-ico">${icon('stat-resistance')}</span><span><b>${esc(c.name)}</b><small>${n} soin${n > 1 ? 's' : ''} dédié${n > 1 ? 's' : ''}</small></span><span class="m-acts"><button class="btn sm ghost" data-inj-ren="${esc(id)}">Renommer</button><button class="btn sm ghost danger-txt" data-inj-del="${esc(id)}">Supprimer</button></span></div>`;
+    }).join('')}</div>` : '<p class="note">Aucune catégorie : toutes les blessures sont de simples « Blessures ». Crée-en avec « + Nouvelle catégorie ».</p>'}`;
+}
 async function gestCall(op, payload, dialog) {
   setBusy(1);
   try {

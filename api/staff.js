@@ -46,7 +46,7 @@ export default handler(['POST'], async (req, body) => {
     : op.startsWith('ship.') ? ['equipages']
     : op.startsWith('map.') ? ['carte']
     : op.startsWith('shop.') ? ['boutiques']
-    : op.startsWith('item.') || op.startsWith('recipe.') ? ['gestion']
+    : op.startsWith('item.') || op.startsWith('recipe.') || op.startsWith('injury.') ? ['gestion']
     : op.startsWith('loot.') ? ['butins']
     : op.startsWith('icons.') ? ['icones']
     : op.startsWith('perms.') ? ['permissions']
@@ -93,6 +93,29 @@ export default handler(['POST'], async (req, body) => {
       console.log(`[staff] ${me.uid} : ${body.action.type} sur ${ok} joueur(s)`);
       return { ok, failed, toast: `Appliqué à ${ok} joueur${ok > 1 ? 's' : ''}${failed.length ? `, ${failed.length} échec${failed.length > 1 ? 's' : ''}` : ''}` };
     }
+    case 'injury.save':
+    case 'injury.delete':
+      // Catégories de blessures (fracture, brûlure…) : chaque soin du médecin peut en viser une
+      return retry(async () => {
+        const row = await read('meta', 'injuries');
+        const categories = { ...(row?.data?.categories || {}) };
+        let toast;
+        if (body.op === 'injury.save') {
+          const name = String(body.name || '').trim().slice(0, 40);
+          need(name, 400, 'Donne un nom à la catégorie.');
+          const id = body.id && categories[body.id] ? body.id : freeId(name, categories);
+          categories[id] = { name };
+          toast = `Catégorie enregistrée : ${name}`;
+        } else {
+          need(categories[body.id], 404, 'Catégorie introuvable.');
+          toast = `Catégorie supprimée : ${categories[body.id].name}`;
+          delete categories[body.id];
+        }
+        await write('meta', 'injuries', { categories }, row?.version ?? null);
+        catalog.injuries = categories;
+        return { catalog, toast };
+      });
+
     case 'perms.get': {
       const roles = (await guildRoles())
         .filter((r) => r.id !== env.guildId && !r.managed) // pas @everyone ni les rôles des bots

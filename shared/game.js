@@ -82,7 +82,7 @@ export const HEALTH_LEVELS = ['Légère', 'Sérieuse', 'Grave', 'Critique'];
 export const careRank = (level) => (level <= 1 ? 1 : level <= 3 ? 2 : 3);
 /** Soin d'une recette : soigne les blessures jusqu'à cette gravité (1 à 4), ou null. */
 export function normalizeCare(c) {
-  return c && c.level ? { level: int(c.level, 1, 4) } : null;
+  return c && c.level ? { level: int(c.level, 1, 4), type: c.type ? str(c.type, 40) : null } : null; // type : catégorie visée (null = toutes)
 }
 /** Pourquoi ce soin est impossible (null s'il est possible). */
 export function careBlock(doctor, patient, h, recipe) {
@@ -91,6 +91,7 @@ export function careBlock(doctor, patient, h, recipe) {
   if (!h) return 'Cette blessure n’existe plus (déjà soignée ?).';
   const g = HEALTH_LEVELS[h.level - 1].toLowerCase();
   if (h.level > recipe.care.level) return `Ce soin ne suffit pas pour une blessure ${g}.`;
+  if (recipe.care.type && recipe.care.type !== h.type) return `Ce soin ne traite pas : ${injuryName(h.type)}.`;
   if (doctor.job.lvl < careRank(h.level)) return `Une blessure ${g} demande le niveau ${JOB_LEVELS[careRank(h.level) - 1]}.`;
   if (doctor.uid === patient.uid && h.level > 1) return 'On ne s’opère pas soi-même : seules les blessures légères se soignent seul.';
   if (doctor.uid !== patient.uid && (!doctor.position?.channelId || doctor.position.channelId !== patient.position?.channelId)) return 'Le patient doit être au même endroit que toi (le dernier salon RP où vous avez écrit).';
@@ -100,7 +101,7 @@ export function careBlock(doctor, patient, h, recipe) {
 export function normalizeHealth(h = {}) {
   return {
     id: str(h.id, 20) || newWid(),
-    type: HEALTH_TYPES[h.type] ? h.type : 'blessure',
+    type: str(h.type, 40) && h.type !== 'maladie' ? str(h.type, 40) : 'blessure', // catégorie de blessure (définie par le staff)
     level: int(h.level ?? 1, 1, 4),
     label: str(h.label, 80),
     desc: str(h.desc, 300),
@@ -126,11 +127,17 @@ export const SHIP_TYPES = ['Caravelle', 'Brick', 'Goélette', 'Frégate', 'Galio
 
 /* ═══ Catalogue (objets et recettes du staff) ════════════════════════════ */
 export let ITEMS = {}; // id → { name, kind, value, desc, img }
+export let INJURIES = {}; // catégories de blessures définies par le staff : id → { name }
 export let RECIPES = {}; // id → { name, job, lvl, seconds, needs, gives, desc }
-export function setCatalog({ items = {}, recipes = {} } = {}) {
+export function setCatalog({ items = {}, recipes = {}, injuries = {} } = {}) {
   ITEMS = items;
   RECIPES = recipes;
+  INJURIES = injuries;
 }
+/** Nom d'une catégorie de blessure (« Blessure » si elle n'existe pas ou plus). */
+export const injuryName = (t) => INJURIES[t]?.name || 'Blessure';
+/** Catégories proposées pour une nouvelle blessure : celles du staff, sinon « Blessure ». */
+export const injuryTypes = () => (Object.keys(INJURIES).length ? Object.fromEntries(Object.entries(INJURIES).map(([k, v]) => [k, v.name])) : HEALTH_TYPES);
 /** Objet du catalogue, ou un objet « supprimé » si le staff l'a effacé. */
 export const itemOf = (k) => ITEMS[k] || { name: 'Objet supprimé', kind: 'objet', value: 0, weight: 0, desc: 'Cet objet n’existe plus.', img: null, missing: true };
 export const itemWeight = (k) => Number(ITEMS[k]?.weight) || 0;
@@ -400,7 +407,7 @@ export function normalizeItem(x) {
   };
 }
 /** Une recette se désigne par ce qu'elle produit : « 2 × Planche, 1 × Clou ». */
-export const recipeLabel = (r) => r?.care ? `Soin : blessure ${HEALTH_LEVELS[r.care.level - 1].toLowerCase()} au plus` : r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
+export const recipeLabel = (r) => r?.care ? `Soin : ${r.care.type ? injuryName(r.care.type).toLowerCase() : 'blessure'} ${HEALTH_LEVELS[r.care.level - 1].toLowerCase()} au plus` : r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
 export function normalizeRecipe(x) {
   const items = (o) =>
     Object.fromEntries(
@@ -786,7 +793,7 @@ export function staffAction(player, action) {
       if (p.health.length >= 30) fail('30 états de santé maximum.');
       const h = normalizeHealth({ type: a.kind, level: a.level, label, desc: a.desc });
       p.health.push(h);
-      out.toast = `${fullName(p)} : ${HEALTH_TYPES[h.type].toLowerCase()} « ${h.label} » (${HEALTH_LEVELS[h.level - 1].toLowerCase()})`;
+      out.toast = `${fullName(p)} : ${injuryName(h.type).toLowerCase()} « ${h.label} » (${HEALTH_LEVELS[h.level - 1].toLowerCase()})`;
       break;
     }
     case 'health.remove': {

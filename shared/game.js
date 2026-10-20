@@ -54,7 +54,7 @@ const WEEK = 7 * 24 * 3600 * 1000;
 /** Anciens grades → nouveaux. */
 const OLD_GRADES = { Matelot: '3ème Classe', Caporal: '2ème Classe', Sergent: '1ère Classe', Adjudant: '1ère Classe', Enseigne: 'Lieutenant', 'Capitaine de corvette': 'Capitaine', Commodore: 'Vice-Amiral', 'Vice-amiral': 'Vice-Amiral' };
 export const RACES = ['Humain', 'Mink', 'Géant', 'Shandia', 'Homme-poisson', 'Buccaneer'];
-export const CLASSES = ['Fighter', 'Sabreur', 'Tireur', 'Civil'];
+export const CLASSES = ['Fighter', 'Sabreur', 'Tireur'];
 /** Races : statistiques de départ (à la création, niveau 1) et description. */
 export const RACE_INFO = {
   Humain: {

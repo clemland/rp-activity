@@ -189,7 +189,7 @@ const FACTION = {
   'Chasseur de primes': { cls: 'f-chasseur', icon: '@faction-chasseur' },
   Civil: { cls: 'f-civil', icon: '@faction-civil' },
 };
-const CLASS_ICON = { Fighter: { icon: '@classe-fighter' }, Sabreur: { icon: '@classe-sabreur' }, Tireur: { icon: '@classe-tireur' }, Civil: { icon: '@classe-civil' } };
+const CLASS_ICON = { Fighter: { icon: '@classe-fighter' }, Sabreur: { icon: '@classe-sabreur' }, Tireur: { icon: '@classe-tireur' } };
 
 function photoHTML(p = S) {
   if (!p.photo) return PORTRAIT;

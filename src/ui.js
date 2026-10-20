@@ -34,7 +34,7 @@ export const ICON_SLOTS = {
   'tab-t-inv': ['Onglets de la fiche', 'Inventaire', 270], 'tab-t-job': ['Onglets de la fiche', 'Métier', 279], 'tab-t-mj': ['Onglets de la fiche', 'Édition MJ', 125],
   'faction-pirate': ['Factions', 'Pirate', 1], 'faction-marine': ['Factions', 'Marine', 160], 'faction-revolutionnaire': ['Factions', 'Révolutionnaire', 96],
   'faction-chasseur': ['Factions', 'Chasseur de primes', 153], 'faction-civil': ['Factions', 'Civil', 121],
-  'classe-fighter': ['Classes', 'Fighter', 128], 'classe-sabreur': ['Classes', 'Sabreur', 147], 'classe-tireur': ['Classes', 'Tireur', 153], 'classe-civil': ['Classes', 'Civil', 121],
+  'classe-fighter': ['Classes', 'Fighter', 128], 'classe-sabreur': ['Classes', 'Sabreur', 147], 'classe-tireur': ['Classes', 'Tireur', 153],
   'race-humain': ['Races', 'Humain', 121], 'race-mink': ['Races', 'Mink', 121], 'race-geant': ['Races', 'Géant', 121],
   'race-shandia': ['Races', 'Shandia', 121], 'race-homme-poisson': ['Races', 'Homme-poisson', 121], 'race-buccaneer': ['Races', 'Buccaneer', 121],
   'metier-navigateur': ['Métiers', 'Navigateur', 'compass'], 'metier-archeologue': ['Métiers', 'Archéologue', 'tmap'], 'metier-charpentier': ['Métiers', 'Charpentier', 'hammer'],

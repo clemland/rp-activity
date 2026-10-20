@@ -20,7 +20,10 @@ import { env } from './_lib/env.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
-import { normalizeMap, STAFF_PERMS, staffCan, normalizeLoot, isNpc, fullName, normalizeIsland, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe, normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS } from '../shared/game.js';
+import {
+  normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe,
+  normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS, isNpc, fullName, normalizeLoot, STAFF_PERMS, staffCan,
+} from '../shared/game.js';
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {

@@ -6,7 +6,15 @@
 <title>Fiche RP</title>
 </head>
 <body>
-<div class="boot" id="boot"><img src="/assets/banner-small.webp" alt=""><p id="boot-msg">Chargement de ta fiche…</p></div>
+<div class="boot" id="boot" aria-live="polite">
+  <div class="boot-half boot-top"></div>
+  <div class="boot-half boot-bottom"></div>
+  <div class="boot-center">
+    <img class="boot-banner" src="/assets/banner-small.webp" alt="">
+    <span class="boot-spin" id="boot-spin" aria-hidden="true"></span>
+    <p id="boot-msg">Chargement</p>
+  </div>
+</div>
 
 <div class="backdrop" aria-hidden="true"></div>
 

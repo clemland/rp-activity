@@ -1879,9 +1879,9 @@ function openEdit() {
   const num = (k, label, v, min, max) => `<div><label for="f-${k}">${label}</label><input id="f-${k}" name="${k}" type="number" min="${min}" max="${max}" value="${v}" inputmode="numeric"></div>`;
   $('edit-extra').innerHTML = `
     <h3 class="ed-h">Volonté et compétences</h3>
-    ${picker('vol', 'Volonté', S.volonte, pic('st_angry'), '0')}
-    ${HAKI.map((h) => picker(`haki_${h.key}`, h.name, S.haki[h.key] ?? 0, ico(h.icon), h.key === 'rois' ? 'Non éveillé' : 'Non débloqué')).join('')}
-    ${picker('fruitStars', 'Maîtrise du fruit', S.fruit?.stars ?? 0, pic('fruit'), '0')}
+    ${picker('vol', 'Volonté', S.volonte, icon('volonte'), '0')}
+    ${HAKI.map((h) => picker(`haki_${h.key}`, h.name, S.haki[h.key] ?? 0, icon(`haki-${h.key}`), h.key === 'rois' ? 'Non éveillé' : 'Non débloqué')).join('')}
+    ${picker('fruitStars', 'Maîtrise du fruit', S.fruit?.stars ?? 0, icon('fruit'), '0')}
     <h3 class="ed-h">Progression</h3>
     <div class="form">
       ${num('level', 'Niveau', S.level, 1, 999)}
@@ -4452,16 +4452,32 @@ document.addEventListener('dragstart', (e) => {
   if (e.target.closest?.('.cell, .xcell, .eslot, .scell, .ico')) e.preventDefault();
 });
 
+/** Fin du chargement : le centre s'efface, puis l'écran s'ouvre vers le haut et vers le bas. */
+function openBoot() {
+  const b = $('boot');
+  if (calm.matches) return void (b.hidden = true);
+  b.classList.add('open');
+  setTimeout(() => (b.hidden = true), 1300);
+}
+
 /* ═══ Démarrage ══════════════════════════════════════════════════════════ */
 (async () => {
   paintStatic();
   $('ship-types').innerHTML = G.SHIP_TYPES.map((t) => `<option value="${esc(t)}">`).join('');
+  // Écran de chargement : l'icône choisie par le staff, gardée en mémoire depuis la dernière ouverture
+  try {
+    setIcons(JSON.parse(localStorage.getItem('op_icons') || '{}'), mediaSrc);
+  } catch {}
+  $('boot-spin').innerHTML = icon('loading');
   let st;
   try {
     st = await API.boot();
     G.setCatalog(st.catalog);
     ICONS = st.icons || {};
     setIcons(ICONS, mediaSrc);
+    try {
+      localStorage.setItem('op_icons', JSON.stringify(ICONS));
+    } catch {}
     ME = st.me;
     S = st.player;
     SHOP = st.shop;
@@ -4486,7 +4502,7 @@ document.addEventListener('dragstart', (e) => {
   selectTab(tabs[0]);
   showScreen('fiche');
   fillGauges(document.querySelector('.hero'));
-  $('boot').hidden = true;
+  openBoot();
   // Ouverte avec /panel admin ou /edit profil : panneau admin (et fiche du joueur pour /edit profil)
   if (st.open && ME.staff) await enterAdmin(st.open);
   if (st.openDenied) toast(OPEN_DENIED);

@@ -239,13 +239,14 @@ function healthToolsHTML() {
     <div class="mj-tools">
       ${list.length ? `<div class="member-list">${list.map((h) => `<div class="member-row"><span class="m-name">🩹 <b>${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small>${h.desc ? ` <small class="note">${esc(h.desc)}</small>` : ''}</span><span class="rank-badge hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span><span class="m-acts"><button class="btn sm ghost" data-health-del="${esc(h.id)}">Guérir</button></span></div>`).join('')}</div>` : '<p class="note" style="margin:0">💚 Intact : aucune blessure, aucune maladie.</p>'}
       <div class="mj-row health-row">
-        <select id="mjh-type" aria-label="Catégorie">${Object.entries(G.injuryTypes()).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
-        <select id="mjh-level" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
+        <label for="mjh-type">Catégorie</label><select id="mjh-type" aria-label="Catégorie">${Object.entries(G.injuryTypes()).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+        <label for="mjh-level">Gravité</label><select id="mjh-level" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
         <input id="mjh-label" maxlength="80" placeholder="Ex. Bras cassé, Fièvre…" aria-label="Description courte">
         <input id="mjh-desc" maxlength="300" placeholder="Détail (facultatif)" aria-label="Détail">
         <button class="btn sm" id="mjh-add">Ajouter</button>
         ${list.length > 1 ? '<button class="btn sm ghost" id="mjh-clear">Tout guérir</button>' : ''}
       </div>
+      ${Object.keys(G.INJURIES).length ? '' : '<p class="note" style="margin:0">Crée des catégories (fracture, brûlure…) dans Gestion > Blessures pour les choisir ici.</p>'}
     </div>`;
 }
 

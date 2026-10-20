@@ -595,7 +595,7 @@ function renderTech() {
   $('v-tech').innerHTML = `
     <div class="tech-tools">
       <div><h2>Techniques</h2><p class="lede" style="margin:0">Crée tes propres techniques. Un MJ les valide avant qu'elles soient utilisables en RP.</p></div>
-      <button class="btn" id="new-tech">${ico(131)}Nouvelle technique</button>
+      <button class="btn" id="new-tech">${icon('tab-t-tech')}Nouvelle technique</button>
     </div>
     ${wait ? `<p class="note">${wait} technique${wait > 1 ? 's' : ''} en attente de validation.</p>` : ''}
     ${refused ? `<p class="note">${refused} technique${refused > 1 ? 's' : ''} refusée${refused > 1 ? 's' : ''} : lis le motif, corrige-la, et elle repartira en validation.</p>` : ''}

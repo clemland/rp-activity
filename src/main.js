@@ -189,7 +189,7 @@ const FACTION = {
   'Chasseur de primes': { cls: 'f-chasseur', icon: '@faction-chasseur' },
   Civil: { cls: 'f-civil', icon: '@faction-civil' },
 };
-const CLASS_ICON = { Fighter: { icon: '@classe-fighter' }, Sabreur: { icon: '@classe-sabreur' }, Tireur: { icon: '@classe-tireur' } };
+const CLASS_ICON = { Fighter: { icon: '@classe-fighter' }, Sabreur: { icon: '@classe-sabreur' }, Tireur: { icon: '@classe-tireur' }, Civil: { icon: '@classe-civil' } };
 
 function photoHTML(p = S) {
   if (!p.photo) return PORTRAIT;
@@ -277,11 +277,11 @@ function renderHero() {
   $('h-rp').setAttribute('aria-label', `Actions RP récompensées aujourd’hui : ${done} sur ${G.RP_DAILY}`);
   const job = S.job.id ? JOBS[S.job.id] : { name: 'Aucun' };
   $('h-traits').innerHTML = [
-    ['Race', S.id.race, `@race-${G.slug(S.id.race)}`],
+    ['Race', S.id.race, `@race-${G.slug(S.id.race)}`, G.RACE_INFO[S.id.race]?.desc],
     ['Classe', S.id.classe, CLASS_ICON[S.id.classe]?.icon ?? '@classe-sabreur'],
     ['Métier', job.name, `@metier-${S.job.id || 'aucun'}`],
     ...(S.fruit ? [['Fruit', S.fruit.name, '@fruit']] : []),
-  ].map(([k, v, i]) => `<li>${glyph(i)}<span><small>${k}</small>${esc(v)}</span></li>`).join('');
+  ].map(([k, v, i, t]) => `<li ${t ? `title="${esc(t)}"` : ''}>${glyph(i)}<span><small>${k}</small>${esc(v)}</span></li>`).join('');
 
   const prevBounty = shown.bounty;
   $('badge-slot').innerHTML = badgeHTML();

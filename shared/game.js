@@ -54,7 +54,34 @@ const WEEK = 7 * 24 * 3600 * 1000;
 /** Anciens grades → nouveaux. */
 const OLD_GRADES = { Matelot: '3ème Classe', Caporal: '2ème Classe', Sergent: '1ère Classe', Adjudant: '1ère Classe', Enseigne: 'Lieutenant', 'Capitaine de corvette': 'Capitaine', Commodore: 'Vice-Amiral', 'Vice-amiral': 'Vice-Amiral' };
 export const RACES = ['Humain', 'Mink', 'Géant', 'Shandia', 'Homme-poisson', 'Buccaneer'];
-export const CLASSES = ['Fighter', 'Sabreur', 'Tireur'];
+export const CLASSES = ['Fighter', 'Sabreur', 'Tireur', 'Civil'];
+/** Races : statistiques de départ (à la création, niveau 1) et description. */
+export const RACE_INFO = {
+  Humain: {
+    stats: { force: 20, resistance: 20, rapidite: 20, sdc: 30 },
+    desc: 'Les humains sont la race la plus répandue du monde. Polyvalents et présents sur presque toutes les mers, ils se distinguent par leur grande diversité physique et culturelle. Leur force varie énormément selon les individus, certains pouvant devenir de redoutables combattants, pirates ou marines.',
+  },
+  Mink: {
+    stats: { force: 30, resistance: 20, rapidite: 50, sdc: 30 },
+    desc: 'Les Minks sont une race d’humanoïdes ressemblant à des animaux, originaires de Zou. Naturellement doués au combat, ils possèdent une grande force physique, des sens développés et peuvent produire de l’électricité grâce à leur fourrure.',
+  },
+  'Homme-poisson': {
+    stats: { force: 30, resistance: 50, rapidite: 20, sdc: 30 },
+    desc: 'Les Hommes-Poissons sont une race humanoïde vivant principalement sous la mer. Ils possèdent des caractéristiques physiques inspirées de différentes espèces marines et sont naturellement bien plus puissants dans l’eau que les humains. Leur capacité à respirer sous l’eau en fait d’excellents combattants aquatiques.',
+  },
+  Shandia: {
+    stats: { force: 30, resistance: 40, rapidite: 40, sdc: 50 },
+    desc: 'Les Shandia sont un ancien peuple guerrier originaire de Jaya, dont les descendants vivent aujourd’hui sur Skypiea. Ils se distinguent notamment par leurs ailes, leurs traditions guerrières et leur lien profond avec leur terre ancestrale. Habiles au combat et très attachés à leur histoire, les Shandia sont un peuple fier et résilient.',
+  },
+  Géant: {
+    stats: { force: 60, resistance: 70, rapidite: 5, sdc: 20 },
+    desc: 'Les Géants sont une race humanoïde connue pour leur taille gigantesque et leur force physique exceptionnelle. Originaires principalement d’Elbaf, ils vivent généralement bien plus longtemps que les humains et sont réputés pour être de redoutables guerriers. Leur puissance brute leur permet de rivaliser avec des adversaires de très haut niveau.',
+  },
+  Buccaneer: {
+    stats: { force: 50, resistance: 50, rapidite: 20, sdc: 40 },
+    desc: 'Les Buccaneers sont une ancienne race presque disparue, connue pour leur taille imposante et leur force physique exceptionnelle. Ils possèdent une grande résistance et sont réputés pour leur puissance hors du commun. Leur histoire est étroitement liée au Gouvernement Mondial.',
+  },
+};
 export const FRUIT_TYPES = ['Paramecia', 'Zoan', 'Logia'];
 export const SLOTS = { arme1: 'Arme 1', arme2: 'Arme 2' };
 export const TECH_SOURCES = { combat: 'Style de combat', fruit: 'Fruit du démon' };
@@ -187,7 +214,7 @@ export function newPlayer(uid, { name, race, job, classe, faction, grade } = {})
     uid,
     id: { name: n, epithet: '', faction: f, crew: '', crewRole: '', grade: g, race: r, classe: c, bounty: 0 },
     level: 1, xp: 0, statPts: 0, berry: 0,
-    stats: { force: 10, rapidite: 10, resistance: 10, sdc: 10 },
+    stats: { ...(RACE_INFO[r]?.stats || { force: 10, rapidite: 10, resistance: 10, sdc: 10 }) }, // stats de départ selon la race
     volonte: 0, haki: { observation: 0, armement: 0, rois: null }, fruit: null,
     job: { id: j, lvl: 1 },
     techniques: [], inv: [], equip: { arme1: null, arme2: null },

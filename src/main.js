@@ -4464,11 +4464,7 @@ function openBoot() {
 (async () => {
   paintStatic();
   $('ship-types').innerHTML = G.SHIP_TYPES.map((t) => `<option value="${esc(t)}">`).join('');
-  // Écran de chargement : l'icône choisie par le staff, gardée en mémoire depuis la dernière ouverture
-  try {
-    setIcons(JSON.parse(localStorage.getItem('op_icons') || '{}'), mediaSrc);
-  } catch {}
-  $('boot-spin').innerHTML = icon('loading');
+  // Écran de chargement : l'icône qui tourne est le fichier /assets/loading-icon.png (chargé avec la page)
   let st;
   try {
     st = await API.boot();

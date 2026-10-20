@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fiche RP</title>
+<link rel="preload" as="image" href="/assets/loading.png">
+<link rel="preload" as="image" href="/assets/loading-icon.png">
 </head>
 <body>
 <div class="boot" id="boot" aria-live="polite">
@@ -11,7 +13,7 @@
   <div class="boot-half boot-bottom"></div>
   <div class="boot-center">
     <img class="boot-banner" src="/assets/banner-small.webp" alt="">
-    <span class="boot-spin" id="boot-spin" aria-hidden="true"></span>
+    <span class="boot-spin" id="boot-spin" aria-hidden="true"><img src="/assets/loading-icon.png" alt="" onerror="this.outerHTML='<span class=&quot;ico pic pic-compass&quot;></span>'"></span>
     <p id="boot-msg">Chargement</p>
   </div>
 </div>

@@ -32,6 +32,14 @@ const itemIco = (k) => {
   return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy" draggable="false"></span>` : icon(`objet-${it.kind}`);
 };
 
+/** Icône d'une recette : l'objet produit, le modèle du bateau construit, ou l'icône du travail ou du soin. */
+const WORK_ICON = { voile: 'ship-speed', canon: 'ship-power', cale: 'objet-mat', granit: 'ship-granit', plongee: 'ship-plongee', moteur: 'ship-engine', reparation: 'ship-robust' };
+function recipeIco(r) {
+  if (r?.work) return r.work.type === 'construire' ? itemIco(r.work.model) : icon(WORK_ICON[r.work.type] || 'metier-charpentier');
+  if (r?.care) return icon('metier-medecin');
+  return itemIco(Object.keys(r?.gives || {})[0]);
+}
+
 /* ═══ État ═══════════════════════════════════════════════════════════════ */
 let ME = null; // { uid, name, staff }
 let S = null; // fiche affichée
@@ -895,7 +903,7 @@ function renderJob() {
     </div>
 
     ${c ? `<div class="craft-now ${ready ? 'ready' : ''}">
-      <div class="craft-gives">${c.work ? `<span class="need">${icon('metier-charpentier')}${esc(c.name)}</span>` : ''}${Object.entries(c.gives).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>
+      <div class="craft-gives">${c.work ? `<span class="need">${recipeIco({ work: c.work })}${esc(c.name)}</span>` : ''}${Object.entries(c.gives).map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>
       <div class="craft-info">
         <b>${esc(c.name)}</b>
         ${ready ? '<span class="ok">Prête à récupérer !</span>' : `<span>Encore <b id="craft-left">${fmtEnd(c.end)}</b></span>`}
@@ -978,7 +986,7 @@ function atelierHTML() {
     <div class="recipes">${works.map(([id, r]) => {
       const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship);
       return `<article class="recipe ${why ? 'locked' : ''}">
-        <h3 class="rc-title">${icon(r.work.type === 'construire' ? 'objet-bateau' : 'metier-charpentier')}${esc(G.workLabel(r.work))}</h3>
+        <h3 class="rc-title">${recipeIco(r)}${esc(G.workLabel(r.work))}</h3>
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
@@ -4109,7 +4117,7 @@ function renderGestion() {
           </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
           <button class="gest-card" data-recipe="${esc(id)}">
-            <span class="slot-ico">${itemIco(Object.keys(r.gives)[0])}</span>
+            <span class="slot-ico">${recipeIco(r)}</span>
             <span><b>${esc(G.recipeLabel(r))}</b><small>${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans ingrédient'}</small></span>
           </button>`).join('')}</div>` : `<p class="note">${Object.keys(G.ITEMS).length ? 'Aucune recette. Crée la première avec « + Nouvelle recette ».' : 'Crée d’abord des objets : une recette transforme des objets en d’autres objets.'}</p>`}`;
 }

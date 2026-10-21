@@ -10,7 +10,7 @@
 
 /* ═══ Réglages ═══════════════════════════════════════════════════════════ */
 export const BAG = 32; // emplacements d'inventaire
-export const MAX_CARRY = 50; // poids maximum porté par un joueur (kg)
+export const MAX_CARRY = 100; // poids maximum porté par un joueur (kg)
 export const ICONS_OWNER = '464061688069488640'; // seul compte autorisé à voir et modifier l'écran Icônes
 export const STAT_MAX = 100;
 export const MAX_LEVEL = 100;

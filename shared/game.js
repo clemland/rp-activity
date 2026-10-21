@@ -824,7 +824,15 @@ export function staffAction(player, action) {
       out.toast = `${n > 0 ? '+' : '−'}${fmt(Math.abs(n))} berrys pour ${fullName(p)}`;
       break;
     }
-        case 'health.add': {
+        case 'discover': {
+      // Le staff ajoute ou retire une île des découvertes du joueur
+      const id = str(a.id, 40);
+      if (!id) fail('Île manquante.');
+      p.discovered = a.on ? [...new Set([...p.discovered, id])] : p.discovered.filter((x) => x !== id);
+      out.toast = a.on ? 'Île ajoutée à ses découvertes' : 'Île retirée de ses découvertes';
+      break;
+    }
+    case 'health.add': {
       const label = str(a.label, 80);
       if (!label) fail('Décris la blessure ou la maladie.');
       if (p.health.length >= 30) fail('30 états de santé maximum.');

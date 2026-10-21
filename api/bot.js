@@ -127,6 +127,17 @@ export default handler(['POST'], async (req, body) => {
         const found = drop ? { key: drop.key, qty: drop.qty, name: itemOf(drop.key).name, rarity: rarityOf(drop.key).name, color: rarityOf(drop.key).color, full: !added } : null;
         return { counted: r.counted, xp: r.xp, count: r.count, max: RP_DAILY, limit: r.limit, ups: r.ups, level: r.player.level, name: fullName(r.player), found };
       });
+      // Découverte : écrire un message RP sur une île la fait découvrir (elle reste sur la carte du joueur)
+      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+        const isl = islandOf((await loadMap()).map, { channelId: String(body.channelId), parentId: body.parentId ? String(body.parentId) : null });
+        if (isl) {
+          await retry(async () => {
+            const r = await read('players', body.userId);
+            if (!r || (r.data.discovered || []).includes(isl)) return;
+            await write('players', body.userId, { ...r.data, discovered: [...(r.data.discovered || []), isl] }, r.version);
+          });
+        }
+      }
       // Navigation : une action RP d'un passager dans le salon du bateau fait avancer le voyage ;
       // à l'arrivée, le premier passager qui écrit sur l'île de destination met le bateau à quai.
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {

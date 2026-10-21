@@ -240,6 +240,22 @@ function healthHTML(p) {
   return `<details class="health"><summary class="hp-tag lvl-${worst}">${worst >= 3 ? '🩸' : '🩹'} ${sum} · ${G.HEALTH_LEVELS[worst - 1]}</summary>
     <ul>${list.map((h) => `<li><b>🩹 ${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small><span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.desc ? `<br><small>${esc(h.desc)}</small>` : ''}</li>`).join('')}</ul></details>`;
 }
+/** Îles découvertes du joueur (onglet Édition MJ) : cases à cocher. */
+function discoveredHTML() {
+  if (!amap) {
+    loadAdminMap().then(() => VIEW && renderMjTab());
+    return '<p class="note" style="margin:0">Chargement de la carte…</p>';
+  }
+  const isl = Object.entries(amap.islands).filter(([, i]) => i.kind === 'island');
+  if (!isl.length) return '<p class="note" style="margin:0">Aucune île sur la carte.</p>';
+  const known = new Set(S.discovered || []);
+  return `<p class="note" style="margin:0">Les îles cochées restent toujours sur sa carte, en plus des îles visibles par tous. Il découvre aussi une île en y arrivant en bateau, ou en y écrivant un message RP.</p>
+    <div class="perms">${isl.map(([id, i]) => `<label><input type="checkbox" data-disc="${esc(id)}" ${known.has(id) ? 'checked' : ''}> ${esc(i.name)}${i.visible ? ' <small class="note">(visible par tous)</small>' : ''}</label>`).join('')}</div>`;
+}
+$('v-mj').addEventListener('change', (e) => {
+  const id = e.target.dataset?.disc;
+  if (id) staffAct({ type: 'discover', id, on: e.target.checked });
+});
 /** Section « État de santé » de l'onglet Édition MJ. */
 function healthToolsHTML() {
   const list = S.health || [];
@@ -2017,6 +2033,8 @@ function renderMjTab() {
       ${progressionTools('mjt')}
     </div>
     ${healthToolsHTML()}
+    <h3 class="ed-h">Îles découvertes</h3>
+    <div class="mj-tools">${discoveredHTML()}</div>
     <h3 class="ed-h">Objets</h3>
     <div class="mj-tools">
       <div class="mj-row">

@@ -1382,6 +1382,7 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .op-pt.done{background:#2f9a55;color:#fff}
 .inj-card{grid-template-columns:auto 1fr auto;cursor:default}
 .ship-trio .ico{--s:24px}
+.games-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:12px}
 .ship-stats .ico{--s:16px;vertical-align:-3px}
 .ship-cfg summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .ship-cfg summary::-webkit-details-marker{display:none}

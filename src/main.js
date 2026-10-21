@@ -1195,13 +1195,13 @@ function careGame(level, label) {
   return opGame(level, `Opération : ${label}`);
 }
 /** Opération en trois étapes (anesthésie, incision, suture) pendant que les constantes baissent. */
-function opGame(level, title) {
+function opGame(level, title, rank = S?.job?.lvl || 1) {
   return new Promise((resolve) => {
     const d = $('d-op'), area = $('op-area');
     $('op-title').textContent = title;
     $('op-msg').textContent = '';
     let vit = 100, step = -1, done = false, raf = 0, last = performance.now();
-    const drain = Math.max(1, 1.5 + level * 1.2 - (S.job.lvl - G.careRank(level)) * 0.8); // % par seconde
+    const drain = Math.max(1, 1.5 + level * 1.2 - (rank - G.careRank(level)) * 0.8); // % par seconde
     let cur = 0, dir = 1, zx = 0, drawing = false, dev = [], next = 1;
     const zw = Math.max(8, 20 - level * 3), total = 3 + level;
     const hurt = (n, msg) => {
@@ -2148,7 +2148,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -3245,6 +3245,73 @@ $('v-atech').addEventListener('click', async (e) => {
     setBusy(-1);
   }
   loadPendingTechs();
+});
+
+/* ═══ Mini-jeux (panneau admin) : tester sans rien dépenser ═════════════ */
+const gameLog = [];
+function renderGames() {
+  if (!tools()) return;
+  const ranks = (sel = 1) => JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${i + 1 === sel ? 'selected' : ''}>${l}</option>`).join('');
+  $('v-agames').innerHTML = `
+    <div class="sec-head"><div><h2>Mini-jeux</h2><p class="lede" style="margin:0">Teste les mini-jeux comme un joueur, sans matériel ni effet sur les fiches ou les bateaux. Pratique pour régler la difficulté.</p></div></div>
+    <div class="games-grid">
+      <section class="crew-box"><h3>🔨 Atelier du charpentier</h3>
+        <div class="mj-row"><label for="tg-work">Travail</label><select id="tg-work">${Object.entries(G.SHIP_WORKS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+        <div class="mj-row"><label for="tg-level">Niveau de voile</label><input id="tg-level" type="number" min="1" max="10" value="5"></div>
+        <div class="mj-row"><label for="tg-size">Calibre</label><select id="tg-size">${Object.entries(G.CANNONS).map(([k, c]) => `<option value="${k}">${esc(c.name)}</option>`).join('')}</select>
+          <label for="tg-wood">Bois</label><select id="tg-wood">${Object.entries(G.WOODS).map(([k, w]) => `<option value="${k}">${esc(w.name)}</option>`).join('')}</select></div>
+        <div class="mj-row"><label for="tg-wrank">Rang</label><select id="tg-wrank">${ranks()}</select></div>
+        <p class="note" id="tg-wdiff" style="margin:0"></p>
+        <div><button class="btn" id="tg-work-go">Tester le marteau</button></div>
+      </section>
+      <section class="crew-box"><h3>🩹 Bandage (blessure légère)</h3>
+        <div class="mj-row"><label for="tg-brank">Rang</label><select id="tg-brank">${ranks()}</select></div>
+        <div><button class="btn" id="tg-band-go">Tester le bandage</button></div>
+      </section>
+      <section class="crew-box"><h3>🔪 Opération</h3>
+        <div class="mj-row"><label for="tg-glvl">Gravité</label><select id="tg-glvl">${G.HEALTH_LEVELS.slice(1).map((l, i) => `<option value="${i + 2}">${l}</option>`).join('')}</select></div>
+        <div class="mj-row"><label for="tg-orank">Rang</label><select id="tg-orank">${ranks(2)}</select></div>
+        <div><button class="btn" id="tg-op-go">Tester l’opération</button></div>
+      </section>
+    </div>
+    <h3 class="ed-h">Résultats</h3>
+    <div class="member-list">${gameLog.map((l) => `<div class="member-row"><span class="m-name">${l.ok ? '✅' : '❌'} ${esc(l.label)}</span><span class="note">${esc(l.at)}</span><span></span></div>`).join('') || '<p class="note">Aucun essai pour l’instant.</p>'}</div>`;
+  showWorkDiff();
+}
+/** Travail et rang choisis dans l'encadré de l'atelier. */
+function testWork() {
+  const work = G.normalizeWork({ type: $('tg-work').value, level: $('tg-level').value, size: $('tg-size').value, wood: $('tg-wood').value, model: '' });
+  return { work, rank: +$('tg-wrank').value };
+}
+function showWorkDiff() {
+  const el = $('tg-wdiff');
+  if (!el) return;
+  const { work, rank } = testWork();
+  const d = G.workDifficulty({ work }, { job: { lvl: rank } });
+  el.textContent = `Curseur : ${d.speed.toFixed(2)} aller-retour par seconde · zone dorée : ${Math.round(d.zone)} % · ${d.nails} clous en ${d.strikes} coups`;
+}
+async function testGame(label, play) {
+  const ok = await play();
+  gameLog.unshift({ ok, label, at: new Date().toLocaleTimeString('fr-FR') });
+  gameLog.length = Math.min(gameLog.length, 15);
+  renderGames();
+}
+$('v-agames').addEventListener('change', () => showWorkDiff());
+$('v-agames').addEventListener('click', (e) => {
+  if (e.target.closest('#tg-work-go')) {
+    const { work, rank } = testWork();
+    const what = work.type === 'construire' ? `Construire en ${G.WOODS[work.wood].name.toLowerCase()}` : G.workLabel(work);
+    const label = `${what} (${JOB_LEVELS[rank - 1]})`;
+    return void testGame(label, () => nailGame(G.workDifficulty({ work }, { job: { lvl: rank } }), `Test : ${what}`));
+  }
+  if (e.target.closest('#tg-band-go')) {
+    const rank = +$('tg-brank').value;
+    return void testGame(`Bandage (${JOB_LEVELS[rank - 1]})`, () => nailGame({ speed: 0.9, zone: 24 + (rank - 1) * 3, nails: 3, strikes: 5 + rank, icon: '🩹', verb: '🩹 Serrer' }, 'Test : bandage'));
+  }
+  if (e.target.closest('#tg-op-go')) {
+    const lvl = +$('tg-glvl').value, rank = +$('tg-orank').value, g = G.HEALTH_LEVELS[lvl - 1].toLowerCase();
+    return void testGame(`Opération ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame(lvl, `Test : opération ${g}`, rank));
+  }
 });
 
 /* ═══ Permissions (panneau admin) : ce que chaque rôle Discord peut faire ═ */
@@ -4424,6 +4491,7 @@ function showScreen(name) {
   if (name === 'aicons') renderIcons();
   if (name === 'aloot') (lootData ? renderLoot() : loadLoot());
   if (name === 'aperms') loadPerms();
+  if (name === 'agames') renderGames();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

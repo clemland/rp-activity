@@ -739,7 +739,7 @@ function renderInv() {
   // Une seule arme équipée sur trois identiques : seule la première case porte la marque.
   $('v-inv').innerHTML = `
     <div class="sec-head"><h2>Inventaire</h2><span class="pill">${icon('bourse')}<b>${berry(S.berry)}</b></span></div>
-    <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight">${G.kg(G.invWeight(S))}</span></p>
+    <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight ${G.invWeight(S) > G.MAX_CARRY ? 'req' : ''}">${G.kg(G.invWeight(S))} / ${G.MAX_CARRY} kg</span></p>
     <div class="equip">
       ${Object.entries(SLOTS).map(([sl, label]) => {
         const idx = G.equipSlotIndex(S, sl), k = idx >= 0 ? S.inv[idx][0] : null, it = k && itemOf(k);

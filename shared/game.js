@@ -10,6 +10,7 @@
 
 /* ═══ Réglages ═══════════════════════════════════════════════════════════ */
 export const BAG = 32; // emplacements d'inventaire
+export const MAX_CARRY = 50; // poids maximum porté par un joueur (kg)
 export const STAT_MAX = 100;
 export const MAX_LEVEL = 100;
 /** XP pour passer du niveau lv au suivant : 50 au départ, puis +10 par niveau (1 030 pour le 99 → 100). */
@@ -309,8 +310,15 @@ export const equipSlotIndex = (p, sl) => (p.equip[sl] ? p.inv.findIndex((s) => s
 export const isWeapon = (k) => ITEMS[k]?.kind === 'arme';
 export const invWeight = (p) => p.inv.reduce((a, s) => a + (s ? itemWeight(s[0]) * s[1] : 0), 0);
 
+/** Pourquoi on ne peut pas ajouter cet objet : trop lourd, sinon plus de place. */
+export function carryBlock(p, k, q = 1) {
+  const w = itemWeight(k) * q;
+  if (invWeight(p) + w > MAX_CARRY + 1e-9) return `Trop lourd : tu portes ${kg(invWeight(p))} sur ${MAX_CARRY} kg, et ${q} × ${itemOf(k).name} pèse ${kg(w)}.`;
+  return 'Inventaire plein.';
+}
 export function addItem(p, k, q = 1) {
   if (!ITEMS[k]) fail('Objet inconnu.');
+  if (invWeight(p) + itemWeight(k) * q > MAX_CARRY + 1e-9) return false; // trop lourd à porter
   if (ITEMS[k].kind === 'arme') {
     // Les armes ne s'empilent pas : une arme = une case.
     const free = p.inv.reduce((a, x) => a + (x ? 0 : 1), 0);
@@ -588,7 +596,7 @@ export function playerAction(player, action, ctx = {}) {
       }
       const test = clone(p);
       const isShip = (k) => ITEMS[k]?.kind === 'bateau';
-      for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !isShip(k) && !addItem(test, k, q)) fail('Inventaire plein : libère de la place pour récupérer ta fabrication.');
+      for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !isShip(k) && !addItem(test, k, q)) fail(`${carryBlock(test, k, q)} Libère de la place pour récupérer ta fabrication.`);
       for (const [k, q] of Object.entries(c.gives)) if (ITEMS[k] && !isShip(k)) addItem(p, k, q);
       // Un bateau fabriqué sort à quai dans le salon où on le récupère.
       out.newShips = Object.entries(c.gives).filter(([k]) => isShip(k)).flatMap(([k, q]) =>
@@ -697,7 +705,7 @@ export function playerAction(player, action, ctx = {}) {
         // Le bateau arrive avec le nom de son type : le propriétaire le personnalise ensuite.
         out.newShip = newShip({ model: k, owner: { kind: 'player', id: p.uid }, position: ctx.channelId ? { channelId: ctx.channelId, name: (shop.channel || '').replace(/^#/, '') } : null }, now);
       }
-      else if (!addItem(p, k, 1)) fail('Inventaire plein.');
+      else if (!addItem(p, k, 1)) fail(carryBlock(p, k, 1));
       p.berry -= price;
       if (stock > 0) row[2]--;
       out.shop = shop; out.toast = out.newShip ? `${out.newShip.type} acheté : donne-lui un nom dans Équipage > Bateaux` : `Acheté : ${ITEMS[k].name}`; out.item = k; out.delta = -price;
@@ -775,7 +783,7 @@ export function staffAction(player, action) {
       const k = a.key, q = int(a.qty ?? 1, 1, 9999);
       if (!ITEMS[k]) fail('Objet inconnu.');
       if (ITEMS[k].kind === 'bateau' && a.type === 'give') fail('Un bateau se crée dans Flotte > Bateaux, pas dans l’inventaire.');
-      if (a.type === 'give') { if (!addItem(p, k, q)) fail('Inventaire plein.'); out.toast = `Donné : ${q} × ${ITEMS[k].name}`; }
+      if (a.type === 'give') { if (!addItem(p, k, q)) fail(carryBlock(p, k, q)); out.toast = `Donné : ${q} × ${ITEMS[k].name}`; }
       else { removeItem(p, k, Math.min(q, count(p, k))); out.toast = `Retiré : ${q} × ${ITEMS[k].name}`; }
       break;
     }
@@ -1388,7 +1396,7 @@ export function crewAction(player, action, ctx = {}) {
       const k = a.key, q = int(a.qty ?? 1, 1, 1e6);
       if ((crew.chest[k] || 0) < q) fail('Le coffre n’en contient pas assez.');
       if (!ITEMS[k]) fail('Objet supprimé : il ne peut plus être sorti.');
-      if (!addItem(p, k, q)) fail('Ton inventaire est plein.');
+      if (!addItem(p, k, q)) fail(`${carryBlock(p, k, q)} Ta cale garde l’objet.`);
       crew.chest[k] -= q;
       if (!crew.chest[k]) delete crew.chest[k];
       out.toast = `Sorti du coffre : ${q} × ${itemOf(k).name}`; out.item = k;

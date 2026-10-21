@@ -223,6 +223,14 @@ export default handler(['POST'], async (req, body) => {
       // Port dans un post de forum (anciens bateaux) : on retrouve le forum grâce à la position du joueur, au même endroit
       if (row.data.position && !row.data.position.parentId && player.position?.channelId === row.data.position.channelId) row.data.position.parentId = player.position.parentId || null;
       const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now(), map: action.type.startsWith('ship.voyage') ? (await loadMap()).map : null });
+      // Monter à bord d'un petit bateau sans salon : son post est créé tout de suite
+      if ((out.boarded || out.accepted) && !out.ship.channel && out.ship.space === 'post') {
+        const ch = await ensureShipChannel(out.ship, me.uid).catch(() => null);
+        if (ch) {
+          out.ship.channel = ch;
+          out.toast = `${out.toast || ''} Salon du bateau créé : ${ch.name}.`.trim();
+        }
+      }
       await write('ships', action.shipId, out.ship, row.version);
       // On n'est à bord que d'un bateau à la fois : on descend des autres.
       const boarder = out.boarded ? me.uid : out.accepted;

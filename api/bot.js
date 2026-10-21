@@ -13,6 +13,7 @@
 import { handler, need } from './_lib/http.js';
 import { env } from './_lib/env.js';
 import { staffPerms } from './_lib/discord.js';
+import { shipEmbed } from './_lib/shipchan.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
 import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep, dockShip } from '../shared/game.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
@@ -81,6 +82,13 @@ export default handler(['POST'], async (req, body) => {
       await remove('players', body.userId);
       if (body.by) console.log(`[staff] ${body.by} a supprimé la fiche de ${body.userId} (${fullName(row.data)})`);
       return { name: fullName(row.data) };
+    }
+
+    case 'ship.embed': {
+      // Fiche du bateau pour le premier message de son salon (/bateau salon)
+      const row = await read('ships', String(body.shipId || ''));
+      need(row, 404, 'Bateau introuvable.');
+      return { embed: await shipEmbed(normalizeShip(row.data)) };
     }
 
     case 'perms':

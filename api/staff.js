@@ -340,7 +340,7 @@ export default handler(['POST'], async (req, body) => {
         if (!(ship.space === 'forum' ? cfg.categoryId : cfg.forumId)) chanNote = ' · salon non créé : fais d’abord /bateau config';
         else {
           try {
-            ship.channel = await createShipChannel(ship.name, ship.space, cfg);
+            ship.channel = await createShipChannel(ship, cfg);
             if (ship.channel) await addRpChannel(ship.channel.id, ship.channel.name, ship.channel.kind === 'forum' ? 'forum' : 'salon', me.uid);
           } catch (err) {
             chanNote = ` · salon non créé : ${err.message}`;

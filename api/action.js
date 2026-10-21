@@ -37,7 +37,7 @@ export default handler(['POST'], async (req, body) => {
     firstTry = false;
     channelId = player.position?.channelId || null;
     const ctx = { channelId, now: Date.now() };
-    const needsCrew = action.type.startsWith('crew.') || action.type.startsWith('ship.') || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau') || action.type === 'craft.collect';
+    const needsCrew = action.type.startsWith('crew.') || action.type.startsWith('ship.') || (action.type === 'shop.buy' && ITEMS[action.key]?.kind === 'bateau') || action.type.startsWith('craft.');
     const cs = needsCrew ? await loadCrewAndShips(player) : null;
     const reply = (out, extra = {}) =>
       cs
@@ -190,6 +190,12 @@ export default handler(['POST'], async (req, body) => {
       if (sid) need(ship, 404, 'Bateau introuvable : il doit être à toi ou à ton équipage.');
       const out = playerAction(player, action, { ...ctx, ship, shipId: sid, crew: cs.crew, channelName: player.position?.name || '' });
       const extra = { ships: {} };
+      if (out.crew && cs.crew) {
+        // matériaux pris dans la cale de l'équipage (atelier)
+        const { id: cid, memberNames: _names, ...crewData } = out.crew;
+        await write('crews', cid, normalizeCrew(crewData), cs.crewVersion);
+        extra.crew = out.crew;
+      }
       if (out.ship) {
         await write('ships', sid, out.ship, cs.shipVersions[sid]);
         extra.ships[sid] = out.ship;
@@ -247,9 +253,15 @@ export default handler(['POST'], async (req, body) => {
     if (action.type === 'craft.collect' && channelId) ctx.channelName = player.position?.name || (await channelName(channelId));
     // Travail d'atelier terminé : il faut le bateau concerné (à lui ou à son équipage)
     if (action.type === 'craft.collect' && player.craft?.work?.shipId) ctx.ship = cs.ships[player.craft.work.shipId] || null;
+    if (cs) ctx.crew = cs.crew; // les fabrications peuvent puiser dans la cale de l'équipage
     const out = playerAction(player, action, ctx);
     if (out.shop) await write('shops', channelId, out.shop, shopV);
+    if (out.crew && cs?.crew) {
+      const { id: cid, memberNames: _names, ...crewData } = out.crew;
+      await write('crews', cid, normalizeCrew(crewData), cs.crewVersion);
+    }
     const extra = {};
+    if (out.crew) extra.crew = out.crew;
     if (out.ship && out.shipId) {
       await write('ships', out.shipId, out.ship, cs.shipVersions[out.shipId]);
       extra.ships = { [out.shipId]: out.ship };

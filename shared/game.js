@@ -10,7 +10,7 @@
 
 /* ═══ Réglages ═══════════════════════════════════════════════════════════ */
 export const BAG = 32; // emplacements d'inventaire
-export const MAX_CARRY = 100; // poids maximum porté par un joueur (kg)
+export const MAX_CARRY = 75; // poids maximum porté par un joueur (kg)
 export const ICONS_OWNER = '464061688069488640'; // seul compte autorisé à voir et modifier l'écran Icônes
 export const STAT_MAX = 100;
 export const MAX_LEVEL = 100;
@@ -468,10 +468,28 @@ export function normalizeRecipe(x) {
   };
 }
 /** Le joueur peut-il lancer cette recette ? Renvoie la raison sinon. */
-export function craftBlock(p, r) {
+/** Quantité utilisable pour une recette : inventaire (hors armes équipées) + cale commune de l'équipage. */
+export const stockOf = (p, crew, k) => freeCount(p, k) + (crew && crew.members?.includes(p.uid) ? crew.chest?.[k] || 0 : 0);
+/** Prend les ingrédients : d'abord dans l'inventaire, puis dans la cale. Renvoie ce qui vient de la cale. */
+export function takeItems(p, crew, needs) {
+  const fromChest = {};
+  for (const [k, q] of Object.entries(needs)) {
+    const inv = Math.min(q, freeCount(p, k));
+    if (inv) removeItem(p, k, inv);
+    const rest = q - inv;
+    if (rest > 0) {
+      if (!crew || !crew.members?.includes(p.uid) || (crew.chest[k] || 0) < rest) fail('Objets manquants.');
+      crew.chest[k] -= rest;
+      if (!crew.chest[k]) delete crew.chest[k];
+      fromChest[k] = rest;
+    }
+  }
+  return fromChest;
+}
+export function craftBlock(p, r, crew = null) {
   if (r.job && r.job !== p.job.id) return `Réservé au métier ${JOBS[r.job].name}.`;
   if (r.job && p.job.lvl < r.lvl) return `Demande le niveau ${JOB_LEVELS[r.lvl - 1]}.`;
-  if (Object.entries(r.needs).some(([k, q]) => count(p, k) < q)) return 'Objets manquants.';
+  if (Object.entries(r.needs).some(([k, q]) => stockOf(p, crew, k) < q)) return 'Objets manquants (inventaire et cale).';
   return null;
 }
 
@@ -574,10 +592,12 @@ export function playerAction(player, action, ctx = {}) {
       const r = RECIPES[a.id];
       if (!r) fail('Recette inconnue.');
       if (p.craft) fail('Tu as déjà une fabrication en cours.');
-      const why = craftBlock(p, r);
+      const crew = ctx.crew ? clone(ctx.crew) : null;
+      const why = craftBlock(p, r, crew);
       if (why) fail(why);
-      for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
-      p.craft = { recipe: a.id, name: recipeLabel(r), gives: r.gives, start: now, end: now + r.seconds * 1000 };
+      const fromChest = takeItems(p, crew, r.needs); // inventaire d'abord, puis la cale de l'équipage
+      if (Object.keys(fromChest).length) out.crew = crew;
+      p.craft = { recipe: a.id, name: recipeLabel(r), gives: r.gives, start: now, end: now + r.seconds * 1000, fromChest };
       out.toast = r.seconds ? `Fabrication lancée : ${recipeLabel(r)} (${duree(r.seconds)})` : `Fabrication lancée : ${recipeLabel(r)}`;
       break;
     }
@@ -612,7 +632,18 @@ export function playerAction(player, action, ctx = {}) {
       const c = p.craft;
       if (!c) fail('Aucune fabrication en cours.');
       const r = RECIPES[c.recipe];
-      if (r) for (const [k, q] of Object.entries(r.needs)) if (ITEMS[k]) addItem(p, k, q);
+      // Ce qui venait de la cale y retourne, le reste revient dans l'inventaire
+      const back = c.fromChest || {};
+      const crew = ctx.crew && Object.keys(back).length ? clone(ctx.crew) : null;
+      if (r) {
+        for (const [k, q] of Object.entries(r.needs)) {
+          if (!ITEMS[k]) continue;
+          const toChest = crew ? Math.min(q, back[k] || 0) : 0;
+          if (toChest) crew.chest[k] = (crew.chest[k] || 0) + toChest;
+          if (q - toChest > 0) addItem(p, k, q - toChest);
+        }
+      }
+      if (crew) out.crew = crew;
       p.craft = null;
       out.toast = 'Fabrication annulée, ingrédients rendus';
       break;
@@ -643,9 +674,11 @@ export function playerAction(player, action, ctx = {}) {
         if (!ship) fail('Bateau introuvable.');
         if (!canManageShip(p, ship, ctx.crew)) fail('Tu ne peux pas travailler sur ce bateau.');
       }
-      const why = workBlock(p, r, ship);
+      const why = workBlock(p, r, ship, ctx.crew);
       if (why) fail(why);
-      for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
+      const crewW = ctx.crew ? clone(ctx.crew) : null;
+      const fromChest = takeItems(p, crewW, r.needs); // inventaire d'abord, puis la cale de l'équipage
+      if (Object.keys(fromChest).length) out.crew = crewW;
       if (!a.success) {
         out.failed = true;
         out.toast = `Travail raté : ${workLabel(w)}. Les matériaux sont perdus.`;
@@ -654,7 +687,7 @@ export function playerAction(player, action, ctx = {}) {
       // Mini-jeu réussi : le travail prend ensuite le temps de la recette (à récupérer dans l'onglet Métier)
       const secs = r.seconds || 0;
       if (secs > 0) {
-        p.craft = { recipe: a.id, name: workLabel(w), gives: {}, start: now, end: now + secs * 1000, work: { ...w, shipId: w.type === 'construire' ? null : ctx.shipId || null } };
+        p.craft = { recipe: a.id, name: workLabel(w), gives: {}, start: now, end: now + secs * 1000, fromChest, work: { ...w, shipId: w.type === 'construire' ? null : ctx.shipId || null } };
         out.toast = `Mini-jeu réussi ! ${workLabel(w)} : prêt dans ${duree(secs)}.`;
         break;
       }
@@ -1028,10 +1061,10 @@ export function workLabel(w) {
   return SHIP_WORKS[w.type];
 }
 /** Pourquoi ce travail est impossible (null s'il est possible). ship : null pour une construction. */
-export function workBlock(p, recipe, ship) {
+export function workBlock(p, recipe, ship, crew = null) {
   const w = recipe.work;
   if (p.craft) return 'Ton atelier est déjà occupé : récupère ou annule le travail en cours.';
-  const why = craftBlock(p, recipe);
+  const why = craftBlock(p, recipe, crew);
   if (why) return why;
   if (w.type === 'voile' && p.job.lvl < sailRank(w.level)) return `Voile niveau ${w.level} : demande le niveau ${JOB_LEVELS[sailRank(w.level) - 1]}.`;
   if (w.type === 'construire') return ITEMS[w.model]?.kind === 'bateau' ? null : 'Ce modèle de bateau n’existe plus.';

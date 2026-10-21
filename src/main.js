@@ -106,7 +106,7 @@ async function run(action) {
   let local = null;
   if (OPTIMISTIC.has(action.type)) {
     try {
-      local = G.playerAction(S, action, { shop: SHOP, channelId: POSID });
+      local = G.playerAction(S, action, { shop: SHOP, channelId: POSID, crew: CREW });
     } catch (e) {
       if (e instanceof G.GameError) {
         toast(esc(e.message));
@@ -763,7 +763,9 @@ function renderInv() {
   // Une seule arme équipée sur trois identiques : seule la première case porte la marque.
   $('v-inv').innerHTML = `
     <div class="sec-head"><h2>Inventaire</h2><span class="pill">${icon('bourse')}<b>${berry(S.berry)}</b></span></div>
-    <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''} · <span class="weight ${G.invWeight(S) > G.MAX_CARRY ? 'req' : ''}">${G.kg(G.invWeight(S))} / ${G.MAX_CARRY} kg</span></p>
+    <p class="lede">${used} / ${BAG} emplacements · ${n} objet${n > 1 ? 's' : ''}</p>
+    <div class="gauge weight-bar ${G.invWeight(S) >= G.MAX_CARRY * 0.9 ? 'bad' : ''}" aria-label="Poids porté"><i style="width:${Math.min(100, (G.invWeight(S) / G.MAX_CARRY) * 100)}%"></i></div>
+    <div class="gauge-cap"><span>Poids porté</span><span class="${G.invWeight(S) > G.MAX_CARRY ? 'req' : ''}">${G.kg(G.invWeight(S))} / ${G.MAX_CARRY} kg</span></div>
     <div class="equip">
       ${Object.entries(SLOTS).map(([sl, label]) => {
         const idx = G.equipSlotIndex(S, sl), k = idx >= 0 ? S.inv[idx][0] : null, it = k && itemOf(k);
@@ -899,14 +901,14 @@ $('v-inv').addEventListener('click', (e) => {
 const fmtEnd = (ms) => G.duree(Math.max(0, ms - Date.now()) / 1000);
 let craftFilter = 'dispo';
 function needChip([k, q], have = true) {
-  const h = count(k), it = itemOf(k);
+  const h = G.stockOf(S, CREW, k), it = itemOf(k); // inventaire + cale de l'équipage
   return `<span class="need ${have ? (h >= q ? 'have' : 'miss') : ''}">${itemIco(k)}${esc(it.name)} ${have ? `${h}/${q}` : `× ${q}`}</span>`;
 }
 function renderJob() {
   if (!S) return;
   const job = S.job.id ? JOBS[S.job.id] : null;
   const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.work && !r.care && (!r.job || r.job === S.job.id));
-  const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r)) : recs;
+  const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r, CREW)) : recs;
   const c = S.craft;
   const ready = c && Date.now() >= c.end;
   $('v-job').innerHTML = `
@@ -939,7 +941,7 @@ function renderJob() {
       </div>
     </div>
     ${shownRecs.length ? `<div class="recipes">${shownRecs.map(([id, r]) => {
-      const why = G.craftBlock(S, r);
+      const why = G.craftBlock(S, r, CREW);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${Object.keys(r.gives).slice(0, 1).map((k) => itemIco(k)).join('')}${esc(G.recipeLabel(r))}</h3>
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}</p>
@@ -1000,7 +1002,7 @@ function atelierHTML() {
     <p class="note">Choisis un bateau et un travail. Les matériaux sont pris au début : réussis le mini-jeu pour que le travail tienne.</p>
     ${ships.length ? `<div class="mj-row"><label for="atelier-ship">Bateau</label><select id="atelier-ship">${ships.map((x) => `<option value="${esc(x.id)}" ${x.id === atelierShip ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)})</option>`).join('')}</select>${st ? `<span class="note">Vitesse ${st.speed} · Robustesse ${st.robust} · Puissance ${st.power} · Coque ${st.hull}/${st.hullMax}</span>` : ''}</div>` : '<p class="note">Tu n’as pas de bateau à travailler (à toi, ou à ton équipage avec la permission « Choisir le bateau »). Tu peux quand même en construire un.</p>'}
     <div class="recipes">${works.map(([id, r]) => {
-      const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship);
+      const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship, CREW);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${recipeIco(r)}${esc(G.workLabel(r.work))}</h3>
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>

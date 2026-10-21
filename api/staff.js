@@ -21,7 +21,7 @@ import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
 import {
-  normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe,
+  ICONS_OWNER, normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe,
   normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS, isNpc, fullName, normalizeLoot, STAFF_PERMS, staffCan,
 } from '../shared/game.js';
 
@@ -54,6 +54,7 @@ export default handler(['POST'], async (req, body) => {
     : op.startsWith('icons.') ? ['icones']
     : op.startsWith('perms.') ? ['permissions']
     : null;
+  need(!op.startsWith('icons.') || me.uid === ICONS_OWNER, 403, 'Seul le propriétaire du RP peut changer les icônes.');
   need(!required || required.some((p) => staffCan(perms, p)), 403, `Ton rôle ne permet pas ça (permission « ${STAFF_PERMS[required?.[0]] ?? '?'} »).`);
   const catalog = await loadCatalog({ fresh: true });
 

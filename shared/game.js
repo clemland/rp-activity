@@ -11,6 +11,7 @@
 /* ═══ Réglages ═══════════════════════════════════════════════════════════ */
 export const BAG = 32; // emplacements d'inventaire
 export const MAX_CARRY = 50; // poids maximum porté par un joueur (kg)
+export const ICONS_OWNER = '464061688069488640'; // seul compte autorisé à voir et modifier l'écran Icônes
 export const STAT_MAX = 100;
 export const MAX_LEVEL = 100;
 /** XP pour passer du niveau lv au suivant : 50 au départ, puis +10 par niveau (1 030 pour le 99 → 100). */
@@ -98,7 +99,7 @@ export const STAFF_PERMS = {
   carte: 'Carte du monde',
   butins: 'Butins (exploration)',
   salons: 'Salons RP (/rp)',
-  icones: 'Icônes',
+
   permissions: 'Gérer les permissions',
 };
 /** Ce membre du staff a-t-il cette permission ? « * » = toutes. */

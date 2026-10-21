@@ -1381,7 +1381,12 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .op-pt{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:2px solid var(--ink);background:#fff;font-weight:800;cursor:pointer}
 .op-pt.done{background:#2f9a55;color:#fff}
 .inj-card{grid-template-columns:auto 1fr auto;cursor:default}
-.ship-trio .ico{--s:24px}
+/* Statistiques du bateau : l'icône en fond, la valeur lisible par-dessus */
+.ship-trio span{position:relative;overflow:hidden;min-width:88px;min-height:58px;align-content:center;padding:4px 10px}
+.ship-trio span > .ico{--s:52px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:.3;z-index:0;pointer-events:none}
+.ship-trio b,.ship-trio small{position:relative;z-index:1}
+.ship-trio b{font-size:24px;line-height:1;color:var(--brown);text-shadow:0 0 3px #fff7e0,0 0 3px #fff7e0,0 0 6px #fff7e0}
+.ship-trio small{color:var(--brown);font-weight:800;text-shadow:0 0 3px #fff7e0,0 0 3px #fff7e0}
 .games-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:12px}
 .ship-stats .ico{--s:16px;vertical-align:-3px}
 .ship-cfg summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}

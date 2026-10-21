@@ -10,6 +10,7 @@ import { userFromRequest, channelName } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
+import { ensureShipChannel, renameShipChannel } from './_lib/shipchan.js';
 import { invitesFor, loadHarbor, loadMap } from './_lib/context.js';
 import { normalize, careBlock, newWid, removeItem, RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
@@ -214,6 +215,11 @@ export default handler(['POST'], async (req, body) => {
     if (action.type.startsWith('ship.') && action.type !== 'ship.edit') {
       const row = await read('ships', String(action.shipId || ''));
       need(row, 404, 'Bateau introuvable.');
+      // Départ : un bateau sans salon RP en reçoit un automatiquement (post ou forum, selon son modèle)
+      if ((action.type === 'ship.voyage.propose' || action.type === 'ship.voyage.logpose') && !row.data.channel) {
+        const ch = await ensureShipChannel(normalizeShip(structuredClone(row.data)), me.uid).catch(() => null);
+        if (ch) row.data.channel = ch;
+      }
       // Port dans un post de forum (anciens bateaux) : on retrouve le forum grâce à la position du joueur, au même endroit
       if (row.data.position && !row.data.position.parentId && player.position?.channelId === row.data.position.channelId) row.data.position.parentId = player.position.parentId || null;
       const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now(), map: action.type.startsWith('ship.voyage') ? (await loadMap()).map : null });
@@ -240,6 +246,7 @@ export default handler(['POST'], async (req, body) => {
       need(ship, 404, 'Bateau introuvable.');
       const out = playerAction(player, action, { ...ctx, ship, crew: cs.crew });
       await write('ships', action.shipId, out.ship, cs.shipVersions[action.shipId]);
+      if (out.ship.channel && out.ship.name !== ship.name) await renameShipChannel(out.ship).catch(() => {}); // le salon suit le nom du bateau
       return reply(out, { ships: { [action.shipId]: out.ship } });
     }
 

@@ -27,6 +27,17 @@ export async function botPost(path, body) {
   return j;
 }
 
+/** Appel PATCH à l'API Discord avec le token du bot (renommer un salon). */
+export async function botPatch(path, body) {
+  const r = await fetch(API + path, {
+    method: 'PATCH',
+    headers: { Authorization: `Bot ${env.botToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new HttpError(400, `Discord a refusé la modification du salon (${r.status}).`);
+  return r.json().catch(() => ({}));
+}
+
 /** Échange le code OAuth2 de l'Activity contre un jeton. */
 export async function exchangeCode(code) {
   const r = await fetch(`${API}/oauth2/token`, {

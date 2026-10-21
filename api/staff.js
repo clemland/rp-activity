@@ -17,6 +17,7 @@
 import { handler, need } from './_lib/http.js';
 import { userFromRequest, staffPerms, guildRoles, clearPermsCache, botPost, channelById } from './_lib/discord.js';
 import { env } from './_lib/env.js';
+import { createShipChannel, addRpChannel, renameShipChannel } from './_lib/shipchan.js';
 import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
@@ -25,32 +26,6 @@ import {
   normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS, isNpc, fullName, normalizeLoot, STAFF_PERMS, staffCan,
 } from '../shared/game.js';
 
-/**
- * Crée le salon RP d'un bateau, comme /bateau salon : un post dans le forum commun (petit bateau),
- * ou un forum dans la catégorie des bateaux (grand bateau). Renvoie { id, kind, name } ou null.
- */
-async function createShipChannel(name, space, cfg) {
-  const intro = `⚓ **${name}**\nC’est ici que l’équipage vit à bord : pendant un voyage, chaque message RP de 400 caractères ou plus fait avancer le bateau.`;
-  if (space === 'forum' && cfg.categoryId) {
-    const f = await botPost(`/guilds/${env.guildId}/channels`, { name: name.slice(0, 100), type: 15, parent_id: cfg.categoryId });
-    await botPost(`/channels/${f.id}/threads`, { name: 'Le pont', message: { content: intro } }).catch(() => null);
-    return { id: f.id, kind: 'forum', name: f.name };
-  }
-  if (space === 'post' && cfg.forumId) {
-    const t = await botPost(`/channels/${cfg.forumId}/threads`, { name: name.slice(0, 100), message: { content: intro } });
-    return { id: t.id, kind: 'post', name: t.name };
-  }
-  return null;
-}
-/** Ajoute un salon à la liste des salons RP (un forum : chacun de ses posts compte). */
-async function addRpChannel(id, name, kind, by) {
-  await retry(async () => {
-    const row = await read('meta', 'rp:channels');
-    const list = (row?.data.list || []).filter((c) => c.id !== id);
-    list.push({ id, name, kind, by, at: Date.now() });
-    await write('meta', 'rp:channels', { list }, row?.version ?? null);
-  });
-}
 
 /** Identifiant libre à partir du nom (« planche-de-chene », « planche-de-chene-2 »…). */
 function freeId(base, taken) {
@@ -388,6 +363,7 @@ export default handler(['POST'], async (req, body) => {
           if (c && !c.data.ship) await write('crews', ship.owner.id, { ...c.data, ship: id }, c.version);
         });
       }
+      if (old && old.name !== ship.name && ship.channel) await renameShipChannel(ship).catch(() => {}); // le salon suit le nom du bateau
       return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}${ship.channel ? ` · salon ${ship.channel.name} créé` : chanNote}` };
     }
 

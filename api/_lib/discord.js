@@ -15,6 +15,18 @@ const cached = async (key, ttl, fn) => {
 const bot = (path) =>
   fetch(API + path, { headers: { Authorization: `Bot ${env.botToken}` } }).then((r) => (r.ok ? r.json() : null));
 
+/** Appel POST à l'API Discord avec le token du bot (création de salons). */
+export async function botPost(path, body) {
+  const r = await fetch(API + path, {
+    method: 'POST',
+    headers: { Authorization: `Bot ${env.botToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new HttpError(400, `Discord a refusé la création du salon (${j.message || r.status}).`);
+  return j;
+}
+
 /** Échange le code OAuth2 de l'Activity contre un jeton. */
 export async function exchangeCode(code) {
   const r = await fetch(`${API}/oauth2/token`, {

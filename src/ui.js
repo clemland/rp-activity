@@ -47,7 +47,9 @@ export const ICON_SLOTS = {
   'objet-mat': ['Catégories d’objets (sans image)', 'Matériau', 331], 'objet-tresor': ['Catégories d’objets (sans image)', 'Trésor', 270],
   'objet-objet': ['Catégories d’objets (sans image)', 'Objet', 237], 'objet-bateau': ['Catégories d’objets (sans image)', 'Bateau', 231],
   'objet-amelioration': ['Catégories d’objets (sans image)', 'Amélioration de bateau', 266],
-  'star-on': ['Divers', 'Étoile pleine', 125], 'star-off': ['Divers', 'Étoile vide', 126], bourse: ['Divers', 'Bourse', 261],
+  'star-on': ['Divers', 'Étoile pleine', 125], 'star-off': ['Divers', 'Étoile vide', 126], 'ship-speed': ['Bateaux', 'Vitesse', 188], 'ship-robust': ['Bateaux', 'Robustesse', 'st_shield'], 'ship-power': ['Bateaux', 'Puissance offensive', 'st_swords'],
+  'ship-engine': ['Bateaux', 'Moteur au cola', 266], 'ship-granit': ['Bateaux', 'Granit marin', 331], 'ship-plongee': ['Bateaux', 'Revêtement de plongée', 231],
+  bourse: ['Divers', 'Bourse', 261],
 };
 const custom = (key) => (OVR[key] ? `<span class="ico item-img" aria-hidden="true"><img src="${esc(srcOf(OVR[key]))}" alt="" draggable="false"></span>` : null);
 export const ico = (id) => custom(`ico:${id}`) ?? `<span class="ico" aria-hidden="true" style="background-position:${pos(id)}"></span>`;

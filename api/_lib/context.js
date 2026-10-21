@@ -33,8 +33,8 @@ export async function loadCatalog({ fresh = false } = {}) {
     setCatalog(catalogCache.catalog);
     return catalogCache.catalog;
   }
-  const [items, recipes, inj] = await Promise.all([readAll('items'), readAll('recipes'), read('meta', 'injuries')]);
-  const catalog = { items, recipes, injuries: inj?.data?.categories || {} };
+  const [items, recipes, inj, cfg] = await Promise.all([readAll('items'), readAll('recipes'), read('meta', 'injuries'), read('meta', 'shipcfg')]);
+  const catalog = { items, recipes, injuries: inj?.data?.categories || {}, shipcfg: cfg?.data || {} };
   catalogCache = { at: Date.now(), catalog };
   setCatalog(catalog);
   return catalog;

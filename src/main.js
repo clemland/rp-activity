@@ -959,7 +959,7 @@ let atelierShip = null;
 function shipStatsHTML(sh) {
   const st = G.shipStats(sh);
   const pct = Math.round((st.hull / Math.max(1, st.hullMax)) * 100);
-  return `<div class="ship-trio"><span title="Vitesse">⛵ <b>${st.speed}</b><small>Vitesse</small></span><span title="Robustesse">🛡️ <b>${st.robust}</b><small>Robustesse</small></span><span title="Puissance offensive">💥 <b>${st.power}</b><small>Puissance</small></span></div>
+  return `<div class="ship-trio"><span title="Vitesse">${icon('ship-speed')} <b>${st.speed}</b><small>Vitesse</small></span><span title="Robustesse">${icon('ship-robust')} <b>${st.robust}</b><small>Robustesse</small></span><span title="Puissance offensive">${icon('ship-power')} <b>${st.power}</b><small>Puissance</small></span></div>
     <div class="gauge hull ${st.damaged ? 'bad' : ''}" aria-label="Coque"><i style="width:${pct}%"></i></div>
     <div class="gauge-cap"><span>Coque${st.damaged ? ' · ⚠️ en avarie' : ''}</span><span>${st.hull} / ${st.hullMax}</span></div>`;
 }
@@ -2346,7 +2346,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
       ${extra}
-      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.engine ? '<span>🥤 Moteur au cola</span>' : ''}${sh.granit ? '<span>🪨 Granit marin</span>' : ''}${sh.plongee ? '<span>🫧 Plongée</span>' : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
+      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
@@ -2982,7 +2982,7 @@ function renderShipsAdmin() {
         <span class="slot-ico">${sh.photo || sh.icon ? `<span class="ico item-img"><img src="${imgSrc(sh.photo || sh.icon)}" alt=""></span>` : ico(SHIP_ICON)}</span>
         <span><b>${main ? '⭐ ' : ''}${esc(sh.name)}</b><small>${esc(sh.type)} · cale ${G.kg(sh.capacity)} · vitesse ${sh.sail ?? 1} · ${sh.berths ?? 4} places · ${sh.cannons} canons<br>${esc(ownerName(sh.owner))}${main ? ' · bateau attitré' : ''}${sh.position ? ` · ⚓ #${esc(sh.position.name || sh.position.channelId)}` : ''}</small></span>
       </button>`;
-    }).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}`;
+    }).join('')}</div>` : '<p class="note">Aucun bateau.</p>'}${shipCfgHTML()}`;
   paintStatic(el);
 }
 $('v-fleet').addEventListener('click', (e) => {
@@ -2993,7 +2993,39 @@ $('v-fleet').addEventListener('click', (e) => {
   const c = e.target.closest('[data-crew]')?.dataset.crew;
   if (c) return openCrewEdit(c);
 });
+/** Réglages des bateaux (Panneau admin > Bateaux) : tous les chiffres des statistiques. */
+function shipCfgHTML() {
+  const C = G.SHIPCFG;
+  const f = (id, label, v, step = '0.1', hint = '') => `<div><label for="sc-${id}">${label}</label><input id="sc-${id}" type="number" step="${step}" value="${v}">${hint ? `<small class="note">${hint}</small>` : ''}</div>`;
+  return `<details class="crew-box ship-cfg" style="margin-top:16px"><summary><b>⚙️ Réglages des bateaux</b> <small class="note">effets des canons, du bois, de la voile, du moteur, de la cale et de la coque</small></summary>
+    <h3 class="ed-h">Vitesse</h3><div class="form">
+      ${f('sailBonus', 'Vitesse par niveau de voile', C.sailBonus)}
+      ${f('engineBonus', 'Vitesse du moteur au cola', C.engineBonus)}
+      ${f('holdSlow', 'Vitesse perdue par kg de cale ajoutée', C.holdSlow, '0.001', '0,005 = 1 de vitesse pour 200 kg')}
+    </div>
+    <h3 class="ed-h">Canons</h3><div class="form">
+      ${Object.entries(G.CANNONS).map(([k, c]) => f(`gun-${k}-power`, `Canon ${c.name} : puissance offensive`, C.cannons[k].power) + f(`gun-${k}-slow`, `Canon ${c.name} : vitesse perdue`, C.cannons[k].slow)).join('')}
+    </div>
+    <h3 class="ed-h">Robustesse et coque</h3><div class="form">
+      ${Object.entries(G.WOODS).map(([k, w]) => f(`wood-${k}`, `${w.name} : multiplicateur de robustesse`, C.woods[k], '0.05')).join('')}
+      ${f('granitBonus', 'Robustesse apportée par le granit marin', C.granitBonus, '1')}
+      ${f('hullPerRobust', 'Points de coque par point de robustesse', C.hullPerRobust, '1')}
+      ${f('damagedPct', 'Seuil d’avarie (% de la coque)', C.damagedPct, '1')}
+    </div>
+    <div class="form-actions"><button class="btn ghost" id="sc-reset">Valeurs par défaut</button><button class="btn" id="sc-save">Enregistrer les réglages</button></div>
+  </details>`;
+}
 $('v-ships').addEventListener('click', (e) => {
+  if (e.target.closest('#sc-save') || e.target.closest('#sc-reset')) {
+    const v = (id) => $(`sc-${id}`).value;
+    const cfg = e.target.closest('#sc-reset') ? {} : {
+      sailBonus: v('sailBonus'), engineBonus: v('engineBonus'), holdSlow: v('holdSlow'),
+      granitBonus: v('granitBonus'), hullPerRobust: v('hullPerRobust'), damagedPct: v('damagedPct'),
+      woods: Object.fromEntries(Object.keys(G.WOODS).map((k) => [k, v(`wood-${k}`)])),
+      cannons: Object.fromEntries(Object.keys(G.CANNONS).map((k) => [k, { power: v(`gun-${k}-power`), slow: v(`gun-${k}-slow`) }])),
+    };
+    return void gestCall('ship.cfg', { cfg });
+  }
   if (e.target.closest('#ships-new')) return openShipEdit(null);
   const sh = e.target.closest('[data-ship]')?.dataset.ship;
   if (sh) return openShipEdit({ id: sh, ...fleet.ships[sh] });

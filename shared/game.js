@@ -158,7 +158,8 @@ export const SHIP_TYPES = ['Caravelle', 'Brick', 'Goélette', 'Frégate', 'Galio
 export let ITEMS = {}; // id → { name, kind, value, desc, img }
 export let INJURIES = {}; // catégories de blessures définies par le staff : id → { name }
 export let RECIPES = {}; // id → { name, job, lvl, seconds, needs, gives, desc }
-export function setCatalog({ items = {}, recipes = {}, injuries = {} } = {}) {
+export function setCatalog({ items = {}, recipes = {}, injuries = {}, shipcfg = {} } = {}) {
+  SHIPCFG = normalizeShipCfg(shipcfg);
   ITEMS = items;
   RECIPES = recipes;
   INJURIES = injuries;
@@ -898,17 +899,38 @@ export const SHIP_WORKS = {
 };
 /** Rang de charpentier nécessaire pour un niveau de voile : 1-3 Apprenti, 4-6 Confirmé, 7-10 Maître. */
 export const sailRank = (level) => (level <= 3 ? 1 : level <= 6 ? 2 : 3);
-/** Statistiques calculées d'un bateau : vitesse, robustesse, puissance, coque. */
+/** Réglages des bateaux, modifiables par le staff (Panneau admin > Bateaux > Réglages). */
+export const SHIP_DEFAULTS = {
+  sailBonus: 2, engineBonus: 6, holdSlow: 0.005, granitBonus: 10, hullPerRobust: 10, damagedPct: 25,
+  woods: { standard: 1, robuste: 1.25, deul: 1.5, adam: 2 },
+  cannons: { leger: { power: 1, slow: 0.2 }, moyen: { power: 2, slow: 0.5 }, lourd: { power: 4, slow: 1 } },
+};
+const cfgNum = (v, d, min, max) => (v != null && v !== '' && Number.isFinite(+v) ? Math.min(max, Math.max(min, +v)) : d);
+export function normalizeShipCfg(c = {}) {
+  const D = SHIP_DEFAULTS;
+  return {
+    sailBonus: cfgNum(c.sailBonus, D.sailBonus, 0, 50),
+    engineBonus: cfgNum(c.engineBonus, D.engineBonus, 0, 100),
+    holdSlow: cfgNum(c.holdSlow, D.holdSlow, 0, 1), // vitesse perdue par kg de cale ajoutée
+    granitBonus: cfgNum(c.granitBonus, D.granitBonus, 0, 1000),
+    hullPerRobust: cfgNum(c.hullPerRobust, D.hullPerRobust, 1, 1000),
+    damagedPct: cfgNum(c.damagedPct, D.damagedPct, 0, 100),
+    woods: Object.fromEntries(Object.keys(WOODS).map((k) => [k, cfgNum(c.woods?.[k], D.woods[k], 0.1, 10)])),
+    cannons: Object.fromEntries(Object.keys(CANNONS).map((k) => [k, { power: cfgNum(c.cannons?.[k]?.power, D.cannons[k].power, 0, 100), slow: cfgNum(c.cannons?.[k]?.slow, D.cannons[k].slow, 0, 20) }])),
+  };
+}
+export let SHIPCFG = normalizeShipCfg();
+/** Statistiques calculées d'un bateau : vitesse, robustesse, puissance, coque (selon les réglages du staff). */
 export function shipStats(s) {
-  const wood = WOODS[s.wood] || WOODS.standard;
+  const C = SHIPCFG;
   const g = s.guns || { leger: s.cannons || 0 };
-  const slow = Object.entries(CANNONS).reduce((a, [k, c]) => a + (g[k] || 0) * c.slow, 0) + (s.holdExt || 0) / 200;
-  const speed = Math.max(1, Math.round(((s.speed ?? 10) + (s.sail ?? 1) * 2 + (s.engine ? 6 : 0) - slow) * 10) / 10);
-  const robust = Math.round((s.robust ?? 10) * wood.mult + (s.granit ? 10 : 0));
-  const power = Object.entries(CANNONS).reduce((a, [k, c]) => a + (g[k] || 0) * c.power, 0);
-  const hullMax = robust * 10;
+  const slow = Object.keys(CANNONS).reduce((a, k) => a + (g[k] || 0) * C.cannons[k].slow, 0) + (s.holdExt || 0) * C.holdSlow;
+  const speed = Math.max(1, Math.round(((s.speed ?? 10) + (s.sail ?? 1) * C.sailBonus + (s.engine ? C.engineBonus : 0) - slow) * 10) / 10);
+  const robust = Math.round((s.robust ?? 10) * (C.woods[s.wood] ?? 1) + (s.granit ? C.granitBonus : 0));
+  const power = Object.keys(CANNONS).reduce((a, k) => a + (g[k] || 0) * C.cannons[k].power, 0);
+  const hullMax = Math.max(1, Math.round(robust * C.hullPerRobust));
   const hull = Math.max(0, Math.min(hullMax, s.hull ?? hullMax));
-  return { speed, robust, power, hullMax, hull, damaged: hull < hullMax * 0.25 };
+  return { speed, robust, power, hullMax, hull, damaged: hull < hullMax * (C.damagedPct / 100) };
 }
 /** Caractéristiques enregistrées à la création : type, canons, capacité (kg), espace RP. */
 export function normalizeShipStats(x) {

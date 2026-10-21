@@ -21,7 +21,7 @@ import { read, readAll, write, remove, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
 import {
-  ICONS_OWNER, normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe,
+  normalizeShipCfg, ICONS_OWNER, normalizeIsland, normalizeMap, routeKey, upgradeShip, recipeLabel, normalize, normalizeShop, normalizeItem, normalizeRecipe,
   normalizeCrew, normalizeShip, newShip, staffAction, slug, ITEMS, isNpc, fullName, normalizeLoot, STAFF_PERMS, staffCan,
 } from '../shared/game.js';
 
@@ -358,6 +358,17 @@ export default handler(['POST'], async (req, body) => {
         await write('ships', body.id, ship, row.version);
         const n = Number(body.amount);
         return { id: body.id, ship, toast: `${ship.name} : ${n > 0 ? '+' : ''}${n} ${body.type === 'cale' ? 'kg de cale' : body.type === 'canons' ? 'canon(s)' : 'niveau(x) de voile'}` };
+      });
+    }
+
+    case 'ship.cfg': {
+      // Réglages des bateaux : effets des canons, bois, voile, moteur, cale, coque
+      const cfg = normalizeShipCfg(body.cfg || {});
+      return retry(async () => {
+        const row = await read('meta', 'shipcfg');
+        await write('meta', 'shipcfg', cfg, row?.version ?? null);
+        catalog.shipcfg = cfg;
+        return { catalog, toast: 'Réglages des bateaux enregistrés' };
       });
     }
 

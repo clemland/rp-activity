@@ -1391,6 +1391,9 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ship-trio b{font-size:24px;line-height:1;color:var(--brown);text-shadow:0 0 3px #fff7e0,0 0 3px #fff7e0,0 0 6px #fff7e0}
 .ship-trio small{color:var(--brown);font-weight:800;text-shadow:0 0 3px #fff7e0,0 0 3px #fff7e0}
 .games-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:12px}
+.hold-peek{margin:6px 0;border:2px dashed rgba(23,37,94,.35);border-radius:8px;padding:4px 10px;background:#fffaea}
+.hold-peek summary{cursor:pointer;font-weight:800;font-size:14px}
+.hold-peek .chest{margin-top:6px}
 .ship-stats .ico{--s:16px;vertical-align:-3px}
 .ship-cfg summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .ship-cfg summary::-webkit-details-marker{display:none}

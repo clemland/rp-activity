@@ -2429,6 +2429,13 @@ function upgradeControl(sh) {
     return `<option value="${i}">${esc(G.ITEMS[x[0]].name)} (+${fmt(u.amount)} ${G.UPGRADES[u.type].unit})</option>`;
   }).join('')}</select><button class="btn sm" data-upg="${esc(sh.id)}">Installer</button></div>`;
 }
+/** Contenu de la cale, en lecture seule (à toi ou à ton équipage) : visible de partout. */
+function holdPeekHTML(sh) {
+  const list = Object.entries(sh.hold || {});
+  return `<details class="hold-peek"><summary>📦 Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)} · ${list.length ? `${list.length} sorte${list.length > 1 ? 's' : ''} d’objets` : 'vide'}</summary>
+    ${list.length ? `<div class="chest">${list.map(([k, q]) => `<span class="need">${itemIco(k)}${q} × ${esc(itemOf(k).name)}</span>`).join('')}</div>` : ''}
+    <p class="note" style="margin:4px 0 0">Monte à bord (écran Navigation) pour déposer ou prendre des objets.</p></details>`;
+}
 function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
   const aboard = sh.passengers?.length ?? 0;
   return `<article class="ship-card">
@@ -2438,6 +2445,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
       ${extra}
       ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
+      ${S && G.isShipFamily(S, sh, CREW) ? holdPeekHTML(sh) : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
     </div>
@@ -2527,7 +2535,7 @@ function bankHTML() {
   return `<section class="crew-box"><h3>Banque commune</h3><div class="bank-amount">${berry(c.bank)}</div>
       <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
         ${can('bankIn') ? '<button class="btn sm" id="bank-in">Déposer</button>' : ''}${can('bankOut') ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div></section>
-    <section class="crew-box"><h3>📦 La cale</h3><p class="note" style="margin:0">Chaque bateau a maintenant sa propre cale : monte à bord, puis ouvre l’écran <b>Navigation</b> pour y déposer ou prendre des objets.${left ? ` L’ancienne cale ${G.crewWords(c).de} contient encore ${left} sorte${left > 1 ? 's' : ''} d’objets : elle sera transférée dans le bateau attitré dès qu’il y en aura un.` : ''}</p></section>`;
+    <section class="crew-box"><h3>📦 La cale</h3><p class="note" style="margin:0">Chaque bateau a maintenant sa propre cale : monte à bord, puis ouvre l’écran <b>Navigation</b> pour y déposer ou prendre des objets. Leur contenu se consulte de partout dans <b>Équipage > Bateaux</b>.${left ? ` L’ancienne cale ${G.crewWords(c).de} contient encore ${left} sorte${left > 1 ? 's' : ''} d’objets : elle sera transférée dans le bateau attitré dès qu’il y en aura un.` : ''}</p></section>`;
 }
 function cargoHTML() {
   const c = CREW;

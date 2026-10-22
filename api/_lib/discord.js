@@ -103,6 +103,11 @@ export async function channelById(channelId) {
   });
 }
 
+/** Posts ouverts (fils actifs) du serveur principal : [{ id, name, parent_id }], gardés 1 minute. */
+export async function activeThreads() {
+  if (!env.guildId || !env.botToken) return [];
+  return (await cached('threads', 60_000, () => bot(`/guilds/${env.guildId}/threads/active`)))?.threads || [];
+}
 export async function channelName(channelId) {
   if (!channelId || !env.botToken) return '';
   return cached(`ch:${channelId}`, 30 * 60_000, async () => (await bot(`/channels/${channelId}`))?.name || '');

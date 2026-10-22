@@ -1139,6 +1139,59 @@ function readWorkFields(r) {
   if (t === 'construire' && !r.work.model) r.work.model = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind === 'bateau') || '';
 }
 
+/* ═══ Amarrer son bateau ailleurs dans le port ════════════════════════════ */
+document.addEventListener('click', (e) => {
+  const id = e.target.closest('[data-dock]')?.dataset.dock;
+  if (id) dockDialog(id);
+});
+async function dockDialog(shipId) {
+  const out = await run({ type: 'ship.dock.options', shipId });
+  if (!out?.options) return;
+  if (!out.options.length) return void toast(`Aucun endroit où s’amarrer sur ${esc(out.island)}.`);
+  $('dock-title').textContent = `Amarrer sur ${out.island}`;
+  const sel = $('dock-to');
+  delete sel.dataset.enhanced;
+  sel.previousElementSibling?.classList.contains('sel-search') && sel.previousElementSibling.remove();
+  sel.innerHTML = out.options.map((o) => `<option value="${esc(o.id)}">${o.parentId ? '' : '#'}${esc(o.name)}</option>`).join('');
+  $('dock-ok').onclick = async () => {
+    const channelId = sel.value;
+    closeDialog($('d-dock'));
+    await run({ type: 'ship.dock', shipId, channelId });
+  };
+  openDialog('d-dock');
+}
+
+/* ═══ Longs menus déroulants : un champ « Filtrer… » au-dessus ════════════ */
+function enhanceSelect(sel) {
+  if (sel.dataset.enhanced || sel.options.length < 12) return;
+  sel.dataset.enhanced = '1';
+  const q = document.createElement('input');
+  q.type = 'search';
+  q.className = 'sel-search';
+  q.placeholder = 'Filtrer…';
+  q.setAttribute('aria-label', 'Filtrer la liste');
+  q.addEventListener('input', () => {
+    const t = normTxt(q.value);
+    let first = null;
+    for (const o of sel.options) {
+      const ok = !t || normTxt(o.textContent).includes(t);
+      o.hidden = !ok;
+      if (ok && !first && o.value) first = o;
+    }
+    if (first && sel.selectedOptions[0]?.hidden) sel.value = first.value; // le premier choix qui correspond
+  });
+  sel.before(q);
+}
+let enhanceQueued = false;
+new MutationObserver(() => {
+  if (enhanceQueued) return;
+  enhanceQueued = true;
+  requestAnimationFrame(() => {
+    enhanceQueued = false;
+    document.querySelectorAll('select').forEach(enhanceSelect);
+  });
+}).observe(document.body, { childList: true, subtree: true });
+
 /* ═══ Utiliser et donner des objets ═══════════════════════════════════════ */
 document.addEventListener('click', (e) => {
   const use = e.target.closest('[data-use]')?.dataset.use;
@@ -2446,6 +2499,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
       ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${S && G.isShipFamily(S, sh, CREW) ? holdPeekHTML(sh) : ''}
+      ${S && !VIEW && !sh.voyage && G.canManageShip(S, sh, CREW) ? `<div class="mj-row"><button class="btn sm ghost" data-dock="${esc(sh.id)}">⚓ Amarrer ailleurs dans le port</button></div>` : ''}
       ${!sh.position && !sh.voyage && S && G.isShipFamily(S, sh, CREW) ? '<p class="note" style="margin:4px 0">⚓ Pas encore à quai : il s’amarrera là où tu écriras ton prochain message RP (400 caractères ou plus).</p>' : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}

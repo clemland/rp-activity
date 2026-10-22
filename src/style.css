@@ -1394,6 +1394,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .hold-peek{margin:6px 0;border:2px dashed rgba(23,37,94,.35);border-radius:8px;padding:4px 10px;background:#fffaea}
 .hold-peek summary{cursor:pointer;font-weight:800;font-size:14px}
 .hold-peek .chest{margin-top:6px}
+.sel-search{display:block;width:100%;max-width:260px;font:inherit;font-size:14px;color:var(--brown);background:#fff;border:2px dashed rgba(23,37,94,.45);border-radius:5px;padding:3px 8px;margin:0 0 4px}
+.mj-row .sel-search,.se-item .sel-search,.loot-row .sel-search,.rc-row .sel-search{margin:0}
 .ship-stats .ico{--s:16px;vertical-align:-3px}
 .ship-cfg summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .ship-cfg summary::-webkit-details-marker{display:none}

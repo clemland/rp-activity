@@ -6,7 +6,7 @@
  * Toutes les règles sont appliquées ici, côté serveur.
  */
 import { handler, need } from './_lib/http.js';
-import { userFromRequest, channelName } from './_lib/discord.js';
+import { userFromRequest, channelName, activeThreads } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
@@ -24,6 +24,19 @@ async function dockNewShips(ships, player) {
   const chans = new Set(Object.values(await readAll('ships')).map((s) => s.channel?.id && String(s.channel.id)).filter(Boolean));
   if (!chans.has(String(player.position.channelId)) && !(player.position.parentId && chans.has(String(player.position.parentId)))) return;
   for (const s of ships) s.position = null;
+}
+/** Endroits d'une île où un bateau peut s'amarrer : ses salons et les posts ouverts de ses forums (sauf salons de bateaux). */
+async function dockOptions(isl) {
+  const shipChans = new Set(Object.values(await readAll('ships')).map((s) => s.channel?.id && String(s.channel.id)).filter(Boolean));
+  const threads = isl.channels.some((c) => c.kind === 'forum') ? await activeThreads() : [];
+  const out = [];
+  for (const c of isl.channels) {
+    if (shipChans.has(c.id)) continue;
+    if (c.kind === 'forum') {
+      for (const t of threads) if (t.parent_id === c.id && !shipChans.has(t.id)) out.push({ id: t.id, name: `${c.name} › ${t.name}`, parentId: c.id });
+    } else out.push({ id: c.id, name: c.name, parentId: null });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 /** Bateau où le joueur est à bord (sa cale sert aux fabrications) : { id, ship, version } ou null. */
 async function aboardShip(uid) {
@@ -226,6 +239,25 @@ export default handler(['POST'], async (req, body) => {
       if (out.left) return { ...out, crew: null, ships: shipList(Object.fromEntries(Object.entries(cs.ships).filter(([, sh]) => sh.owner?.kind === 'player'))), invites: await invitesFor(me.uid) };
       const names = { ...cs.memberNames };
       return reply(out, { crew: { ...out.crew, memberNames: names }, ships: out.ships });
+    }
+
+    // Amarrer son bateau ailleurs dans le port (même île) : liste des endroits, puis choix
+    if (action.type === 'ship.dock.options' || action.type === 'ship.dock') {
+      const row = await read('ships', String(action.shipId || ''));
+      need(row, 404, 'Bateau introuvable.');
+      const ship = normalizeShip(row.data);
+      need(GM.canManageShip(player, ship, cs.crew), 403, 'Ce n’est pas ton bateau (ou ton grade ne permet pas de choisir le bateau).');
+      need(!ship.voyage, 400, 'Impossible pendant un voyage.');
+      const { map } = await loadMap();
+      const isl = GM.islandOf(map, ship.position || player.position);
+      need(isl, 400, ship.position ? 'Ce port n’est sur aucune île de la carte.' : 'Tu n’es sur aucune île de la carte : écris d’abord un message RP dans un salon de port.');
+      const options = await dockOptions(map.islands[isl]);
+      if (action.type === 'ship.dock.options') return { island: map.islands[isl].name, options };
+      const opt = options.find((o) => o.id === String(action.channelId));
+      need(opt, 400, 'Cet endroit n’est pas sur cette île.');
+      ship.position = { channelId: opt.id, name: opt.name, parentId: opt.parentId };
+      await write('ships', action.shipId, ship, row.version);
+      return reply({ player, toast: `${ship.name} est maintenant à quai à ${opt.name}.` }, { ships: { [action.shipId]: ship } });
     }
 
     // Atelier du charpentier : travail sur un bateau (à lui ou à son équipage), ou construction

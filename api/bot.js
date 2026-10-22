@@ -146,6 +146,28 @@ export default handler(['POST'], async (req, body) => {
           });
         }
       }
+      // Bateau à quai nulle part (acheté ou fabriqué avant d'avoir écrit en RP, ou créé par le staff) :
+      // il se met à quai là où son propriétaire écrit son prochain message RP (jamais dans le salon d'un bateau)
+      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+        const here = { channelId: String(body.channelId), parentId: body.parentId ? String(body.parentId) : null, name: String(body.name || '').slice(0, 60) };
+        const all = await readAll('ships');
+        const shipChans = new Set(Object.values(all).map((s) => s.channel?.id && String(s.channel.id)).filter(Boolean));
+        const inShipChannel = shipChans.has(here.channelId) || (here.parentId && shipChans.has(here.parentId));
+        const crewId = row.data.crewId || null;
+        if (!inShipChannel) {
+          for (const [sid, raw] of Object.entries(all)) {
+            if (raw.position?.channelId || raw.voyage) continue;
+            const mine = raw.owner?.kind === 'player' ? raw.owner.id === body.userId : raw.owner?.kind === 'crew' && !!crewId && raw.owner.id === crewId;
+            if (!mine) continue;
+            await retry(async () => {
+              const r = await read('ships', sid);
+              if (!r || r.data.position?.channelId || r.data.voyage) return;
+              await write('ships', sid, { ...r.data, position: here }, r.version);
+            });
+            res.docked = { ship: raw.name, where: here.name };
+          }
+        }
+      }
       // Navigation : une action RP d'un passager dans le salon du bateau fait avancer le voyage ;
       // à l'arrivée, le premier passager qui écrit sur l'île de destination met le bateau à quai.
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {

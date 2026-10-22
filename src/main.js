@@ -2446,6 +2446,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
       ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${S && G.isShipFamily(S, sh, CREW) ? holdPeekHTML(sh) : ''}
+      ${!sh.position && !sh.voyage && S && G.isShipFamily(S, sh, CREW) ? '<p class="note" style="margin:4px 0">⚓ Pas encore à quai : il s’amarrera là où tu écriras ton prochain message RP (400 caractères ou plus).</p>' : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
     </div>

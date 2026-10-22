@@ -92,6 +92,7 @@ export const STAFF_PERMS = {
   joueurs: 'Voir et modifier les fiches (XP, objets, santé, actions de groupe)',
   fiches: 'Créer et supprimer des fiches (/register, /delete profil)',
   techniques: 'Valider ou refuser les techniques',
+  inventions: 'Valider ou refuser les inventions (scientifiques)',
   boutiques: 'Boutiques',
   gestion: 'Objets et recettes (Gestion)',
   equipages: 'Équipages et bateaux',
@@ -250,6 +251,16 @@ export function normalize(p) {
   const freshReq = (l) => (Array.isArray(l) ? l : []).filter((x) => x?.id && Date.now() - (x.at || 0) < 3_600_000).slice(-10);
   p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
   p.careOut = freshReq(p.careOut); // demandes de soin envoyées
+  // Inventions des scientifiques : proposées par le joueur, validées ou refusées (avec motif) par le staff
+  p.inventions = (Array.isArray(p.inventions) ? p.inventions : []).filter((x) => x && str(x.name, 60)).slice(0, 30).map((x) => ({
+    id: Number(x.id) || Date.now(),
+    name: str(x.name, 60),
+    desc: str(x.desc, 3000),
+    images: (Array.isArray(x.images) ? x.images : []).filter((u) => typeof u === 'string' && u).map((u) => str(u, 3_000_000)).slice(0, 5),
+    ok: !!x.ok,
+    refused: x.refused?.reason ? { reason: str(x.refused.reason, 300), at: Number(x.refused.at) || 0 } : null,
+    at: Number(x.at) || 0,
+  }));
   // Courbe d'XP changée : le surplus d'une ancienne fiche devient des niveaux (avec leurs points).
   if (typeof p.level === 'number' && typeof p.xp === 'number') {
     p.level = Math.min(MAX_LEVEL, Math.max(1, p.level));
@@ -712,6 +723,33 @@ export function playerAction(player, action, ctx = {}) {
       out.toast = `${it.name} : « ${h.label} » est soigné !`;
       break;
     }
+    case 'invention.save': {
+      if (p.job?.id !== 'scientifique') fail('Seuls les scientifiques proposent des inventions.');
+      const name = str(a.name, 60);
+      if (!name) fail('Donne un nom à ton invention.');
+      const desc = str(a.desc, 3000);
+      if (desc.length < 30) fail('Décris précisément ce que fait ton invention (30 caractères minimum).');
+      const images = (Array.isArray(a.images) ? a.images : []).filter((u) => typeof u === 'string' && u).slice(0, 5);
+      const data = { name, desc, images, ok: false, refused: null, at: now }; // modifiée : de nouveau à valider
+      if (a.id != null) {
+        const inv = p.inventions.find((x) => x.id === a.id);
+        if (!inv) fail('Invention introuvable.');
+        Object.assign(inv, data);
+        out.toast = 'Invention modifiée, en attente de validation';
+      } else {
+        if (p.inventions.length >= 30) fail('Trop d’inventions.');
+        p.inventions.push({ id: now + Math.floor(rng() * 1000), ...data });
+        out.toast = 'Invention proposée au staff';
+      }
+      break;
+    }
+    case 'invention.delete': {
+      const inv = p.inventions.find((x) => x.id === a.id);
+      if (!inv) fail('Invention introuvable.');
+      p.inventions = p.inventions.filter((x) => x !== inv);
+      out.toast = `Invention supprimée : ${inv.name}`;
+      break;
+    }
     case 'tech.save': {
       const name = str(a.name, 40);
       if (!name) fail('Donne un nom à ta technique.');
@@ -908,6 +946,20 @@ export function staffAction(player, action) {
       if (!p.craft) fail('Aucune fabrication en cours.');
       p.craft.end = Date.now();
       out.toast = 'Fabrication terminée : le joueur peut la récupérer';
+      break;
+    }
+    case 'invention.validate': {
+      const inv = p.inventions.find((x) => x.id === a.id);
+      if (!inv) fail('Invention introuvable.');
+      if (a.ok) {
+        inv.ok = true;
+        inv.refused = null;
+        out.toast = `Invention validée : ${inv.name}`;
+      } else {
+        inv.ok = false;
+        inv.refused = { reason: str(a.reason, 300) || 'Sans motif précisé.', at: Date.now() };
+        out.toast = `Invention refusée : ${inv.name}`;
+      }
       break;
     }
     case 'tech.validate': {

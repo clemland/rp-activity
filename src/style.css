@@ -1405,6 +1405,16 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .sim-pad:disabled{cursor:default}
 .op-cv.trace-cv{aspect-ratio:460/260}
 .op-sut.tall{height:240px}
+/* ═══ v51 : inventions ═══ */
+.tech .status.ok{color:#1d7a3a}
+.inv-gallery{display:flex;gap:8px;flex-wrap:wrap;margin:0 16px 10px}
+.val-body .inv-gallery{margin:6px 0 10px}
+.inv-gallery img{max-height:180px;max-width:100%;border:3px solid var(--ink);border-radius:6px;object-fit:contain;background:#fff}
+.inv-gallery.edit{margin:4px 0 8px}
+.inv-img{position:relative;display:inline-block}
+.inv-img img{max-height:110px}
+.inv-img .sm-close{position:absolute;top:-8px;right:-8px}
+.inv-desc{white-space:pre-wrap}
 .sel-search{display:block;width:100%;max-width:260px;font:inherit;font-size:14px;color:var(--brown);background:#fff;border:2px dashed rgba(23,37,94,.45);border-radius:5px;padding:3px 8px;margin:0 0 4px}
 .mj-row .sel-search,.se-item .sel-search,.loot-row .sel-search,.rc-row .sel-search{margin:0}
 .ship-stats .ico{--s:16px;vertical-align:-3px}

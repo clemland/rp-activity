@@ -956,7 +956,7 @@ function renderJob() {
           <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
         </div>
       </article>`;
-    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}`;
+    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}${inventionsHTML()}`;
 }
 $('v-job').addEventListener('click', async (e) => {
   const cf = e.target.closest('[data-cf]')?.dataset.cf;
@@ -1620,6 +1620,87 @@ function opGame2(level, title, rank = S?.job?.lvl || 1, only = null) {
     : [s.anesthesie(), ...['incision', 'suture', 'hemorragie'].sort(() => Math.random() - 0.5).slice(0, level >= 4 ? 3 : 2).map((k) => s[k]())];
   return miniGame({ title, help: 'Garde le patient en vie : ses constantes baissent pendant toute l’opération.', drain, steps });
 }
+
+/* ═══ Inventions des scientifiques ═══════════════════════════════════════ */
+function inventionsHTML() {
+  if (S.job.id !== 'scientifique') return '';
+  const list = S.inventions || [];
+  const status = (x) => (x.ok ? '<span class="status ok">Validée</span>' : x.refused ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>');
+  return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🔬 Inventions</h2>${VIEW ? '' : '<button class="btn sm" id="inv-new">+ Proposer une invention</button>'}</div>
+    <p class="note">Imagine une invention, décris précisément ce qu’elle fait et ajoute des images : le staff la valide, ou la refuse avec un motif.</p>
+    ${list.length ? list.map((x) => `<details class="tech" ${x.refused && !x.ok ? 'open' : ''}>
+      <summary>${x.images[0] ? `<span class="t-thumb"><img src="${imgSrc(x.images[0])}" alt="" loading="lazy"></span>` : ''}<span><span class="t-name">${esc(x.name)}</span>${status(x)}</span><span class="cost"><span class="chev" aria-hidden="true">▾</span></span></summary>
+      ${!x.ok && x.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(x.refused.reason)}</p>` : ''}
+      ${x.images.length ? `<div class="inv-gallery">${x.images.map((u) => `<img src="${imgSrc(u)}" alt="" loading="lazy">`).join('')}</div>` : ''}
+      <p class="inv-desc">${esc(x.desc)}</p>
+      ${VIEW ? '' : `<div class="t-actions"><button class="btn sm ghost" data-inv-edit="${x.id}">${!x.ok && x.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-inv-del="${x.id}">Supprimer</button></div>`}
+    </details>`).join('') : '<p class="note">Aucune invention pour l’instant.</p>'}`;
+}
+let invDraft = null;
+function openInvention(x = null) {
+  invDraft = { id: x?.id ?? null, images: [...(x?.images || [])] };
+  $('inv-title').textContent = x ? (x.refused && !x.ok ? 'Corriger l’invention' : 'Modifier l’invention') : 'Nouvelle invention';
+  $('inv-save').textContent = x?.ok ? 'Enregistrer (repassera en validation)' : x ? 'Reproposer l’invention' : 'Proposer l’invention';
+  $('inv-name').value = x?.name ?? '';
+  $('inv-desc').value = x?.desc ?? '';
+  $('inv-url').value = '';
+  $('inv-err').textContent = x && !x.ok && x.refused ? `Motif du refus : ${x.refused.reason}` : '';
+  showInvImgs();
+  invCount();
+  openDialog('d-inv');
+}
+function showInvImgs() {
+  $('inv-imgs').innerHTML = invDraft.images.map((u, i) => `<span class="inv-img"><img src="${imgSrc(u)}" alt=""><button type="button" class="close sm-close" data-inv-rm="${i}" aria-label="Retirer">×</button></span>`).join('') || '<span class="note">Aucune image.</span>';
+  $('inv-pick').disabled = invDraft.images.length >= 5;
+}
+const invCount = () => ($('inv-count').textContent = `${$('inv-desc').value.trim().length} / 3 000 caractères (30 minimum)`);
+$('inv-desc').addEventListener('input', invCount);
+$('inv-pick').addEventListener('click', () => $('inv-file').click());
+$('inv-file').addEventListener('change', async (e) => {
+  const files = [...e.target.files].filter((f) => f.type.startsWith('image/'));
+  e.target.value = '';
+  for (const f of files) {
+    if (invDraft.images.length >= 5) break;
+    if (f.size > 20 * 1024 * 1024) {
+      $('inv-err').textContent = 'Image trop lourde (20 Mo maximum).';
+      continue;
+    }
+    invDraft.images.push(await readImage(f, { max: 1200, maxBytes: 700 * 1024 })); // allégée : 5 images doivent passer d'un coup
+  }
+  showInvImgs();
+});
+$('inv-url-go').addEventListener('click', () => {
+  const v = $('inv-url').value.trim();
+  if (!/^https?:\/\//.test(v)) return void ($('inv-err').textContent = 'Le lien doit commencer par http:// ou https://');
+  if (invDraft.images.length >= 5) return;
+  invDraft.images.push(v);
+  $('inv-url').value = '';
+  showInvImgs();
+});
+$('inv-imgs').addEventListener('click', (e) => {
+  const i = e.target.closest('[data-inv-rm]')?.dataset.invRm;
+  if (i == null) return;
+  invDraft.images.splice(+i, 1);
+  showInvImgs();
+});
+$('inv-save').addEventListener('click', async () => {
+  const name = $('inv-name').value.trim(), desc = $('inv-desc').value.trim();
+  if (!name) return void ($('inv-err').textContent = 'Donne un nom à ton invention.');
+  if (desc.length < 30) return void ($('inv-err').textContent = 'Décris précisément ce qu’elle fait (30 caractères minimum).');
+  $('inv-save').disabled = true;
+  $('inv-err').textContent = invDraft.images.some((u) => u.startsWith('data:')) ? 'Envoi des images…' : '';
+  const out = await run({ type: 'invention.save', id: invDraft.id ?? undefined, name, desc, images: invDraft.images });
+  $('inv-save').disabled = false;
+  if (out) closeDialog($('d-inv'));
+  else $('inv-err').textContent = '';
+});
+$('v-job').addEventListener('click', async (e) => {
+  if (e.target.closest('#inv-new')) return openInvention();
+  const ed = e.target.closest('[data-inv-edit]')?.dataset.invEdit;
+  if (ed) return openInvention(S.inventions.find((x) => x.id === Number(ed)));
+  const del = e.target.closest('[data-inv-del]')?.dataset.invDel;
+  if (del && (await askConfirm('L’invention sera supprimée de ta fiche.', { title: 'Supprimer cette invention ?', ok: 'Supprimer', danger: true }))) run({ type: 'invention.delete', id: Number(del) });
+});
 
 /* ═══ Utiliser et donner des objets ═══════════════════════════════════════ */
 document.addEventListener('click', (e) => {
@@ -2712,7 +2793,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -2885,6 +2966,7 @@ async function enterAdmin({ target = null } = {}) {
   loadAdminShops();
   loadFleet();
   if (staffCan('techniques')) loadPendingTechs();
+  if (staffCan('inventions')) loadPendingInventions();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 
@@ -3827,6 +3909,68 @@ $('v-atech').addEventListener('click', async (e) => {
     setBusy(-1);
   }
   loadPendingTechs();
+});
+
+/* ═══ Inventions à valider (panneau admin) ═══════════════════════════════ */
+let pendingInv = null;
+async function loadPendingInventions() {
+  try {
+    pendingInv = (await API.staff('inventions')).list;
+  } catch (err) {
+    pendingInv = [];
+    toast(esc(err.message));
+  }
+  renderPendingInventions();
+}
+function renderPendingInventions() {
+  if (!tools()) return;
+  const label = document.querySelector('#scr-ainv span:last-child');
+  if (label) label.textContent = pendingInv?.length ? `Inventions (${pendingInv.length})` : 'Inventions';
+  const el = $('v-ainv');
+  if (!pendingInv) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Inventions à valider</h2><p class="lede" style="margin:0">Les inventions proposées par les scientifiques. Un refus demande un motif, que le joueur verra dans son onglet Métier.</p></div>
+      <button class="btn ghost" id="ainv-reload">Actualiser</button>
+    </div>
+    ${pendingInv.length ? `<div class="val-list">${pendingInv.map(({ uid, player, job, jobLvl, invention: x }) => `
+      <article class="val-card">
+        <div class="val-body">
+          <p class="note" style="margin:0 0 4px">Proposée par <b>${esc(player)}</b> · ${job ? `${esc(JOBS[job]?.name || job)} ${JOB_LEVELS[jobLvl - 1]}` : 'sans métier'}${job !== 'scientifique' ? ' <span class="req">(n’est plus scientifique)</span>' : ''}</p>
+          <h3>${esc(x.name)}</h3>
+          ${x.images.length ? `<div class="inv-gallery">${x.images.map((u) => `<img src="${imgSrc(u)}" alt="" loading="lazy">`).join('')}</div>` : ''}
+          <p class="inv-desc">${esc(x.desc)}</p>
+          <div class="val-acts">
+            <button class="btn sm" data-iv-ok="${esc(uid)}" data-iid="${x.id}">✓ Valider</button>
+            <button class="btn sm ghost" data-iv-no="${esc(uid)}" data-iid="${x.id}">✗ Refuser</button>
+            <button class="btn sm ghost" data-iv-open="${esc(uid)}">Voir la fiche</button>
+          </div>
+        </div>
+      </article>`).join('')}</div>` : '<p class="note">Aucune invention en attente. 🎉</p>'}`;
+}
+$('v-ainv').addEventListener('click', async (e) => {
+  if (e.target.closest('#ainv-reload')) return void loadPendingInventions();
+  const open = e.target.closest('[data-iv-open]')?.dataset.ivOpen;
+  if (open) return void openPlayer(open, { tab: 't-job' });
+  const okB = e.target.closest('[data-iv-ok]'), noB = e.target.closest('[data-iv-no]');
+  const b = okB || noB;
+  if (!b) return;
+  const uid = b.dataset.ivOk || b.dataset.ivNo, id = Number(b.dataset.iid);
+  let reason = null;
+  if (noB) {
+    reason = await askText('Explique au joueur pourquoi : il verra ce motif et pourra corriger son invention.', { title: 'Refuser l’invention', ok: 'Refuser', placeholder: 'Ex. trop puissante, pas assez précise…', max: 300 });
+    if (!reason) return;
+  }
+  setBusy(1);
+  try {
+    const out = await API.staff('act', { target: uid, action: { type: 'invention.validate', id, ok: !!okB, reason } });
+    toast(esc(out.toast));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+  loadPendingInventions();
 });
 
 /* ═══ Mini-jeux (panneau admin) : tester sans rien dépenser ═════════════ */
@@ -5080,6 +5224,7 @@ function showScreen(name) {
   if (name === 'aloot') (lootData ? renderLoot() : loadLoot());
   if (name === 'aperms') loadPerms();
   if (name === 'agames') renderGames();
+  if (name === 'ainv') loadPendingInventions();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

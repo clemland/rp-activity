@@ -36,6 +36,7 @@
     <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
     <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
     <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
+        <button class="scr" role="tab" data-screen="ainv" aria-controls="s-ainv" id="scr-ainv" hidden><span class="ico" data-i="192"></span><span>Inventions</span></button>
         <button class="scr" role="tab" data-screen="agames" aria-controls="s-agames" id="scr-agames" hidden><span class="ico" data-i="279"></span><span>Mini-jeux</span></button>
     <button class="scr" role="tab" data-screen="aperms" aria-controls="s-aperms" id="scr-aperms" hidden><span class="ico" data-i="125"></span><span>Permissions</span></button>
     <button class="scr" role="tab" data-screen="aloot" aria-controls="s-aloot" id="scr-aloot" hidden><span class="ico" data-i="331"></span><span>Butins</span></button>
@@ -142,6 +143,10 @@
 
 <main class="screen" id="s-gest" role="tabpanel" hidden>
   <section class="sheet" id="v-gest"></section>
+</main>
+
+<main class="screen" id="s-ainv" role="tabpanel" hidden>
+  <section class="sheet" id="v-ainv"></section>
 </main>
 
 <main class="screen" id="s-agames" role="tabpanel" hidden>
@@ -475,6 +480,29 @@
         <button type="button" class="btn ghost" data-close>Annuler</button>
         <button type="button" class="btn" id="isl-save">Enregistrer</button>
       </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-inv" aria-labelledby="inv-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="inv-title">Nouvelle invention</h2><p>Le staff la lira, puis la validera ou la refusera avec un motif.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div class="form">
+        <div class="wide"><label for="inv-name">Nom de l’invention</label><input id="inv-name" maxlength="60"></div>
+        <div class="wide"><label for="inv-desc">Ce qu’elle fait, précisément</label><textarea id="inv-desc" maxlength="3000" rows="7" style="width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px"></textarea><small class="note" id="inv-count"></small></div>
+        <div class="wide"><label>Images (5 maximum)</label>
+          <div class="inv-gallery edit" id="inv-imgs"></div>
+          <div class="se-row"><button type="button" class="btn sm" id="inv-pick">Ajouter des images</button><input type="file" id="inv-file" accept="image/*" multiple hidden></div>
+          <div class="ph-url-row"><input type="url" id="inv-url" placeholder="ou un lien https://…" autocomplete="off"><button type="button" class="btn sm" id="inv-url-go">Ajouter</button></div>
+        </div>
+      </div>
+      <p class="err" id="inv-err" role="alert"></p>
+      <div class="form-actions"><button type="button" class="btn ghost" data-close>Annuler</button><button type="button" class="btn" id="inv-save">Proposer l’invention</button></div>
     </div>
   </div>
 </dialog>

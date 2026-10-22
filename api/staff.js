@@ -43,9 +43,10 @@ export default handler(['POST'], async (req, body) => {
   const gradeOnly = body.action?.type === 'edit' && Object.keys(body.action.patch || {}).join() === 'id' && Object.keys(body.action.patch.id || {}).join() === 'grade';
   const required =
     ['players', 'shops', 'crews', 'ships', 'map.get'].includes(op) ? null
-    : op === 'act' ? (body.action?.type === 'tech.validate' ? ['techniques', 'joueurs'] : gradeOnly ? ['joueurs', 'marine'] : ['joueurs'])
+    : op === 'act' ? (body.action?.type === 'tech.validate' ? ['techniques', 'joueurs'] : body.action?.type === 'invention.validate' ? ['inventions', 'joueurs'] : gradeOnly ? ['joueurs', 'marine'] : ['joueurs'])
     : op === 'bulk' ? ['joueurs']
     : op === 'techniques' ? ['techniques']
+    : op === 'inventions' ? ['inventions']
     : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
     : op.startsWith('crew.') ? ['equipages', 'marine']
     : op.startsWith('ship.') ? ['equipages']
@@ -207,6 +208,15 @@ export default handler(['POST'], async (req, body) => {
         await write('meta', 'icons', icons, row?.version ?? null);
         return { icons, toast: url ? 'Icône changée pour tout le monde' : 'Icône remise par défaut' };
       });
+    }
+    case 'inventions': {
+      // Toutes les inventions en attente de validation, avec le niveau de métier de leur auteur
+      const list = [];
+      for (const [uid, p] of Object.entries(await readAll('players'))) {
+        for (const inv of p.inventions || []) if (!inv.ok && !inv.refused) list.push({ uid, player: fullName(p), job: p.job?.id || null, jobLvl: p.job?.lvl || 1, invention: inv });
+      }
+      list.sort((a, b) => (a.invention.at || 0) - (b.invention.at || 0));
+      return { list };
     }
         case 'techniques': {
       // Toutes les techniques en attente de validation, tous joueurs confondus

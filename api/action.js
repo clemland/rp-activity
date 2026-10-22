@@ -61,6 +61,7 @@ export default handler(['POST'], async (req, body) => {
     else if (ph?.url) action.photo = { ...ph, url: await ingest(ph.url, 'photos', me.uid) };
   }
   if (action.type === 'tech.save' && action.media !== undefined) action.media = await ingest(action.media, 'techniques', me.uid);
+  if (action.type === 'invention.save' && Array.isArray(action.images)) action.images = await Promise.all(action.images.slice(0, 5).map((u) => ingest(u, 'inventions', me.uid)));
   if (action.type === 'ship.edit' && action.photo) action.photo = await ingest(action.photo, 'bateaux', me.uid);
   if (action.type === 'crew.edit' && action.flag) action.flag = await ingest(action.flag, 'pavillons', me.uid);
 

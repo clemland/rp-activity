@@ -1202,6 +1202,32 @@ function randomCurve(level = 1, straight = false) {
   const w = [[mgRnd(0.8, 1.6) * (straight ? 1 : 1 + level * 0.3), mgRnd(0, 6.28), amp], [mgRnd(2, 3.5), mgRnd(0, 6.28), amp * mgRnd(0.15, 0.4)]];
   return (x) => Math.max(18, Math.min(142, mid + w.reduce((s, [f, p, a]) => s + Math.sin((x / 460) * Math.PI * f + p) * a, 0)));
 }
+/**
+ * Chemin libre et aléatoire (incision, sciage) dans un cadre de 460 × 260 : il peut boucler, se croiser
+ * et revenir en arrière. gentle : trait plus doux, d'un bord à l'autre (sciage).
+ */
+function randomPath(level = 1, gentle = false) {
+  const W = 460, H = 260, m = 34;
+  const n = gentle ? 3 + Math.min(level, 3) : 4 + level * 2;
+  const ctrl = [];
+  for (let tries = 0; ctrl.length < n && tries < 400; tries++) {
+    const p = gentle ? { x: m + ((W - 2 * m) * ctrl.length) / (n - 1), y: mgRnd(70, H - 70) } : { x: mgRnd(m, W - m), y: mgRnd(m, H - m) };
+    const prev = ctrl[ctrl.length - 1];
+    if (!prev || gentle || Math.hypot(p.x - prev.x, p.y - prev.y) > 90) ctrl.push(p);
+  }
+  // Courbe de Catmull-Rom qui passe par tous les points de contrôle
+  const P = [ctrl[0], ...ctrl, ctrl[ctrl.length - 1]];
+  const cr = (a, b, c, d, t) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
+  const out = [];
+  for (let i = 1; i < P.length - 2; i++) {
+    for (let k = 0; k < 25; k++) {
+      const t = k / 25;
+      out.push({ x: cr(P[i - 1].x, P[i].x, P[i + 1].x, P[i + 2].x, t), y: cr(P[i - 1].y, P[i].y, P[i + 1].y, P[i + 2].y, t) });
+    }
+  }
+  out.push(ctrl[ctrl.length - 1]);
+  return out.map((p) => ({ x: Math.max(8, Math.min(W - 8, p.x)), y: Math.max(8, Math.min(H - 8, p.y)) }));
+}
 /** Points éparpillés sans se chevaucher (en %), dans une zone environ 2,7 fois plus large que haute. */
 function mgScatter(n, minDist = 15) {
   const pts = [];
@@ -1335,34 +1361,49 @@ const timingStep = (o) => (api) => {
   place();
   row();
 };
-/** Étape « tracé » : suivre une courbe du point vert au point rouge, sans lâcher. */
+/** Étape « tracé » : suivre un chemin libre (boucles, retours en arrière) du point vert au point rouge, sans lâcher. */
 const traceStep = (o) => (api) => {
-  const yAt = o.curve;
-  let tries = o.tries ?? null, drawing = false, dev = [];
-  api.area.innerHTML = `<p class="op-step">${o.label}</p><canvas id="mg-cv" class="op-cv ${o.cls || ''}" width="460" height="160"></canvas>${tries != null ? '<p class="note" id="mg-tries" style="margin:4px 0 0"></p>' : ''}`;
+  const W = 460, H = 260, pts = o.path;
+  let tries = o.tries ?? null, drawing = false, dev = [], prog = 0;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><canvas id="mg-cv" class="op-cv trace-cv ${o.cls || ''}" width="${W}" height="${H}"></canvas>${tries != null ? '<p class="note" id="mg-tries" style="margin:4px 0 0"></p>' : ''}`;
   const cv = $('mg-cv'), g = cv.getContext('2d');
   const showTries = () => tries != null && ($('mg-tries').textContent = `${tries} essai${tries > 1 ? 's' : ''} restant${tries > 1 ? 's' : ''}`);
   const drawPath = () => {
-    g.clearRect(0, 0, 460, 160);
+    g.clearRect(0, 0, W, H);
     g.setLineDash([6, 6]);
     g.strokeStyle = '#17255e';
     g.lineWidth = 2;
     g.beginPath();
-    for (let x = 10; x <= 450; x += 5) (x === 10 ? g.moveTo(x, yAt(x)) : g.lineTo(x, yAt(x)));
+    pts.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)));
     g.stroke();
     g.setLineDash([]);
+    // Petites flèches : le sens du chemin
+    g.fillStyle = 'rgba(23,37,94,.55)';
+    for (let i = 12; i < pts.length - 6; i += 18) {
+      const a = pts[i], b = pts[i + 2];
+      g.save();
+      g.translate(a.x, a.y);
+      g.rotate(Math.atan2(b.y - a.y, b.x - a.x));
+      g.beginPath();
+      g.moveTo(6, 0);
+      g.lineTo(-4, -4);
+      g.lineTo(-4, 4);
+      g.fill();
+      g.restore();
+    }
+    const s = pts[0], f = pts[pts.length - 1];
     g.fillStyle = '#2f9a55';
     g.beginPath();
-    g.arc(10, yAt(10), 7, 0, 7);
+    g.arc(s.x, s.y, 8, 0, 7);
     g.fill();
     g.fillStyle = '#c7352c';
     g.beginPath();
-    g.arc(450, yAt(450), 5, 0, 7);
+    g.arc(f.x, f.y, 6, 0, 7);
     g.fill();
   };
   const pt = (e) => {
     const r = cv.getBoundingClientRect();
-    return { x: ((e.clientX - r.left) / r.width) * 460, y: ((e.clientY - r.top) / r.height) * 160 };
+    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
   };
   const missed = (text) => {
     if (o.penalty) api.hurt(o.slip ?? 8, text);
@@ -1373,9 +1414,10 @@ const traceStep = (o) => (api) => {
   };
   cv.onpointerdown = (e) => {
     const p = pt(e);
-    if (p.x > 30) return void api.msg('Commence au point vert, à gauche.');
+    if (Math.hypot(p.x - pts[0].x, p.y - pts[0].y) > 22) return void api.msg('Commence sur le point vert.');
     drawing = true;
     dev = [];
+    prog = 0;
     cv.setPointerCapture(e.pointerId);
     drawPath();
     g.strokeStyle = o.ink || '#c7352c';
@@ -1386,10 +1428,20 @@ const traceStep = (o) => (api) => {
   cv.onpointermove = (e) => {
     if (!drawing) return;
     const p = pt(e);
-    dev.push(Math.abs(p.y - yAt(p.x)));
+    // Point du chemin le plus proche, en avançant seulement : on suit le chemin dans l'ordre, boucles comprises
+    let best = prog, bd = Infinity;
+    for (let j = prog; j < Math.min(pts.length, prog + 30); j++) {
+      const dd = Math.hypot(p.x - pts[j].x, p.y - pts[j].y);
+      if (dd < bd) {
+        bd = dd;
+        best = j;
+      }
+    }
+    dev.push(bd);
+    if (bd < o.tolerance * 3) prog = best;
     g.lineTo(p.x, p.y);
     g.stroke();
-    if (p.x < 445) return;
+    if (prog < pts.length - 3) return;
     drawing = false;
     const avg = dev.reduce((a, b) => a + b, 0) / Math.max(1, dev.length);
     if (avg > o.tolerance) {
@@ -1410,19 +1462,19 @@ const traceStep = (o) => (api) => {
   drawPath();
   showTries();
 };
-/** Étape « dans l'ordre » : des points numérotés éparpillés, parfois à rebours. */
+/** Étape « dans l'ordre » : des points numérotés (1, 2, 3…) éparpillés n'importe où dans la zone. */
 const orderStep = (o) => (api) => {
-  const pts = mgScatter(o.n), rev = !!o.reverse;
-  let next = rev ? o.n : 1, miss = 0;
-  api.area.innerHTML = `<p class="op-step">${o.label}${rev ? ' <b>À rebours : du plus grand au plus petit !</b>' : ''}</p><div class="op-sut ${o.cls || ''}" id="mg-pts">${pts.map((p, k) => `<button type="button" class="op-pt" data-pt="${k + 1}" style="left:${p.x}%;top:${p.y}%">${k + 1}</button>`).join('')}</div>`;
+  const pts = mgScatter(o.n, o.n > 8 ? 12 : 15);
+  let next = 1, miss = 0;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="op-sut tall ${o.cls || ''}" id="mg-pts">${pts.map((p, k) => `<button type="button" class="op-pt" data-pt="${k + 1}" style="left:${p.x}%;top:${p.y}%">${k + 1}</button>`).join('')}</div>`;
   $('mg-pts').onclick = (e) => {
     const b = e.target.closest('[data-pt]');
     if (!b || b.disabled) return;
     if (+b.dataset.pt === next) {
       b.classList.add('done');
       b.disabled = true;
-      next += rev ? -1 : 1;
-      if (rev ? next < 1 : next > o.n) api.next();
+      next++;
+      if (next > o.n) api.next();
     } else {
       replay(b, 'shake');
       miss++;
@@ -1529,7 +1581,7 @@ function workGame(recipe, rank, title, kind = null) {
   const lvl = 1 + Math.round(((d.speed - 0.6) / 1.4) * 4); // 1 (facile) à 5 (très dur)
   const games = {
     marteau: () => timingStep({ label: '🔨 <b>Marteau</b> : frappe quand le curseur passe dans la zone dorée (clic, Espace ou le bouton).', verb: '🔨 Frapper', icon: '🔩', speed: d.speed, zone: d.zone, hits: d.nails, misses: d.strikes - d.nails, good: 'Bien planté !' }),
-    scie: () => traceStep({ label: '🪚 <b>Sciage</b> : suis le trait de coupe de gauche à droite, sans lâcher.', curve: randomCurve(lvl, true), tolerance: Math.max(5, 13 - lvl * 1.5 + rank * 1.5), tries: 1 + rank, cls: 'wood-cv', ink: '#5a3a1e', bad: 'Coupe de travers : recommence.', good: 'Coupe nette !' }),
+    scie: () => traceStep({ label: '🪚 <b>Sciage</b> : suis le trait de coupe du point vert au point rouge, sans lâcher.', path: randomPath(lvl, true), tolerance: Math.max(5, 13 - lvl * 1.5 + rank * 1.5), tries: 1 + rank, cls: 'wood-cv', ink: '#5a3a1e', bad: 'Coupe de travers : recommence.', good: 'Coupe nette !' }),
     assemblage: () => simonStep({ label: '🧩 <b>Assemblage</b> : retiens l’ordre des pièces, puis assemble-les dans le même ordre.', len: 2 + lvl, misses: rank - 1, icons: ['🪵', '🔩', '⚙️', '🪢'] }),
     calfatage: () => whackStep({ label: '💧 <b>Calfatage</b> : bouche les fuites avant que l’eau n’entre !', icon: '💧', total: 5 + lvl, life: Math.max(0.9, 2.2 - lvl * 0.25 + rank * 0.2), every: Math.max(0.45, 0.95 - lvl * 0.08), misses: rank, cls: 'hull-wh' }),
   };
@@ -1541,22 +1593,31 @@ function bandageGame(label, rank = 1, kind = null) {
   const games = {
     serrer: () => timingStep({ label: '🩹 <b>Bandage</b> : serre quand le curseur est dans la zone.', verb: '🩹 Serrer', icon: '🩹', speed: 0.9, zone: 24 + (rank - 1) * 3, hits: 3, misses: 1 + rank }),
     nettoyer: () => whackStep({ label: '🦠 <b>Désinfecter</b> : nettoie les microbes de la plaie avant qu’ils ne s’incrustent.', icon: '🦠', total: 6, life: 1.8 + rank * 0.2, every: 0.8, misses: rank, cls: 'skin-wh' }),
-    points: () => orderStep({ label: '🧵 <b>Points de suture</b> : clique les points dans l’ordre.', n: 4, misses: rank, reverse: Math.random() < 0.3 }),
+    points: () => orderStep({ label: '🧵 <b>Points de suture</b> : clique les points dans l’ordre (1, 2, 3…).', n: 6, misses: rank }),
   };
   const k = kind && games[kind] ? kind : mgPick(Object.keys(games));
   return miniGame({ title: `Soin léger : ${label}`, steps: [games[k]()] });
 }
-/** Opération : anesthésie, puis 2 étapes au hasard (3 pour une blessure critique), pendant que les constantes baissent. */
-function opGame2(level, title, rank = S?.job?.lvl || 1) {
+/** Étapes d'une opération, selon la gravité (2 Sérieuse, 3 Grave, 4 Critique). */
+const OP_STEPS = { anesthesie: '💉 Anesthésie', incision: '🔪 Incision', suture: '🧵 Suture', hemorragie: '🩸 Hémorragie' };
+function opSteps(level) {
+  return {
+    anesthesie: () => timingStep({ label: '💉 <b>Anesthésie</b> : injecte quand l’aiguille est dans la zone verte.', verb: '💉 Injecter', icon: '💉', speed: 0.8 + level * 0.25, zone: Math.max(8, 20 - level * 3), hits: 1, penalty: 12, cls: 'op-dose', zoneCls: 'op-ok', bad: 'Mauvaise dose : le patient réagit mal !' }),
+    incision: () => traceStep({ label: '🔪 <b>Incision</b> : pars du point vert et suis le tracé jusqu’au point rouge, sans lâcher. Il peut boucler et revenir en arrière : suis les flèches.', path: randomPath(level), tolerance: 11, penalty: 1, bad: 'Incision imprécise…', good: 'Incision propre.' }),
+    suture: () => orderStep({ label: '🧵 <b>Suture</b> : clique les points dans l’ordre (1, 2, 3…).', n: 5 + level * 2, penalty: 6 }),
+    hemorragie: () => whackStep({ label: '🩸 <b>Hémorragie</b> : comprime les saignements avant qu’ils ne s’aggravent !', icon: '🩸', total: 3 + level, life: Math.max(1, 2.4 - level * 0.3), every: 0.8, penalty: 6, cls: 'skin-wh' }),
+  };
+}
+/**
+ * Opération : anesthésie, puis 2 étapes au hasard (3 pour une blessure critique), pendant que les constantes baissent.
+ * only : une seule étape (test dans le panneau admin).
+ */
+function opGame2(level, title, rank = S?.job?.lvl || 1, only = null) {
   const drain = Math.max(1, 1.5 + level * 1.2 - (rank - G.careRank(level)) * 0.8);
-  const pool = [
-    () => traceStep({ label: '🔪 <b>Incision</b> : pars du point vert et suis le tracé jusqu’au bout, sans lâcher.', curve: randomCurve(level), tolerance: 10, penalty: 1, bad: 'Incision imprécise…', good: 'Incision propre.' }),
-    () => orderStep({ label: '🧵 <b>Suture</b> : clique les points dans l’ordre.', n: 3 + level, penalty: 8, reverse: Math.random() < 0.35 }),
-    () => whackStep({ label: '🩸 <b>Hémorragie</b> : comprime les saignements avant qu’ils ne s’aggravent !', icon: '🩸', total: 3 + level, life: Math.max(1, 2.4 - level * 0.3), every: 0.8, penalty: 6, cls: 'skin-wh' }),
-  ];
-  const steps = [timingStep({ label: '💉 <b>Anesthésie</b> : injecte quand l’aiguille est dans la zone verte.', verb: '💉 Injecter', icon: '💉', speed: 0.8 + level * 0.25, zone: Math.max(8, 20 - level * 3), hits: 1, penalty: 12, cls: 'op-dose', zoneCls: 'op-ok', bad: 'Mauvaise dose : le patient réagit mal !' })];
-  const picked = [...pool].sort(() => Math.random() - 0.5).slice(0, level >= 4 ? 3 : 2);
-  steps.push(...picked.map((f) => f()));
+  const s = opSteps(level);
+  const steps = only && s[only]
+    ? [s[only]()]
+    : [s.anesthesie(), ...['incision', 'suture', 'hemorragie'].sort(() => Math.random() - 0.5).slice(0, level >= 4 ? 3 : 2).map((k) => s[k]())];
   return miniGame({ title, help: 'Garde le patient en vie : ses constantes baissent pendant toute l’opération.', drain, steps });
 }
 
@@ -3794,6 +3855,7 @@ function renderGames() {
       <section class="crew-box"><h3>🔪 Opération</h3>
         <div class="mj-row"><label for="tg-glvl">Gravité</label><select id="tg-glvl">${G.HEALTH_LEVELS.slice(1).map((l, i) => `<option value="${i + 2}">${l}</option>`).join('')}</select></div>
         <div class="mj-row"><label for="tg-orank">Rang</label><select id="tg-orank">${ranks(2)}</select></div>
+        <div class="mj-row"><label for="tg-ostep">Étape</label><select id="tg-ostep"><option value="">Opération complète</option>${Object.entries(OP_STEPS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
         <div><button class="btn" id="tg-op-go">Tester l’opération</button></div>
       </section>
     </div>
@@ -3833,7 +3895,8 @@ $('v-agames').addEventListener('click', (e) => {
   }
   if (e.target.closest('#tg-op-go')) {
     const lvl = +$('tg-glvl').value, rank = +$('tg-orank').value, g = G.HEALTH_LEVELS[lvl - 1].toLowerCase();
-    return void testGame(`Opération ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame2(lvl, `Test : opération ${g}`, rank));
+    const only = $('tg-ostep').value || null, what = only ? OP_STEPS[only] : 'Opération';
+    return void testGame(`${what} · ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame2(lvl, `Test : ${what.toLowerCase()} ${g}`, rank, only));
   }
 });
 

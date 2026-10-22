@@ -1403,6 +1403,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .sim-pad{height:90px;border:3px solid var(--ink);border-radius:12px;background:var(--c);opacity:.45;font-size:30px;cursor:pointer;transition:opacity .1s,transform .1s}
 .sim-pad.lit{opacity:1;transform:scale(1.06);box-shadow:0 0 14px var(--c)}
 .sim-pad:disabled{cursor:default}
+.op-cv.trace-cv{aspect-ratio:460/260}
+.op-sut.tall{height:240px}
 .sel-search{display:block;width:100%;max-width:260px;font:inherit;font-size:14px;color:var(--brown);background:#fff;border:2px dashed rgba(23,37,94,.45);border-radius:5px;padding:3px 8px;margin:0 0 4px}
 .mj-row .sel-search,.se-item .sel-search,.loot-row .sel-search,.rc-row .sel-search{margin:0}
 .ship-stats .ico{--s:16px;vertical-align:-3px}

@@ -15,6 +15,16 @@ import { ensureShipChannel, renameShipChannel } from './_lib/shipchan.js';
 import { invitesFor, loadHarbor, loadMap } from './_lib/context.js';
 import { normalize, careBlock, newWid, removeItem, RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
+/**
+ * Nouveaux bateaux (achat, fabrication, construction) : s'ils devaient s'amarrer dans le salon d'un bateau,
+ * on les laisse à quai nulle part. Ils s'amarreront au prochain message RP du joueur dans un vrai salon.
+ */
+async function dockNewShips(ships, player) {
+  if (!ships.length || !player.position?.channelId) return;
+  const chans = new Set(Object.values(await readAll('ships')).map((s) => s.channel?.id && String(s.channel.id)).filter(Boolean));
+  if (!chans.has(String(player.position.channelId)) && !(player.position.parentId && chans.has(String(player.position.parentId)))) return;
+  for (const s of ships) s.position = null;
+}
 /** Bateau où le joueur est à bord (sa cale sert aux fabrications) : { id, ship, version } ou null. */
 async function aboardShip(uid) {
   for (const [id, s] of Object.entries(await readAll('ships'))) {
@@ -232,6 +242,7 @@ export default handler(['POST'], async (req, body) => {
         await write('ships', sid, out.ship, cs.shipVersions[sid]);
         extra.ships[sid] = out.ship;
       }
+      await dockNewShips(out.newShips || [], player); // construction : jamais amarré dans le salon d'un bateau
       for (const s of out.newShips || []) {
         let id = slug(s.name), n = 2;
         while (await read('ships', id)) id = `${slug(s.name)}-${n++}`;
@@ -319,6 +330,7 @@ export default handler(['POST'], async (req, body) => {
       await write('ships', out.shipId, out.ship, cs.shipVersions[out.shipId]);
       extra.ships = { [out.shipId]: out.ship };
     }
+    await dockNewShips([...(out.newShips || []), ...(out.newShip ? [out.newShip] : [])], player); // jamais amarré dans le salon d'un bateau
     // Bateaux fabriqués : ils apparaissent dans « Mes bateaux », à quai dans ce salon.
     for (const ship of out.newShips || []) {
       let id = slug(ship.name), n = 2;

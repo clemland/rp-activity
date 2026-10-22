@@ -1,6 +1,6 @@
 /** Chargement commun : fiche, boutique du salon, catalogue d'objets et de recettes. */
 import { normalize, normalizeShop, normalizeCrew, normalizeShip, normalizeMap, setCatalog, fullName, canManageShip } from '../../shared/game.js';
-import { read, readAll, readMany, db } from './db.js';
+import { read, readAll, readMany, write, db } from './db.js';
 import { channelName } from './discord.js';
 import { HttpError } from './http.js';
 
@@ -72,6 +72,18 @@ export async function loadCrewAndShips(player) {
       out.ships[r.id] = normalizeShip(r.data);
       out.shipVersions[r.id] = r.version;
     }
+  }
+  // Ancienne cale d'équipage : transférée dans la cale du bateau attitré (les cales sont maintenant par bateau)
+  const c = out.crew;
+  if (c && Object.keys(c.chest || {}).length && c.ship && out.ships[c.ship]) {
+    const sh = out.ships[c.ship];
+    for (const [k, q] of Object.entries(c.chest)) sh.hold[k] = (sh.hold[k] || 0) + q;
+    c.chest = {};
+    try {
+      out.shipVersions[c.ship] = await write('ships', c.ship, sh, out.shipVersions[c.ship]);
+      const { id, ...crewData } = c;
+      out.crewVersion = await write('crews', id, crewData, out.crewVersion);
+    } catch {}
   }
   return out;
 }

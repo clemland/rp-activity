@@ -106,7 +106,7 @@ async function run(action) {
   let local = null;
   if (OPTIMISTIC.has(action.type)) {
     try {
-      local = G.playerAction(S, action, { shop: SHOP, channelId: POSID, crew: CREW });
+      local = G.playerAction(S, action, { shop: SHOP, channelId: POSID, crew: CREW, store: NAVD?.aboard, storeId: NAVD?.aboard?.id });
     } catch (e) {
       if (e instanceof G.GameError) {
         toast(esc(e.message));
@@ -902,15 +902,15 @@ $('v-inv').addEventListener('click', (e) => {
 /* ═══ Métier : atelier de fabrication ════════════════════════════════════ */
 const fmtEnd = (ms) => G.duree(Math.max(0, ms - Date.now()) / 1000);
 let craftFilter = 'dispo';
-function needChip([k, q], have = true) {
-  const h = G.stockOf(S, CREW, k), it = itemOf(k); // inventaire + cale de l'équipage
+function needChip([k, q], have = true, store = NAVD?.aboard) {
+  const h = G.stockOf(S, store, k), it = itemOf(k); // inventaire + cale du bateau où l'on est à bord
   return `<span class="need ${have ? (h >= q ? 'have' : 'miss') : ''}">${itemIco(k)}${esc(it.name)} ${have ? `${h}/${q}` : `× ${q}`}</span>`;
 }
 function renderJob() {
   if (!S) return;
   const job = S.job.id ? JOBS[S.job.id] : null;
   const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.work && !r.care && (!r.job || r.job === S.job.id));
-  const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r, CREW)) : recs;
+  const shownRecs = craftFilter === 'dispo' ? recs.filter(([, r]) => !G.craftBlock(S, r, NAVD?.aboard)) : recs;
   const c = S.craft;
   const ready = c && Date.now() >= c.end;
   $('v-job').innerHTML = `
@@ -943,7 +943,7 @@ function renderJob() {
       </div>
     </div>
     ${shownRecs.length ? `<div class="recipes">${shownRecs.map(([id, r]) => {
-      const why = G.craftBlock(S, r, CREW);
+      const why = G.craftBlock(S, r, NAVD?.aboard);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${Object.keys(r.gives).slice(0, 1).map((k) => itemIco(k)).join('')}${esc(G.recipeLabel(r))}</h3>
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}</p>
@@ -1004,13 +1004,14 @@ function atelierHTML() {
     <p class="note">Choisis un bateau et un travail. Les matériaux sont pris au début : réussis le mini-jeu pour que le travail tienne.</p>
     ${ships.length ? `<div class="mj-row"><label for="atelier-ship">Bateau</label><select id="atelier-ship">${ships.map((x) => `<option value="${esc(x.id)}" ${x.id === atelierShip ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)})</option>`).join('')}</select>${st ? `<span class="note">Vitesse ${st.speed} · Robustesse ${st.robust} · Puissance ${st.power} · Coque ${st.hull}/${st.hullMax}</span>` : ''}</div>` : '<p class="note">Tu n’as pas de bateau à travailler (à toi, ou à ton équipage avec la permission « Choisir le bateau »). Tu peux quand même en construire un.</p>'}
     <div class="recipes">${works.map(([id, r]) => {
-      const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship, CREW);
+      const store = r.work.type === 'construire' ? NAVD?.aboard : ship; // cale du bateau travaillé (ou de celui où l'on est à bord)
+      const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship, store);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${recipeIco(r)}${esc(G.workLabel(r.work))}</h3>
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
-        <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
+        <div class="needs">${Object.entries(r.needs).map((x) => needChip(x, true, store)).join('') || '<span class="note">Rien</span>'}</div>
         <div class="recipe-foot">${why ? `<span class="req">${esc(why)}</span>` : '<span></span>'}<button class="btn sm" data-work="${esc(id)}" ${why ? 'disabled' : ''}>Travailler</button></div>
       </article>`;
     }).join('')}</div>`;
@@ -1447,6 +1448,30 @@ function voyageHTML(sh) {
 $('v-amap').addEventListener('change', (e) => {
   if (e.target.id === 'amap-pace') mapCall('map.pace', { pace: +e.target.value });
 });
+/** Cale du bateau où l'on est à bord : déposer et prendre des objets. */
+let hx = { side: null, key: null, qty: 1 };
+function holdHTML(sh) {
+  const load = G.holdWeight(sh), cap = sh.capacity;
+  const inv = {};
+  S.inv.forEach((s) => s && (inv[s[0]] = G.freeCount(S, s[0])));
+  for (const k of Object.keys(inv)) if (inv[k] <= 0) delete inv[k];
+  const cell = (side, k, q) => `<button class="cell xcell ${hx.side === side && hx.key === k ? 'on' : ''}" data-h-side="${side}" data-h-key="${esc(k)}" title="${esc(itemOf(k).name)}" aria-label="${esc(itemOf(k).name)}, ${q}">${itemIco(k)}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>`;
+  const selQ = hx.key ? (hx.side === 'inv' ? inv[hx.key] : sh.hold?.[hx.key]) || 0 : 0;
+  if (hx.key && !selQ) hx = { side: null, key: null, qty: 1 };
+  const it = hx.key ? itemOf(hx.key) : null;
+  return `<section class="crew-box"><h3>📦 Cale de ${esc(sh.name)}</h3>
+    <div class="gauge" aria-label="Chargement de la cale"><i style="width:${Math.min(100, (load / Math.max(cap, 1)) * 100)}%"></i></div>
+    <div class="gauge-cap"><span>Chargement</span><span>${G.kg(load)} / ${G.kg(cap)}</span></div>
+    <div class="cargo">
+      <div class="cargo-side"><b>Ton inventaire <small class="note">${G.kg(G.invWeight(S))} / ${G.MAX_CARRY} kg</small></b><div class="xgrid">${Object.entries(inv).map(([k, q]) => cell('inv', k, q)).join('') || '<p class="note">Vide</p>'}</div></div>
+      <div class="cargo-side"><b>Cale</b><div class="xgrid">${Object.entries(sh.hold || {}).map(([k, q]) => cell('hold', k, q)).join('') || '<p class="note">Vide</p>'}</div></div>
+    </div>
+    ${it ? `<div class="xbar">${itemIco(hx.key)}<span class="x-name"><b>${esc(it.name)}</b><small>${G.kg(it.weight || 0)} l’unité · ${selQ} disponible${selQ > 1 ? 's' : ''}</small></span>
+      <span class="x-qty"><input id="h-qty" type="number" min="1" max="${selQ}" value="${Math.min(hx.qty, selQ)}" aria-label="Quantité"><button class="btn sm ghost" data-hq="all">Tout</button></span>
+      <button class="btn" id="h-go" data-ship="${esc(sh.id)}">${hx.side === 'inv' ? 'Déposer dans la cale →' : '← Prendre'}</button></div>`
+    : '<p class="note" style="margin:0">Clique sur un objet pour le déposer dans la cale ou le prendre. Tes fabrications puisent aussi dans cette cale.</p>'}
+  </section>`;
+}
 function renderNav() {
   if (!S || ADMIN) return;
   const n = NAVD || { harbor: [], aboard: null, requests: [] };
@@ -1468,15 +1493,27 @@ function renderNav() {
   $('v-nav').innerHTML = `
     <section class="logbook nav-port">
       <h2>Navigation</h2>
-      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ' (en mer)'} ${n.aboard.position ? `<button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button>` : ''}</div>${logPoseHTML(n.aboard)}${voyageHTML(n.aboard)}` : ''}
+      ${n.aboard ? `<div class="aboard"><b>Tu es à bord de ${esc(n.aboard.name)}</b>${n.aboard.position ? ` (à quai dans #${esc(n.aboard.position.name || n.aboard.position.channelId)})` : ' (en mer)'} ${n.aboard.position ? `<button class="btn sm ghost" data-ship-leave="${esc(n.aboard.id)}">Descendre</button>` : ''}</div>${logPoseHTML(n.aboard)}${voyageHTML(n.aboard)}${holdHTML(n.aboard)}` : ''}
       ${n.requests.length ? `<div class="crew-box"><h3>Demandes d’embarquement</h3>${n.requests.map((r) => `<div class="member-row"><span class="m-name"><b>${navName(r.uid)}</b> veut monter sur <b>${esc(r.shipName)}</b></span><span></span><span class="m-acts"><button class="btn sm" data-req-yes="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Accepter</button><button class="btn sm ghost" data-req-no="${esc(r.shipId)}" data-uid="${esc(r.uid)}">Refuser</button></span></div>`).join('')}</div>` : ''}
       <h3 class="ed-h">${POSID ? `À quai à #${esc(CHNAME || POSID)}` : 'À quai'}</h3>
       ${!POSID ? '<p class="note">Tu n’es nulle part pour l’instant : écris un message RP (400 caractères ou plus) dans un salon RP pour t’y trouver.</p>' : harbor ? `<div class="ships">${harbor}</div>` : '<p class="note">Aucun bateau à quai ici.</p>'}
-      <p class="note">La navigation en mer arrive bientôt : le niveau de voile servira de vitesse.</p>
     </section>`;
   paintStatic($('v-nav'));
 }
 $('v-nav').addEventListener('click', async (e) => {
+  const hc = e.target.closest('[data-h-key]');
+  if (hc) {
+    const same = hx.side === hc.dataset.hSide && hx.key === hc.dataset.hKey;
+    hx = same ? { side: null, key: null, qty: 1 } : { side: hc.dataset.hSide, key: hc.dataset.hKey, qty: 1 };
+    return renderNav();
+  }
+  if (e.target.closest('[data-hq]')) return void ($('h-qty').value = $('h-qty').max);
+  const hg = e.target.closest('#h-go');
+  if (hg) {
+    const qty = Math.max(1, Math.floor(+$('h-qty').value || 1));
+    if (await run({ type: hx.side === 'inv' ? 'ship.hold.deposit' : 'ship.hold.withdraw', shipId: hg.dataset.ship, key: hx.key, qty })) hx.qty = 1;
+    return;
+  }
   const vl = e.target.closest('[data-voy-logpose]')?.dataset.voyLogpose;
   if (vl) return void run({ type: 'ship.voyage.logpose', shipId: vl, choice: +($('voy-path')?.value ?? 0) });
   const vp = e.target.closest('[data-voy-propose]')?.dataset.voyPropose;
@@ -2399,7 +2436,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
       ${extra}
-      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
+      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${actions}
       ${upgrade ? upgradeControl(sh) : ''}
@@ -2484,6 +2521,14 @@ function crewTabHTML() {
     </section>` : ''}
     <div><button class="btn ghost danger-txt" id="crew-leave">Quitter ${W.le}</button></div>`;
 }
+/** Onglet « Banque » de l'équipage : la cale est maintenant celle de chaque bateau. */
+function bankHTML() {
+  const c = CREW, left = Object.keys(c.chest || {}).length;
+  return `<section class="crew-box"><h3>Banque commune</h3><div class="bank-amount">${berry(c.bank)}</div>
+      <div class="mj-row prog-row"><label for="bank-n">Montant</label><input id="bank-n" type="number" min="1" inputmode="numeric" placeholder="ex. 5000">
+        ${can('bankIn') ? '<button class="btn sm" id="bank-in">Déposer</button>' : ''}${can('bankOut') ? '<button class="btn sm ghost" id="bank-out">Retirer</button>' : ''}</div></section>
+    <section class="crew-box"><h3>📦 La cale</h3><p class="note" style="margin:0">Chaque bateau a maintenant sa propre cale : monte à bord, puis ouvre l’écran <b>Navigation</b> pour y déposer ou prendre des objets.${left ? ` L’ancienne cale ${G.crewWords(c).de} contient encore ${left} sorte${left > 1 ? 's' : ''} d’objets : elle sera transférée dans le bateau attitré dès qu’il y en aura un.` : ''}</p></section>`;
+}
 function cargoHTML() {
   const c = CREW;
   const ship = c.ship ? SHIPS.find((x) => x.id === c.ship) : null;
@@ -2561,10 +2606,10 @@ function renderCrew() {
       </div>
     </div>` : `<div class="no-shop">${ico(1)}<h2>${S.id.faction === 'Marine' ? 'Pas d’escouade' : 'Pas d’équipage'}</h2><p class="note">${S.id.faction === 'Marine' ? 'Tu n’es affecté à aucune escouade. Un commandant peut t’inviter.' : 'Tu ne fais partie d’aucun équipage. Un capitaine peut t’inviter.'}</p></div>`;
   const tabs = `<div class="seg crew-seg" role="group" aria-label="Section">
-    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">${c.kind === 'flotte' ? 'Escouade' : 'Équipage'}</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">Cale et banque</button>` : ''}
+    ${c ? `<button aria-pressed="${crewTab === 'crew'}" data-ct="crew">${c.kind === 'flotte' ? 'Escouade' : 'Équipage'}</button><button aria-pressed="${crewTab === 'cargo'}" data-ct="cargo">Banque</button>` : ''}
     <button aria-pressed="${crewTab === 'ships'}" data-ct="ships">Bateaux</button></div>`;
   $('v-crew').innerHTML = `${head}${invitesHTML()}${tabs}
-    <div class="crew-body">${crewTab === 'ships' ? shipsTabHTML() : !c ? '' : crewTab === 'cargo' ? cargoHTML() : crewTabHTML()}</div>`;
+    <div class="crew-body">${crewTab === 'ships' ? shipsTabHTML() : !c ? '' : crewTab === 'cargo' ? bankHTML() : crewTabHTML()}</div>`;
   paintStatic($('v-crew'));
 }
 async function crewSearchNow() {

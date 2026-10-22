@@ -15,6 +15,16 @@ import { ensureShipChannel, renameShipChannel } from './_lib/shipchan.js';
 import { invitesFor, loadHarbor, loadMap } from './_lib/context.js';
 import { normalize, careBlock, newWid, removeItem, RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
 
+/** Bateau où le joueur est à bord (sa cale sert aux fabrications) : { id, ship, version } ou null. */
+async function aboardShip(uid) {
+  for (const [id, s] of Object.entries(await readAll('ships'))) {
+    if (!(s.passengers || []).includes(uid)) continue;
+    const r = await read('ships', id);
+    return r ? { id, ship: normalizeShip(r.data), version: r.version } : null;
+  }
+  return null;
+}
+
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
   const action = body.action || {};
@@ -214,14 +224,10 @@ export default handler(['POST'], async (req, body) => {
       const sid = r?.work?.type === 'construire' ? null : String(action.shipId || '');
       const ship = sid ? cs.ships[sid] : null;
       if (sid) need(ship, 404, 'Bateau introuvable : il doit être à toi ou à ton équipage.');
-      const out = playerAction(player, action, { ...ctx, ship, shipId: sid, crew: cs.crew, channelName: player.position?.name || '' });
+      const store = r?.work?.type === 'construire' ? await aboardShip(me.uid) : null; // construction : cale du bateau où l'on est à bord
+      const out = playerAction(player, action, { ...ctx, ship, shipId: sid, crew: cs.crew, store: store?.ship, storeId: store?.id, channelName: player.position?.name || '' });
       const extra = { ships: {} };
-      if (out.crew && cs.crew) {
-        // matériaux pris dans la cale de l'équipage (atelier)
-        const { id: cid, memberNames: _names, ...crewData } = out.crew;
-        await write('crews', cid, normalizeCrew(crewData), cs.crewVersion);
-        extra.crew = out.crew;
-      }
+      if (out.store && store) await write('ships', store.id, out.store, store.version);
       if (out.ship) {
         await write('ships', sid, out.ship, cs.shipVersions[sid]);
         extra.ships[sid] = out.ship;
@@ -293,15 +299,22 @@ export default handler(['POST'], async (req, body) => {
     if (action.type === 'craft.collect' && channelId) ctx.channelName = player.position?.name || (await channelName(channelId));
     // Travail d'atelier terminé : il faut le bateau concerné (à lui ou à son équipage)
     if (action.type === 'craft.collect' && player.craft?.work?.shipId) ctx.ship = cs.ships[player.craft.work.shipId] || null;
-    if (cs) ctx.crew = cs.crew; // les fabrications peuvent puiser dans la cale de l'équipage
+    // Fabrications : elles puisent aussi dans la cale du bateau où l'on est à bord ; une annulation rend à la cale d'origine
+    let store = null;
+    if (action.type === 'craft.start') store = await aboardShip(me.uid);
+    if (action.type === 'craft.cancel' && player.craft?.fromShip) {
+      const r = await read('ships', player.craft.fromShip);
+      if (r) store = { id: player.craft.fromShip, ship: normalizeShip(r.data), version: r.version };
+    }
+    if (store) {
+      ctx.store = store.ship;
+      ctx.storeId = store.id;
+    }
     const out = playerAction(player, action, ctx);
     if (out.shop) await write('shops', channelId, out.shop, shopV);
-    if (out.crew && cs?.crew) {
-      const { id: cid, memberNames: _names, ...crewData } = out.crew;
-      await write('crews', cid, normalizeCrew(crewData), cs.crewVersion);
-    }
+    if (out.store && store) await write('ships', store.id, out.store, store.version);
     const extra = {};
-    if (out.crew) extra.crew = out.crew;
+    if (out.store) extra.nav = await loadHarbor(out.player, cs?.crew ?? null, channelId);
     if (out.ship && out.shipId) {
       await write('ships', out.shipId, out.ship, cs.shipVersions[out.shipId]);
       extra.ships = { [out.shipId]: out.ship };

@@ -1031,7 +1031,7 @@ async function startWork(id) {
   if (!r?.work) return;
   const label = G.workLabel(r.work);
   if (!(await askConfirm('Les matériaux seront pris tout de suite. Si tu rates le mini-jeu, ils sont perdus.', { title: `${label} ?`, ok: 'Commencer' }))) return;
-  const success = await nailGame(G.workDifficulty(r, S), label);
+  const success = await workGame(r, S.job.lvl, label);
   await run({ type: 'ship.work', id, shipId: r.work.type === 'construire' ? null : atelierShip, success });
 }
 /** Mini-jeu du marteau : planter les clous quand le curseur passe dans la zone dorée. Renvoie true si réussi. */
@@ -1192,6 +1192,374 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { childList: true, subtree: true });
 
+/* ═══ Mini-jeux : plusieurs variantes tirées au hasard, contenu différent à chaque partie ═══ */
+const mgRnd = (a, b) => a + Math.random() * (b - a);
+const mgPick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+/** Tracé aléatoire et doux (incision, sciage) : y(x) entre 18 et 142 sur un canevas de 460 × 160. */
+function randomCurve(level = 1, straight = false) {
+  const mid = mgRnd(60, 100);
+  const amp = straight ? mgRnd(4, 10) : mgRnd(16, 26) + level * 4;
+  const w = [[mgRnd(0.8, 1.6) * (straight ? 1 : 1 + level * 0.3), mgRnd(0, 6.28), amp], [mgRnd(2, 3.5), mgRnd(0, 6.28), amp * mgRnd(0.15, 0.4)]];
+  return (x) => Math.max(18, Math.min(142, mid + w.reduce((s, [f, p, a]) => s + Math.sin((x / 460) * Math.PI * f + p) * a, 0)));
+}
+/** Points éparpillés sans se chevaucher (en %), dans une zone environ 2,7 fois plus large que haute. */
+function mgScatter(n, minDist = 15) {
+  const pts = [];
+  for (let tries = 0; pts.length < n && tries < 800; tries++) {
+    const p = { x: mgRnd(7, 93), y: mgRnd(14, 86) };
+    if (pts.every((q) => Math.hypot((q.x - p.x) * 2.7, q.y - p.y) > minDist)) pts.push(p);
+  }
+  while (pts.length < n) pts.push({ x: mgRnd(7, 93), y: mgRnd(14, 86) });
+  return pts;
+}
+/**
+ * Fenêtre de mini-jeu : enchaîne des étapes. Avec drain > 0, les constantes vitales baissent
+ * pendant toute la partie (opération). Renvoie true si toutes les étapes sont réussies.
+ */
+function miniGame({ title, help = '', drain = 0, steps }) {
+  return new Promise((resolve) => {
+    const d = $('d-mg'), area = $('mg-area');
+    $('mg-title').textContent = title;
+    $('mg-help').textContent = help;
+    $('mg-step').textContent = '';
+    $('mg-vit-wrap').hidden = !drain;
+    $('mg-vit').style.width = '100%';
+    $('mg-vit-n').textContent = '100 %';
+    $('mg-vit').parentElement.classList.remove('bad');
+    $('mg-msg').textContent = '';
+    let vit = 100, i = -1, done = false, raf = 0, last = performance.now(), tickFn = null;
+    const key = (e) => {
+      if (e.code !== 'Space' || e.repeat || e.target.closest?.('button, input')) return;
+      e.preventDefault();
+      $('mg-hit')?.click();
+    };
+    const stop = () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', key);
+    };
+    const finish = (ok, text) => {
+      if (done) return;
+      done = true;
+      stop();
+      $('mg-msg').textContent = text || (ok ? 'Réussi !' : 'Raté…');
+      setTimeout(() => {
+        if (d.open) closeDialog(d);
+        resolve(ok);
+      }, 1100);
+    };
+    const api = {
+      area,
+      msg: (t) => ($('mg-msg').textContent = t),
+      hurt: (n, t) => {
+        if (drain) vit -= n;
+        if (t) api.msg(t);
+      },
+      onTick: (fn) => (tickFn = fn),
+      next: () => {
+        if (done) return;
+        tickFn = null;
+        i++;
+        if (i >= steps.length) return finish(true, drain ? 'Opération réussie : le patient est sauvé !' : 'Travail réussi !');
+        $('mg-step').textContent = steps.length > 1 ? `Étape ${i + 1} sur ${steps.length}` : '';
+        steps[i](api);
+      },
+      fail: (t) => finish(false, t),
+    };
+    const tick = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      if (drain) {
+        vit -= drain * dt;
+        const v = Math.max(0, vit);
+        $('mg-vit').style.width = `${v}%`;
+        $('mg-vit-n').textContent = `${Math.round(v)} %`;
+        $('mg-vit').parentElement.classList.toggle('bad', v < 30);
+        if (vit <= 0) return finish(false, 'Les constantes se sont effondrées : opération ratée.');
+      }
+      tickFn?.(dt);
+      if (!done) raf = requestAnimationFrame(tick);
+    };
+    d.addEventListener('close', () => {
+      if (done) return;
+      done = true;
+      stop();
+      resolve(false); // fenêtre fermée : abandon
+    }, { once: true });
+    document.addEventListener('keydown', key);
+    openDialog('d-mg');
+    api.next();
+    raf = requestAnimationFrame((t) => {
+      last = t;
+      tick(t);
+    });
+  });
+}
+/** Étape « au bon moment » : un curseur va et vient, il faut frapper dans la zone. */
+const timingStep = (o) => (api) => {
+  let pos = 0, dir = 1, zx = 0, got = 0, miss = 0;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="nail-board ${o.cls || ''}" id="mg-board"><div class="nail-zone ${o.zoneCls || ''}" id="mg-zone"></div><div class="nail-cursor" id="mg-cur"></div></div>
+    <div class="nail-row" id="mg-row"></div><div class="form-actions"><button type="button" class="btn" id="mg-hit">${o.verb}</button></div>`;
+  const place = () => {
+    zx = mgRnd(5, 95 - o.zone);
+    $('mg-zone').style.left = `${zx}%`;
+    $('mg-zone').style.width = `${o.zone}%`;
+  };
+  const row = () => {
+    const left = o.misses != null ? o.misses - miss : null;
+    $('mg-row').innerHTML = `${Array.from({ length: o.hits }, (_, k) => `<span class="nail ${k < got ? 'in' : ''}">${k < got ? o.icon : '◦'}</span>`).join('')}${left != null ? `<small class="note">${left} erreur${left > 1 ? 's' : ''} permise${left > 1 ? 's' : ''}</small>` : ''}`;
+  };
+  const hit = () => {
+    if (pos >= zx && pos <= zx + o.zone) {
+      got++;
+      api.msg(o.good || 'Bien !');
+      if (got >= o.hits) return api.next();
+      place();
+    } else {
+      replay($('mg-board'), 'shake');
+      miss++;
+      if (o.penalty) api.hurt(o.penalty, o.bad || 'Raté !');
+      else api.msg(o.bad || 'À côté…');
+      if (o.misses != null && miss > o.misses) return api.fail();
+    }
+    row();
+  };
+  $('mg-hit').onclick = hit;
+  $('mg-board').onclick = hit;
+  api.onTick((dt) => {
+    pos += dir * o.speed * 100 * dt;
+    if (pos >= 100) { pos = 100; dir = -1; }
+    if (pos <= 0) { pos = 0; dir = 1; }
+    const c = $('mg-cur');
+    if (c) c.style.left = `${pos}%`;
+  });
+  place();
+  row();
+};
+/** Étape « tracé » : suivre une courbe du point vert au point rouge, sans lâcher. */
+const traceStep = (o) => (api) => {
+  const yAt = o.curve;
+  let tries = o.tries ?? null, drawing = false, dev = [];
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><canvas id="mg-cv" class="op-cv ${o.cls || ''}" width="460" height="160"></canvas>${tries != null ? '<p class="note" id="mg-tries" style="margin:4px 0 0"></p>' : ''}`;
+  const cv = $('mg-cv'), g = cv.getContext('2d');
+  const showTries = () => tries != null && ($('mg-tries').textContent = `${tries} essai${tries > 1 ? 's' : ''} restant${tries > 1 ? 's' : ''}`);
+  const drawPath = () => {
+    g.clearRect(0, 0, 460, 160);
+    g.setLineDash([6, 6]);
+    g.strokeStyle = '#17255e';
+    g.lineWidth = 2;
+    g.beginPath();
+    for (let x = 10; x <= 450; x += 5) (x === 10 ? g.moveTo(x, yAt(x)) : g.lineTo(x, yAt(x)));
+    g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = '#2f9a55';
+    g.beginPath();
+    g.arc(10, yAt(10), 7, 0, 7);
+    g.fill();
+    g.fillStyle = '#c7352c';
+    g.beginPath();
+    g.arc(450, yAt(450), 5, 0, 7);
+    g.fill();
+  };
+  const pt = (e) => {
+    const r = cv.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * 460, y: ((e.clientY - r.top) / r.height) * 160 };
+  };
+  const missed = (text) => {
+    if (o.penalty) api.hurt(o.slip ?? 8, text);
+    else api.msg(text);
+    if (tries != null && --tries <= 0) return api.fail('Trop d’essais ratés.');
+    showTries();
+    drawPath();
+  };
+  cv.onpointerdown = (e) => {
+    const p = pt(e);
+    if (p.x > 30) return void api.msg('Commence au point vert, à gauche.');
+    drawing = true;
+    dev = [];
+    cv.setPointerCapture(e.pointerId);
+    drawPath();
+    g.strokeStyle = o.ink || '#c7352c';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(p.x, p.y);
+  };
+  cv.onpointermove = (e) => {
+    if (!drawing) return;
+    const p = pt(e);
+    dev.push(Math.abs(p.y - yAt(p.x)));
+    g.lineTo(p.x, p.y);
+    g.stroke();
+    if (p.x < 445) return;
+    drawing = false;
+    const avg = dev.reduce((a, b) => a + b, 0) / Math.max(1, dev.length);
+    if (avg > o.tolerance) {
+      if (o.penalty) {
+        api.hurt(Math.min(35, (avg - o.tolerance) * 2), o.bad || 'Tracé imprécis…');
+        return api.next();
+      }
+      return missed(o.bad || 'Trop imprécis : recommence.');
+    }
+    api.msg(o.good || 'Tracé propre.');
+    api.next();
+  };
+  cv.onpointerup = () => {
+    if (!drawing) return;
+    drawing = false;
+    missed('Tu as lâché : recommence.');
+  };
+  drawPath();
+  showTries();
+};
+/** Étape « dans l'ordre » : des points numérotés éparpillés, parfois à rebours. */
+const orderStep = (o) => (api) => {
+  const pts = mgScatter(o.n), rev = !!o.reverse;
+  let next = rev ? o.n : 1, miss = 0;
+  api.area.innerHTML = `<p class="op-step">${o.label}${rev ? ' <b>À rebours : du plus grand au plus petit !</b>' : ''}</p><div class="op-sut ${o.cls || ''}" id="mg-pts">${pts.map((p, k) => `<button type="button" class="op-pt" data-pt="${k + 1}" style="left:${p.x}%;top:${p.y}%">${k + 1}</button>`).join('')}</div>`;
+  $('mg-pts').onclick = (e) => {
+    const b = e.target.closest('[data-pt]');
+    if (!b || b.disabled) return;
+    if (+b.dataset.pt === next) {
+      b.classList.add('done');
+      b.disabled = true;
+      next += rev ? -1 : 1;
+      if (rev ? next < 1 : next > o.n) api.next();
+    } else {
+      replay(b, 'shake');
+      miss++;
+      if (o.penalty) api.hurt(o.penalty, o.bad || 'Mauvais point !');
+      else api.msg(o.bad || 'Pas dans l’ordre !');
+      if (o.misses != null && miss > o.misses) api.fail('Trop d’erreurs.');
+    }
+  };
+};
+/** Étape « réflexes » : des cibles apparaissent n'importe où, il faut cliquer avant qu'elles disparaissent. */
+const whackStep = (o) => (api) => {
+  let hit = 0, miss = 0, t = 0, since = o.every, alive = [];
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="op-sut whack ${o.cls || ''}" id="mg-wh"></div><div class="nail-row" id="mg-row"></div>`;
+  const box = $('mg-wh');
+  const row = () => ($('mg-row').innerHTML = `<small class="note">${hit} / ${o.total}${o.misses != null ? ` · ${o.misses - miss} oubli${o.misses - miss > 1 ? 's' : ''} permis` : ''}</small>`);
+  const spawn = () => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'wh-t';
+    b.textContent = o.icon;
+    b.style.left = `${mgRnd(8, 92)}%`;
+    b.style.top = `${mgRnd(15, 85)}%`;
+    b.dataset.born = String(t);
+    box.appendChild(b);
+    alive.push(b);
+  };
+  box.onclick = (e) => {
+    const b = e.target.closest('.wh-t');
+    if (!b) return;
+    b.remove();
+    alive = alive.filter((x) => x !== b);
+    hit++;
+    if (hit >= o.total) return api.next();
+    row();
+  };
+  api.onTick((dt) => {
+    t += dt;
+    since += dt;
+    if (since >= o.every && hit + alive.length < o.total + 2) {
+      since = 0;
+      spawn();
+    }
+    for (const b of [...alive]) {
+      if (t - +b.dataset.born <= o.life) continue;
+      b.remove();
+      alive = alive.filter((x) => x !== b);
+      miss++;
+      if (o.penalty) api.hurt(o.penalty, o.bad || 'Trop tard !');
+      else api.msg(o.bad || 'Trop tard !');
+      if (o.misses != null && miss > o.misses) return api.fail('Trop d’oublis.');
+      row();
+    }
+  });
+  row();
+};
+/** Étape « mémoire » : des pièces s'allument dans un ordre aléatoire, il faut le refaire. */
+const simonStep = (o) => (api) => {
+  const colors = ['#c7352c', '#2f6fd0', '#2f9a55', '#e6a223'];
+  const seq = Array.from({ length: o.len }, () => Math.floor(Math.random() * 4));
+  let k = 0, showing = true, miss = 0;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="simon" id="mg-sim">${colors.map((c, j) => `<button type="button" class="sim-pad" data-pad="${j}" style="--c:${c}" disabled>${o.icons?.[j] || ''}</button>`).join('')}</div>`;
+  const pads = () => document.querySelectorAll('#mg-sim .sim-pad');
+  const flash = (j) => {
+    const p = document.querySelector(`#mg-sim [data-pad="${j}"]`);
+    if (!p) return;
+    p.classList.add('lit');
+    setTimeout(() => p.classList.remove('lit'), 380);
+  };
+  const play = () => {
+    if (!$('mg-sim')) return;
+    showing = true;
+    api.msg('Regarde bien…');
+    pads().forEach((p) => (p.disabled = true));
+    seq.forEach((j, n) => setTimeout(() => flash(j), 600 + n * 550));
+    setTimeout(() => {
+      if (!$('mg-sim')) return;
+      showing = false;
+      k = 0;
+      api.msg('À toi : refais la même suite.');
+      pads().forEach((p) => (p.disabled = false));
+    }, 600 + seq.length * 550 + 200);
+  };
+  $('mg-sim').onclick = (e) => {
+    const p = e.target.closest('[data-pad]');
+    if (!p || showing) return;
+    const j = +p.dataset.pad;
+    flash(j);
+    if (j === seq[k]) {
+      if (++k >= seq.length) api.next();
+      return;
+    }
+    miss++;
+    replay($('mg-sim'), 'shake');
+    if (o.misses != null && miss > o.misses) return api.fail('Mauvais ordre.');
+    api.msg('Raté : on recommence la suite.');
+    showing = true;
+    setTimeout(play, 700);
+  };
+  play();
+};
+/** Atelier du charpentier : un mini-jeu au hasard (ou celui demandé), difficulté selon le travail et le rang. */
+function workGame(recipe, rank, title, kind = null) {
+  const d = G.workDifficulty(recipe, { job: { lvl: rank } });
+  const lvl = 1 + Math.round(((d.speed - 0.6) / 1.4) * 4); // 1 (facile) à 5 (très dur)
+  const games = {
+    marteau: () => timingStep({ label: '🔨 <b>Marteau</b> : frappe quand le curseur passe dans la zone dorée (clic, Espace ou le bouton).', verb: '🔨 Frapper', icon: '🔩', speed: d.speed, zone: d.zone, hits: d.nails, misses: d.strikes - d.nails, good: 'Bien planté !' }),
+    scie: () => traceStep({ label: '🪚 <b>Sciage</b> : suis le trait de coupe de gauche à droite, sans lâcher.', curve: randomCurve(lvl, true), tolerance: Math.max(5, 13 - lvl * 1.5 + rank * 1.5), tries: 1 + rank, cls: 'wood-cv', ink: '#5a3a1e', bad: 'Coupe de travers : recommence.', good: 'Coupe nette !' }),
+    assemblage: () => simonStep({ label: '🧩 <b>Assemblage</b> : retiens l’ordre des pièces, puis assemble-les dans le même ordre.', len: 2 + lvl, misses: rank - 1, icons: ['🪵', '🔩', '⚙️', '🪢'] }),
+    calfatage: () => whackStep({ label: '💧 <b>Calfatage</b> : bouche les fuites avant que l’eau n’entre !', icon: '💧', total: 5 + lvl, life: Math.max(0.9, 2.2 - lvl * 0.25 + rank * 0.2), every: Math.max(0.45, 0.95 - lvl * 0.08), misses: rank, cls: 'hull-wh' }),
+  };
+  const k = kind && games[kind] ? kind : mgPick(Object.keys(games));
+  return miniGame({ title, steps: [games[k]()] });
+}
+/** Soin d'une blessure légère : un mini-jeu au hasard (ou celui demandé). */
+function bandageGame(label, rank = 1, kind = null) {
+  const games = {
+    serrer: () => timingStep({ label: '🩹 <b>Bandage</b> : serre quand le curseur est dans la zone.', verb: '🩹 Serrer', icon: '🩹', speed: 0.9, zone: 24 + (rank - 1) * 3, hits: 3, misses: 1 + rank }),
+    nettoyer: () => whackStep({ label: '🦠 <b>Désinfecter</b> : nettoie les microbes de la plaie avant qu’ils ne s’incrustent.', icon: '🦠', total: 6, life: 1.8 + rank * 0.2, every: 0.8, misses: rank, cls: 'skin-wh' }),
+    points: () => orderStep({ label: '🧵 <b>Points de suture</b> : clique les points dans l’ordre.', n: 4, misses: rank, reverse: Math.random() < 0.3 }),
+  };
+  const k = kind && games[kind] ? kind : mgPick(Object.keys(games));
+  return miniGame({ title: `Soin léger : ${label}`, steps: [games[k]()] });
+}
+/** Opération : anesthésie, puis 2 étapes au hasard (3 pour une blessure critique), pendant que les constantes baissent. */
+function opGame2(level, title, rank = S?.job?.lvl || 1) {
+  const drain = Math.max(1, 1.5 + level * 1.2 - (rank - G.careRank(level)) * 0.8);
+  const pool = [
+    () => traceStep({ label: '🔪 <b>Incision</b> : pars du point vert et suis le tracé jusqu’au bout, sans lâcher.', curve: randomCurve(level), tolerance: 10, penalty: 1, bad: 'Incision imprécise…', good: 'Incision propre.' }),
+    () => orderStep({ label: '🧵 <b>Suture</b> : clique les points dans l’ordre.', n: 3 + level, penalty: 8, reverse: Math.random() < 0.35 }),
+    () => whackStep({ label: '🩸 <b>Hémorragie</b> : comprime les saignements avant qu’ils ne s’aggravent !', icon: '🩸', total: 3 + level, life: Math.max(1, 2.4 - level * 0.3), every: 0.8, penalty: 6, cls: 'skin-wh' }),
+  ];
+  const steps = [timingStep({ label: '💉 <b>Anesthésie</b> : injecte quand l’aiguille est dans la zone verte.', verb: '💉 Injecter', icon: '💉', speed: 0.8 + level * 0.25, zone: Math.max(8, 20 - level * 3), hits: 1, penalty: 12, cls: 'op-dose', zoneCls: 'op-ok', bad: 'Mauvaise dose : le patient réagit mal !' })];
+  const picked = [...pool].sort(() => Math.random() - 0.5).slice(0, level >= 4 ? 3 : 2);
+  steps.push(...picked.map((f) => f()));
+  return miniGame({ title, help: 'Garde le patient en vie : ses constantes baissent pendant toute l’opération.', drain, steps });
+}
+
 /* ═══ Utiliser et donner des objets ═══════════════════════════════════════ */
 document.addEventListener('click', (e) => {
   const use = e.target.closest('[data-use]')?.dataset.use;
@@ -1287,9 +1655,9 @@ async function careSelf(healthId, recipe) {
   cabinet.patients = null;
 }
 /** Bandage pour une blessure légère, opération au-delà. */
-function careGame(level, label) {
-  if (level <= 1) return nailGame({ speed: 0.9, zone: 24 + (S.job.lvl - 1) * 3, nails: 3, strikes: 5 + S.job.lvl, icon: '🩹', verb: '🩹 Serrer' }, `Bandage : ${label}`);
-  return opGame(level, `Opération : ${label}`);
+function careGame(level, label, rank = S?.job?.lvl || 1, kind = null) {
+  if (level <= 1) return bandageGame(label, rank, kind);
+  return opGame2(level, `Opération : ${label}`, rank);
 }
 /** Opération en trois étapes (anesthésie, incision, suture) pendant que les constantes baissent. */
 function opGame(level, title, rank = S?.job?.lvl || 1) {
@@ -3414,11 +3782,13 @@ function renderGames() {
         <div class="mj-row"><label for="tg-size">Calibre</label><select id="tg-size">${Object.entries(G.CANNONS).map(([k, c]) => `<option value="${k}">${esc(c.name)}</option>`).join('')}</select>
           <label for="tg-wood">Bois</label><select id="tg-wood">${Object.entries(G.WOODS).map(([k, w]) => `<option value="${k}">${esc(w.name)}</option>`).join('')}</select></div>
         <div class="mj-row"><label for="tg-wrank">Rang</label><select id="tg-wrank">${ranks()}</select></div>
+        <div class="mj-row"><label for="tg-wgame">Mini-jeu</label><select id="tg-wgame"><option value="">Au hasard</option><option value="marteau">🔨 Marteau</option><option value="scie">🪚 Sciage</option><option value="assemblage">🧩 Assemblage</option><option value="calfatage">💧 Calfatage</option></select></div>
         <p class="note" id="tg-wdiff" style="margin:0"></p>
         <div><button class="btn" id="tg-work-go">Tester le marteau</button></div>
       </section>
       <section class="crew-box"><h3>🩹 Bandage (blessure légère)</h3>
         <div class="mj-row"><label for="tg-brank">Rang</label><select id="tg-brank">${ranks()}</select></div>
+        <div class="mj-row"><label for="tg-bgame">Mini-jeu</label><select id="tg-bgame"><option value="">Au hasard</option><option value="serrer">🩹 Bandage</option><option value="nettoyer">🦠 Désinfecter</option><option value="points">🧵 Points de suture</option></select></div>
         <div><button class="btn" id="tg-band-go">Tester le bandage</button></div>
       </section>
       <section class="crew-box"><h3>🔪 Opération</h3>
@@ -3455,15 +3825,15 @@ $('v-agames').addEventListener('click', (e) => {
     const { work, rank } = testWork();
     const what = work.type === 'construire' ? `Construire en ${G.WOODS[work.wood].name.toLowerCase()}` : G.workLabel(work);
     const label = `${what} (${JOB_LEVELS[rank - 1]})`;
-    return void testGame(label, () => nailGame(G.workDifficulty({ work }, { job: { lvl: rank } }), `Test : ${what}`));
+    return void testGame(label, () => workGame({ work }, rank, `Test : ${what}`, $('tg-wgame').value || null));
   }
   if (e.target.closest('#tg-band-go')) {
     const rank = +$('tg-brank').value;
-    return void testGame(`Bandage (${JOB_LEVELS[rank - 1]})`, () => nailGame({ speed: 0.9, zone: 24 + (rank - 1) * 3, nails: 3, strikes: 5 + rank, icon: '🩹', verb: '🩹 Serrer' }, 'Test : bandage'));
+    return void testGame(`Bandage (${JOB_LEVELS[rank - 1]})`, () => bandageGame('test', rank, $('tg-bgame').value || null));
   }
   if (e.target.closest('#tg-op-go')) {
     const lvl = +$('tg-glvl').value, rank = +$('tg-orank').value, g = G.HEALTH_LEVELS[lvl - 1].toLowerCase();
-    return void testGame(`Opération ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame(lvl, `Test : opération ${g}`, rank));
+    return void testGame(`Opération ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame2(lvl, `Test : opération ${g}`, rank));
   }
 });
 

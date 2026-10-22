@@ -1394,6 +1394,15 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .hold-peek{margin:6px 0;border:2px dashed rgba(23,37,94,.35);border-radius:8px;padding:4px 10px;background:#fffaea}
 .hold-peek summary{cursor:pointer;font-weight:800;font-size:14px}
 .hold-peek .chest{margin-top:6px}
+/* ═══ v50 : mini-jeux variés ═══ */
+.wh-t{position:absolute;transform:translate(-50%,-50%);font-size:28px;line-height:1;background:none;border:none;cursor:pointer;padding:4px;animation:pop .2s ease-out}
+.hull-wh{background:repeating-linear-gradient(0deg,#9a6a3a 0 26px,#8a5c30 26px 28px)}
+.skin-wh{background:#f6e3d3}
+.wood-cv{background:repeating-linear-gradient(90deg,#d9a86a 0 58px,#cf9c5c 58px 60px)}
+.simon{display:grid;grid-template-columns:repeat(2,minmax(0,120px));gap:10px;justify-content:center;margin:6px 0}
+.sim-pad{height:90px;border:3px solid var(--ink);border-radius:12px;background:var(--c);opacity:.45;font-size:30px;cursor:pointer;transition:opacity .1s,transform .1s}
+.sim-pad.lit{opacity:1;transform:scale(1.06);box-shadow:0 0 14px var(--c)}
+.sim-pad:disabled{cursor:default}
 .sel-search{display:block;width:100%;max-width:260px;font:inherit;font-size:14px;color:var(--brown);background:#fff;border:2px dashed rgba(23,37,94,.45);border-radius:5px;padding:3px 8px;margin:0 0 4px}
 .mj-row .sel-search,.se-item .sel-search,.loot-row .sel-search,.rc-row .sel-search{margin:0}
 .ship-stats .ico{--s:16px;vertical-align:-3px}

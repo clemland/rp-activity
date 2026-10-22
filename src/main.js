@@ -753,7 +753,9 @@ function renderInv() {
     const [k, q] = selItem, it = itemOf(k), eq = slotEquipped(sel);
     det = `<div class="detail" id="inv-detail">
       <div class="slot-ico">${itemIco(k)}</div>
-      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span> <span class="tag" style="color:${G.rarityOf(k).color}">${G.rarityOf(k).name}</span></h3><p>${esc(it.desc)} Quantité : ${q}. Poids : ${G.kg((it.weight || 0) * q)}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
+      <div><h3>${esc(it.name)} <span class="tag">${KIND[it.kind]}</span> <span class="tag" style="color:${G.rarityOf(k).color}">${G.rarityOf(k).name}</span></h3>
+        ${it.heal ? `<p class="note" style="margin:4px 0">🩹 Soigne : ${esc(it.heal.type ? G.injuryName(it.heal.type) : 'toute blessure')}, jusqu’à ${G.HEALTH_LEVELS[it.heal.level - 1].toLowerCase()}</p>` : ''}
+        ${!VIEW && (it.heal || (it.kind !== 'arme' && it.kind !== 'bateau')) ? `<div class="mj-row">${it.heal ? `<button class="btn sm" data-use="${esc(k)}">Utiliser</button>` : ''}${it.kind !== 'arme' && it.kind !== 'bateau' ? `<button class="btn sm ghost" data-give="${esc(k)}">Donner</button>` : ''}</div>` : ''}<p>${esc(it.desc)} Quantité : ${q}. Poids : ${G.kg((it.weight || 0) * q)}. Valeur : ${it.value ? berry(it.value) : 'aucune'}.</p></div>
       <div class="acts">
         ${G.isWeapon(k) ? `<button class="btn sm" data-equip="${sel}">${eq ? 'Retirer' : 'Équiper'}</button>` : ''}
         <button class="btn sm ghost" data-drop="${sel}" ${eq ? 'disabled title="Retire-la d’abord"' : ''}>Jeter un</button>
@@ -1134,6 +1136,29 @@ function readWorkFields(r) {
     count: $('rc-w-count')?.value ?? prev.count, amount: $('rc-w-amount')?.value ?? prev.amount,
   });
   if (t === 'construire' && !r.work.model) r.work.model = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind === 'bateau') || '';
+}
+
+/* ═══ Utiliser et donner des objets ═══════════════════════════════════════ */
+document.addEventListener('click', (e) => {
+  const use = e.target.closest('[data-use]')?.dataset.use;
+  if (use) return void run({ type: 'item.use', key: use });
+  const give = e.target.closest('[data-give]')?.dataset.give;
+  if (give) giveDialog(give);
+});
+async function giveDialog(k) {
+  const out = await run({ type: 'players.here' });
+  if (!out?.players) return;
+  if (!out.players.length) return void toast('Personne d’autre ici : vous devez avoir écrit dans le même salon RP.');
+  $('give-title').textContent = `Donner : ${itemOf(k).name}`;
+  $('give-to').innerHTML = out.players.map((p) => `<option value="${esc(p.uid)}">${esc(p.name)}</option>`).join('');
+  $('give-qty').max = count(k);
+  $('give-qty').value = 1;
+  $('give-ok').onclick = async () => {
+    const to = $('give-to').value, qty = Math.max(1, Math.floor(+$('give-qty').value || 1));
+    closeDialog($('d-give'));
+    await run({ type: 'item.give', key: k, to, qty });
+  };
+  openDialog('d-give');
 }
 
 /* ═══ Cabinet médical : soigner les blessures ════════════════════════════ */
@@ -4276,6 +4301,8 @@ function openItemEdit(id = null) {
   $('it-title').textContent = id ? 'Modifier l’objet' : 'Nouvel objet';
   $('it-name').value = itemDraft.name;
   $('it-kind').innerHTML = Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === itemDraft.kind ? 'selected' : ''}>${l}</option>`).join('');
+  $('it-heal').innerHTML = `<option value="">Non</option>${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}" ${itemDraft.heal?.level === i + 1 ? 'selected' : ''}>Oui, jusqu’à : ${l}</option>`).join('')}`;
+  $('it-heal-type').innerHTML = `<option value="">Toutes les catégories</option>${Object.entries(G.INJURIES).map(([k, c]) => `<option value="${esc(k)}" ${itemDraft.heal?.type === k ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}`;
   $('it-rarity').innerHTML = G.RARITIES.map((r) => `<option value="${r.key}" ${r.key === (itemDraft.rarity || 'commun') ? 'selected' : ''}>${r.name}</option>`).join('');
   $('it-value').value = itemDraft.value;
   $('it-weight').value = itemDraft.weight ?? 0;
@@ -4337,7 +4364,7 @@ $('it-noimg').addEventListener('click', () => {
 });
 $('it-save').addEventListener('click', () => {
   const item = {
-    name: $('it-name').value, kind: $('it-kind').value, rarity: $('it-rarity').value, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
+    name: $('it-name').value, kind: $('it-kind').value, rarity: $('it-rarity').value, heal: $('it-heal').value ? { level: +$('it-heal').value, type: $('it-heal-type').value || null } : null, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
     ship: { speed: +$('it-speed').value || 10, robust: +$('it-robust').value || 10, space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };

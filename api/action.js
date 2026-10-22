@@ -10,6 +10,7 @@ import { userFromRequest, channelName } from './_lib/discord.js';
 import { loadPlayer, loadShop, loadCatalog, loadCrewAndShips, publicCrew, shipList } from './_lib/context.js';
 import { read, readAll, write, retry, listPlayers } from './_lib/db.js';
 import { ingest } from './_lib/media.js';
+import * as GM from '../shared/game.js';
 import { ensureShipChannel, renameShipChannel } from './_lib/shipchan.js';
 import { invitesFor, loadHarbor, loadMap } from './_lib/context.js';
 import { normalize, careBlock, newWid, removeItem, RECIPES, playerAction, crewAction, inviteAction, shipAction, normalizeCrew, normalizeShip, crewCan, slug, fullName, ITEMS } from '../shared/game.js';
@@ -44,6 +45,30 @@ export default handler(['POST'], async (req, body) => {
       cs
         ? { ...out, ...extra, crew: publicCrew(extra.crew ?? cs.crew, cs.memberNames), ships: shipList({ ...cs.ships, ...(extra.ships || {}) }) }
         : { ...out, ...extra };
+
+    // Joueurs au même endroit (dernier salon RP où chacun a écrit), pour leur donner un objet
+    if (action.type === 'players.here') {
+      need(player.position?.channelId, 400, 'Tu n’es nulle part : écris d’abord un message RP.');
+      const all = await readAll('players');
+      const players = Object.entries(all)
+        .filter(([uid, d]) => uid !== me.uid && d.position?.channelId === player.position.channelId)
+        .map(([uid, d]) => ({ uid, name: GM.fullName(d) }));
+      return { players };
+    }
+    if (action.type === 'item.give') {
+      const k = String(action.key || ''), q = Math.max(1, Math.floor(+action.qty || 1));
+      need(GM.ITEMS[k] && GM.ITEMS[k].kind !== 'arme' && GM.ITEMS[k].kind !== 'bateau', 400, 'Cet objet ne peut pas être donné.');
+      need(GM.count(player, k) >= q, 400, 'Tu n’en as pas assez.');
+      const trow = await read('players', String(action.to || ''));
+      need(trow, 404, 'Joueur introuvable.');
+      const target = GM.normalize(trow.data);
+      need(player.position?.channelId && target.position?.channelId === player.position.channelId, 400, `${GM.fullName(target)} n’est pas au même endroit que toi.`);
+      GM.removeItem(player, k, q);
+      need(GM.addItem(target, k, q), 400, `${GM.fullName(target)} ne peut pas le porter : ${GM.carryBlock(target, k, q)}`);
+      await write('players', target.uid, target, trow.version);
+      await write('players', me.uid, player, version);
+      return { player, toast: `Tu donnes ${q} × ${GM.ITEMS[k].name} à ${GM.fullName(target)}.` };
+    }
 
     // Médecin : soins des blessures (le patient doit être au même endroit et accepter)
     if (action.type.startsWith('care.')) {

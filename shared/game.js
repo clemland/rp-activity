@@ -439,6 +439,7 @@ export function normalizeItem(x) {
     ...(kind === 'bateau' && { ship: { ...normalizeShipStats(x.ship || {}), type: name } }), // le nom est le type
     ...(kind === 'amelioration' && { upgrade: { type: UPGRADES[x.upgrade?.type] ? x.upgrade.type : 'cale', amount: int(x.upgrade?.amount ?? 1, 1, 1e6) } }),
     rarity: RARITIES.some((r) => r.key === x.rarity) ? x.rarity : 'commun',
+    heal: normalizeCare(x.heal), // objet de soin (antidote…) : soigne une blessure jusqu'à cette gravité
     desc: str(x.desc, 400),
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
   };
@@ -692,6 +693,19 @@ export function playerAction(player, action, ctx = {}) {
         break;
       }
       Object.assign(out, applyWork(p, ship, w, a.id, ctx, now));
+      break;
+    }
+    case 'item.use': {
+      // Objet de soin (antidote…) : soigne la blessure la plus grave qu'il peut soigner
+      const it = ITEMS[a.key];
+      if (!it?.heal) fail('Cet objet ne soigne rien.');
+      if (count(p, a.key) < 1) fail('Tu n’en as pas.');
+      const ok = p.health.filter((h) => h.level <= it.heal.level && (!it.heal.type || it.heal.type === h.type)).sort((x, y) => y.level - x.level);
+      if (!ok.length) fail(`${it.name} ne soigne aucune de tes blessures.`);
+      const h = ok[0];
+      removeItem(p, a.key, 1);
+      p.health = p.health.filter((x) => x.id !== h.id);
+      out.toast = `${it.name} : « ${h.label} » est soigné !`;
       break;
     }
     case 'tech.save': {

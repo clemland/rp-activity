@@ -248,6 +248,8 @@
         <div class="wide"><label for="it-name" id="it-name-label">Nom</label><input id="it-name" maxlength="60"></div>
         <div><label for="it-kind">Catégorie</label><select id="it-kind"></select></div>
         <div><label for="it-rarity">Rareté</label><select id="it-rarity"></select></div>
+        <div><label for="it-heal">Soigne une blessure (antidote…)</label><select id="it-heal"></select></div>
+        <div><label for="it-heal-type">Catégorie soignée</label><select id="it-heal-type"></select></div>
         <div><label for="it-value">Valeur de référence (berrys)</label><input id="it-value" type="number" min="0" inputmode="numeric"></div>
         <div id="it-weight-box"><label for="it-weight">Poids (kg)</label><input id="it-weight" type="number" min="0" step="0.1" inputmode="decimal"></div>
         <div class="wide it-ship" id="it-upg" hidden>
@@ -320,6 +322,19 @@
     </div>
   </div>
 </dialog>
+<dialog id="d-give" aria-labelledby="give-title" class="confirm">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="give-title">Donner</h2><p>À un joueur au même endroit que toi (le dernier salon RP où vous avez écrit).</p></div>
+    </div>
+    <div class="panel-body">
+      <div class="mj-row"><label for="give-to">À</label><select id="give-to"></select></div>
+      <div class="mj-row"><label for="give-qty">Quantité</label><input id="give-qty" type="number" min="1" value="1"></div>
+      <div class="form-actions"><button type="button" class="btn ghost" data-close>Annuler</button><button type="button" class="btn" id="give-ok">Donner</button></div>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="d-op" aria-labelledby="op-title">
   <div class="panel">
     <div class="panel-head">

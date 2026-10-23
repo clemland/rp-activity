@@ -943,7 +943,7 @@ function toolsHTML(r, store = NAVD?.aboard) {
 }
 function renderJob() {
   if ($('v-job')?.offsetParent) refreshFeatures(); // onglet visible : on vérifie si les métiers sont ouverts
-  if (FEAT.metiers === false && !VIEW) {
+  if (FEAT.metiers === false && !VIEW && !beta()) {
     $('v-job').innerHTML = '<div class="feat-off"><span aria-hidden="true">🛠️</span><h2>Fonctionnalité désactivée pour le moment</h2><p class="note">Les métiers reviendront bientôt.</p></div>';
     return;
   }

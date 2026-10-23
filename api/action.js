@@ -77,7 +77,7 @@ export default handler(['POST'], async (req, body) => {
   }
   // Fonctionnalité désactivée par le staff (écran « Fonctionnalités »)
   const feat = GM.featureFor(action.type);
-  if (feat) {
+  if (feat && !GM.isBeta(me.uid)) { // les testeurs gardent l'accès à tout
     const { map: fm } = await loadMap();
     need(fm.features?.[feat] !== false, 403, GM.FEATURES[feat].off);
   }

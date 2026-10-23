@@ -1463,6 +1463,33 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .sea-table td input[type=number]{width:62px;font:inherit;padding:2px 4px;border:2px solid var(--ink);border-radius:4px;background:#fff;text-align:right}
 .sea-table tfoot th{background:#efe3c4}
 .sea-table .warn{color:var(--red)}
+/* ═══ v53 : cuisine et commerce ═══ */
+.chop{display:flex;justify-content:center;margin:10px 0}
+.chop-btn{font-size:22px;padding:14px 28px}
+.oven{display:flex;gap:18px;align-items:center;justify-content:center;margin:6px 0 10px}
+.oven-th{position:relative;width:46px;height:200px;border:3px solid var(--ink);border-radius:23px;background:linear-gradient(0deg,#7fc2ff,#ffe08a 50%,#ff6b4a)}
+.oven-th #ov-z{position:absolute;left:0;right:0;background:rgba(47,154,85,.55);border-top:2px solid #1d7a3a;border-bottom:2px solid #1d7a3a}
+.oven-th b{position:absolute;left:50%;transform:translate(-50%,50%);background:var(--ink);color:#fff;font-size:12px;padding:1px 6px;border-radius:6px;white-space:nowrap}
+.oven-side{display:grid;gap:8px}
+.bowl{width:200px;height:200px;margin:6px auto;border-radius:50%;border:4px solid var(--ink);background:radial-gradient(circle,#fff3cf 0 55%,#e8d29f 56%);display:grid;place-items:center;font-size:54px;touch-action:none;cursor:grab;user-select:none}
+.fry{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:6px 0}
+.fry-it{display:grid;gap:6px;justify-items:center;background:#fffaea;border:3px solid var(--ink);border-radius:10px;padding:8px 6px;cursor:pointer;font-size:28px}
+.fry-it.ok{background:#d9f2df}
+.fry-it.ko{background:#f6d4cf}
+.fry-bar{position:relative;display:block;width:100%;height:12px;border:2px solid var(--ink);border-radius:6px;background:#fff;overflow:hidden}
+.fry-zone{position:absolute;left:70%;width:20%;top:0;bottom:0;background:rgba(230,162,35,.55)}
+.fry-p{position:absolute;left:0;top:0;bottom:0;width:0;background:#a8690c;opacity:.75}
+.ck-ta{width:100%;font:inherit;font-size:16px;color:var(--brown);background:#fffaea;border:3px solid var(--ink);border-radius:5px;padding:7px 10px}
+.ck-photo{max-height:90px;border:3px solid var(--ink);border-radius:6px}
+.ck-thumb{width:100%;max-height:140px;object-fit:cover;border-radius:8px;border:3px solid var(--ink);margin-bottom:6px}
+.ck-steps{margin:4px 0 8px;padding-left:24px;display:grid;gap:4px}
+.ck-steps li span{display:inline-block;min-width:170px}
+.recipe .status{font-size:13px;margin-left:6px}
+.status.ok{color:#1d7a3a}
+#trade-fab{position:fixed;left:14px;bottom:14px;z-index:40;font:inherit;font-weight:800;background:var(--gold);color:var(--ink);border:3px solid var(--ink);border-radius:999px;padding:8px 14px;box-shadow:0 4px 0 rgba(0,0,0,.3);cursor:pointer}
+#trade-fab b{background:var(--red);color:#fff;border-radius:999px;padding:0 7px;margin-left:4px}
+#trade-fab[hidden]{display:none}
+.trade-offer{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;background:var(--card);border:2px solid var(--ink);border-radius:8px;padding:6px 10px;margin-bottom:6px}
 .sea-table td input:not([type]){width:100%;min-width:160px;font:inherit;padding:3px 6px;border:2px solid var(--ink);border-radius:4px;background:#fff}
 .sea-read .d1,.sea-read .d2{color:#1d7a3a}
 .sea-read .d3{color:#a8690c}

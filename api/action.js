@@ -68,6 +68,8 @@ export default handler(['POST'], async (req, body) => {
     if (typeof ph === 'string') action.photo = await ingest(ph, 'photos', me.uid);
     else if (ph?.url) action.photo = { ...ph, url: await ingest(ph.url, 'photos', me.uid) };
   }
+  // Nouveautés en test (cuisine, commerce) : réservées aux testeurs
+  need(!GM.betaAction(action.type) || GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
   // État des fonctionnalités (l'app masque l'onglet Métier quand les métiers sont désactivés)
   if (action.type === 'features.get') {
     const { map: fm0 } = await loadMap();
@@ -81,6 +83,7 @@ export default handler(['POST'], async (req, body) => {
   }
   if (action.type === 'tech.save' && action.media !== undefined) action.media = await ingest(action.media, 'techniques', me.uid);
   if (action.type === 'invention.save' && Array.isArray(action.images)) action.images = await Promise.all(action.images.slice(0, 5).map((u) => ingest(u, 'inventions', me.uid)));
+  if (action.type === 'cook.save' && action.photo) action.photo = await ingest(action.photo, 'cuisine', me.uid);
   if (action.type === 'ship.edit' && action.photo) action.photo = await ingest(action.photo, 'bateaux', me.uid);
   if (action.type === 'crew.edit' && action.flag) action.flag = await ingest(action.flag, 'pavillons', me.uid);
 
@@ -121,6 +124,46 @@ export default handler(['POST'], async (req, body) => {
       await write('players', target.uid, target, trow.version);
       await write('players', me.uid, player, version);
       return { player, toast: `Tu donnes ${q} × ${GM.ITEMS[k].name} à ${GM.fullName(target)}.` };
+    }
+    // Vente entre joueurs : le vendeur propose (objet, quantité, prix), l'acheteur accepte ou refuse dans l'app
+    const prix = (n) => `${Number(n || 0).toLocaleString('fr-FR')} ฿`;
+    if (action.type === 'trade.offer') {
+      const k = String(action.key || ''), q = Math.max(1, Math.floor(+action.qty || 1)), price = Math.max(0, Math.floor(+action.price || 0));
+      need(GM.ITEMS[k] && GM.ITEMS[k].kind !== 'arme' && GM.ITEMS[k].kind !== 'bateau', 400, 'Cet objet ne peut pas être vendu.');
+      need(GM.count(player, k) >= q, 400, 'Tu n’en as pas assez.');
+      need(String(action.to || '') !== me.uid, 400, 'Tu ne peux pas te vendre un objet.');
+      const trow = await read('players', String(action.to || ''));
+      need(trow, 404, 'Joueur introuvable.');
+      const target = GM.normalize(trow.data);
+      need(player.position?.channelId && target.position?.channelId === player.position.channelId, 400, `${GM.fullName(target)} n’est pas au même endroit que toi.`);
+      target.offers = [...target.offers.filter((o) => !(o.from === me.uid && o.key === k)), { id: newWid(), from: me.uid, fromName: GM.fullName(player), key: k, qty: q, price, at: Date.now() }].slice(-10);
+      await write('players', target.uid, target, trow.version);
+      await announce(player.position.channelId, `🤝 **${GM.fullName(player)}** propose à **${GM.fullName(target)}** : ${q} × ${GM.ITEMS[k].name} pour ${prix(price)}. *(à accepter dans l’app, bouton 🤝 Commerce)*`);
+      return { player, toast: `Offre envoyée à ${GM.fullName(target)} : ${q} × ${GM.ITEMS[k].name} pour ${prix(price)}.` };
+    }
+    if (action.type === 'trade.answer') {
+      const o = player.offers.find((x) => x.id === String(action.id));
+      need(o, 404, 'Cette offre n’existe plus.');
+      player.offers = player.offers.filter((x) => x !== o);
+      if (!action.accept) {
+        await write('players', me.uid, player, version);
+        return { player, toast: `Offre de ${o.fromName} refusée.` };
+      }
+      const srow = await read('players', o.from);
+      need(srow, 404, 'Le vendeur n’existe plus.');
+      const seller = GM.normalize(srow.data);
+      need(GM.count(seller, o.key) >= o.qty, 400, `${o.fromName} n’a plus cet objet.`);
+      need(seller.position?.channelId && seller.position.channelId === player.position?.channelId, 400, `${o.fromName} n’est plus au même endroit que toi.`);
+      need((player.berry || 0) >= o.price, 400, 'Tu n’as pas assez de berrys.');
+      GM.removeItem(seller, o.key, o.qty);
+      need(GM.addItem(player, o.key, o.qty), 400, `Tu ne peux pas le porter : ${GM.carryBlock(player, o.key, o.qty)}`);
+      player.berry -= o.price;
+      seller.berry = (seller.berry || 0) + o.price;
+      await write('players', o.from, seller, srow.version);
+      await write('players', me.uid, player, version);
+      const nom = GM.ITEMS[o.key]?.name || 'objet';
+      await announce(player.position?.channelId, `🤝 **${GM.fullName(player)}** achète ${o.qty} × ${nom} à **${o.fromName}** pour ${prix(o.price)}.`);
+      return { player, toast: `Achat conclu : ${o.qty} × ${nom} pour ${prix(o.price)}.` };
     }
 
     // Médecin : soins des blessures (le patient doit être au même endroit et accepter)
@@ -402,7 +445,7 @@ export default handler(['POST'], async (req, body) => {
     }
     await dockNewShips([...(out.newShips || []), ...(out.newShip ? [out.newShip] : [])], player); // jamais amarré dans le salon d'un bateau
     // Annonces dans le salon RP du joueur : dons, objets utilisés, fabrications terminées ou ratées
-    const ANN = { 'item.give': '🎁', 'item.use': '💊', 'craft.collect': '🛠️', 'craft.start': '🛠️' };
+    const ANN = { 'item.give': '🎁', 'item.use': '💊', 'craft.collect': '🛠️', 'craft.start': '🛠️', 'cook.make': '🍳' };
     if (ANN[action.type] && out.toast && (action.type !== 'craft.start' || out.failed)) await announce(player.position?.channelId, `${ANN[action.type]} **${fullName(player)}** · ${out.toast}`);
     // Bateaux fabriqués : ils apparaissent dans « Mes bateaux », à quai dans ce salon.
     for (const ship of out.newShips || []) {

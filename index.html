@@ -36,6 +36,7 @@
     <button class="scr" role="tab" data-screen="fleet" aria-controls="s-fleet" id="scr-fleet" hidden><span class="ico" data-i="1"></span><span>Équipages</span></button>
     <button class="scr" role="tab" data-screen="ships" aria-controls="s-ships" id="scr-ships" hidden><span class="ico" data-i="231"></span><span>Bateaux</span></button>
     <button class="scr" role="tab" data-screen="gest" aria-controls="s-gest" id="scr-gest" hidden><span class="ico" data-i="270"></span><span>Gestion</span></button>
+        <button class="scr" role="tab" data-screen="acook" aria-controls="s-acook" id="scr-acook" hidden><span class="ico" data-i="192"></span><span>Cuisine</span></button>
         <button class="scr" role="tab" data-screen="asea" aria-controls="s-asea" id="scr-asea" hidden><span class="ico" data-i="279"></span><span>Événements en mer</span></button>
         <button class="scr" role="tab" data-screen="acalc" aria-controls="s-acalc" id="scr-acalc" hidden><span class="ico" data-i="279"></span><span>Calcul de trajet</span></button>
         <button class="scr" role="tab" data-screen="afeat" aria-controls="s-afeat" id="scr-afeat" hidden><span class="ico" data-i="279"></span><span>Fonctionnalités</span></button>
@@ -146,6 +147,10 @@
 
 <main class="screen" id="s-gest" role="tabpanel" hidden>
   <section class="sheet" id="v-gest"></section>
+</main>
+
+<main class="screen" id="s-acook" role="tabpanel" hidden>
+  <section class="sheet" id="v-acook"></section>
 </main>
 
 <main class="screen" id="s-asea" role="tabpanel" hidden>
@@ -496,6 +501,31 @@
         <button type="button" class="btn" id="isl-save">Enregistrer</button>
       </div>
     </div>
+  </div>
+</dialog>
+
+<dialog id="d-cook" aria-labelledby="ck-title">
+  <div class="panel">
+    <img class="panel-crest" src="/assets/banner-wave.webp" alt="">
+    <div class="panel-head">
+      <div><h2 id="ck-title">Nouvelle recette</h2><p>Ingrédients, étapes et plat final : le staff la validera.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body">
+      <div id="ck-body"></div>
+      <p class="err" id="ck-err" role="alert"></p>
+      <div class="form-actions"><button type="button" class="btn ghost" data-close>Annuler</button><button type="button" class="btn" id="ck-save">Proposer la recette</button></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="d-trade" aria-labelledby="tr-title">
+  <div class="panel">
+    <div class="panel-head">
+      <div><h2 id="tr-title">🤝 Commerce</h2><p>Vends un objet à un joueur au même endroit, ou réponds aux offres reçues.</p></div>
+      <button class="close" data-close aria-label="Fermer">×</button>
+    </div>
+    <div class="panel-body" id="tr-body"></div>
   </div>
 </dialog>
 

@@ -93,6 +93,7 @@ export const STAFF_PERMS = {
   fiches: 'Créer et supprimer des fiches (/register, /delete profil)',
   techniques: 'Valider ou refuser les techniques',
   inventions: 'Valider ou refuser les inventions (scientifiques)',
+  cuisine: 'Valider ou refuser les recettes de cuisine',
   boutiques: 'Boutiques',
   gestion: 'Objets et recettes (Gestion)',
   equipages: 'Équipages et bateaux',
@@ -151,10 +152,17 @@ export const JOBS = {
   charpentier: { name: 'Charpentier', pic: 'hammer' },
   scientifique: { name: 'Scientifique', pic: 'potion' },
   medecin: { name: 'Médecin', pic: 'stetho' },
+  cuisinier: { name: 'Cuisinier', pic: 'potion' }, // sans niveau : il crée ses recettes, validées par le staff
 };
 
+/** Testeurs des nouveautés pas encore ouvertes à tous (cuisine, commerce). */
+export const BETA_USERS = ['464061688069488640'];
+export const isBeta = (uid) => BETA_USERS.includes(String(uid));
+export const betaAction = (type) => typeof type === 'string' && (type.startsWith('cook.') || type.startsWith('trade.'));
+/** Étapes de cuisine (mini-jeux) que le cuisinier enchaîne dans l'ordre de sa recette. */
+export const COOK_STEPS = { couper: '🔪 Couper', four: '🔥 Cuire au four', melanger: '🥄 Mélanger', assaisonner: '🧂 Assaisonner', eplucher: '🥔 Éplucher', frire: '🍳 Frire', dresser: '🍽️ Dresser' };
 /** Catégories d'objets. Seules les armes s'équipent. */
-export const KIND = { arme: 'Arme', conso: 'Consommable', mat: 'Matériau', tresor: 'Trésor', objet: 'Objet', bateau: 'Bateau', amelioration: 'Amélioration de bateau' };
+export const KIND = { arme: 'Arme', conso: 'Consommable', mat: 'Matériau', tresor: 'Trésor', objet: 'Objet', bateau: 'Bateau', amelioration: 'Amélioration de bateau', ingredient: 'Ingrédient', plat: 'Plat' };
 /** Améliorations de bateau : ce qu'elles ajoutent quand on les installe. */
 export const UPGRADES = { cale: { name: 'Cale', unit: 'kg' }, canons: { name: 'Canons', unit: 'canons' }, voile: { name: 'Voile', unit: 'niveaux de vitesse' } };
 export const CHEST_BASE = 100; // capacité (kg) du coffre d'un équipage sans bateau
@@ -257,6 +265,23 @@ export function normalize(p) {
   const freshReq = (l) => (Array.isArray(l) ? l : []).filter((x) => x?.id && Date.now() - (x.at || 0) < 3_600_000).slice(-10);
   p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
   p.careOut = freshReq(p.careOut); // demandes de soin envoyées
+  // Recettes de cuisine du joueur : validées par le staff (le plat devient alors un objet du catalogue)
+  p.cook = (Array.isArray(p.cook) ? p.cook : []).filter((x) => x && str(x.name, 60)).slice(0, 40).map((x) => ({
+    id: Number(x.id) || Date.now(),
+    name: str(x.name, 60),
+    desc: str(x.desc, 1000),
+    photo: x.photo ? str(x.photo, 3_000_000) : null,
+    needs: Object.fromEntries(Object.entries(x.needs || {}).slice(0, 12).map(([k, q]) => [String(k), int(q, 1, 99)])),
+    steps: (Array.isArray(x.steps) ? x.steps : []).filter((k) => COOK_STEPS[k]).slice(0, 15),
+    ok: !!x.ok,
+    item: x.item ? String(x.item) : null,
+    refused: x.refused?.reason ? { reason: str(x.refused.reason, 300), at: Number(x.refused.at) || 0 } : null,
+    at: Number(x.at) || 0,
+  }));
+  // Offres de vente reçues d'autres joueurs (expirent au bout de 3 jours)
+  p.offers = (Array.isArray(p.offers) ? p.offers : []).filter((o) => o && o.from && o.key && Date.now() - (Number(o.at) || 0) < 3 * 86_400_000).slice(-10).map((o) => ({
+    id: String(o.id), from: String(o.from), fromName: str(o.fromName, 80), key: String(o.key), qty: int(o.qty ?? 1, 1, 9999), price: int(o.price ?? 0, 0, 1e12), at: Number(o.at) || 0,
+  }));
   // Inventions des scientifiques : proposées par le joueur, validées ou refusées (avec motif) par le staff
   p.inventions = (Array.isArray(p.inventions) ? p.inventions : []).filter((x) => x && str(x.name, 60)).slice(0, 30).map((x) => ({
     id: Number(x.id) || Date.now(),
@@ -756,6 +781,57 @@ export function playerAction(player, action, ctx = {}) {
       removeItem(p, a.key, 1);
       p.health = p.health.filter((x) => x.id !== h.id);
       out.toast = `${it.name} : « ${h.label} » est soigné !`;
+      break;
+    }
+    case 'cook.save': {
+      if (p.job?.id !== 'cuisinier') fail('Seuls les cuisiniers créent des recettes.');
+      const name = str(a.name, 60);
+      if (!name) fail('Donne un nom au plat.');
+      const desc = str(a.desc, 1000);
+      if (desc.length < 10) fail('Décris le plat (10 caractères minimum).');
+      const needs = Object.fromEntries(Object.entries(a.needs || {}).map(([k, q]) => [k, int(q, 1, 99)]).filter(([k]) => ITEMS[k]?.kind === 'ingredient'));
+      if (!Object.keys(needs).length) fail('Choisis au moins un ingrédient.');
+      const steps = (Array.isArray(a.steps) ? a.steps : []).filter((k) => COOK_STEPS[k]).slice(0, 15);
+      if (!steps.length) fail('Ajoute au moins une étape.');
+      const photo = typeof a.photo === 'string' && a.photo ? a.photo : null;
+      const data = { name, desc, photo, needs, steps, ok: false, refused: null, at: now }; // modifiée : de nouveau à valider
+      if (a.id != null) {
+        const r = p.cook.find((x) => x.id === a.id);
+        if (!r) fail('Recette introuvable.');
+        Object.assign(r, data);
+        out.toast = 'Recette modifiée, en attente de validation';
+      } else {
+        if (p.cook.length >= 40) fail('Trop de recettes.');
+        p.cook.push({ id: now + Math.floor(rng() * 1000), item: null, ...data });
+        out.toast = 'Recette proposée au staff';
+      }
+      break;
+    }
+    case 'cook.delete': {
+      const r = p.cook.find((x) => x.id === a.id);
+      if (!r) fail('Recette introuvable.');
+      p.cook = p.cook.filter((x) => x !== r);
+      out.toast = `Recette supprimée : ${r.name}`;
+      break;
+    }
+    case 'cook.make': {
+      // Cuisiner une de SES recettes validées : ingrédients pris, plat obtenu si toutes les étapes sont réussies
+      if (p.job?.id !== 'cuisinier') fail('Seuls les cuisiniers cuisinent.');
+      const r = p.cook.find((x) => x.id === a.id);
+      if (!r) fail('Recette introuvable.');
+      if (!r.ok || !r.item || !ITEMS[r.item]) fail('Cette recette n’est pas encore validée par le staff.');
+      for (const [k, q] of Object.entries(r.needs)) if (count(p, k) < q) fail(`Il te manque : ${itemOf(k).name}.`);
+      for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
+      if (!a.success) {
+        out.failed = true;
+        out.toast = `Raté : ${r.name}. Les ingrédients sont perdus.`;
+        break;
+      }
+      if (!addItem(p, r.item, 1)) {
+        out.toast = `${r.name} est réussi, mais tu ne peux pas le porter : ${carryBlock(p, r.item, 1)} Le plat est perdu.`;
+        break;
+      }
+      out.toast = `${r.name} est prêt ! Le plat est dans ton inventaire.`;
       break;
     }
     case 'invention.save': {
@@ -1287,13 +1363,13 @@ export const FEATURES = {
   voyage: { name: 'Voyages en mer', icon: '⛵', desc: 'Proposer un départ et voter. Les voyages déjà en cours continuent.', off: 'Les voyages en mer sont désactivés pour le moment.' },
   boutique: { name: 'Boutiques', icon: '🛒', desc: 'Acheter et vendre dans les boutiques.', off: 'Les boutiques sont fermées pour le moment.' },
   metiers: { name: 'Métiers', icon: '🛠️', desc: 'Lancer une fabrication, un travail, un soin ou une invention. Récupérer ou annuler ce qui est en cours reste possible.', off: 'Les métiers sont désactivés pour le moment.' },
-  dons: { name: 'Dons d’objets', icon: '🎁', desc: 'Donner un objet à un autre joueur.', off: 'Les dons d’objets sont désactivés pour le moment.' },
+  dons: { name: 'Dons et ventes', icon: '🎁', desc: 'Donner ou vendre un objet à un autre joueur.', off: 'Les dons et les ventes d’objets sont désactivés pour le moment.' },
 };
 const FEATURE_TYPES = {
   voyage: ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.vote', 'ship.voyage.read'],
   boutique: ['shop.buy', 'shop.sell'],
-  metiers: ['craft.start', 'ship.work', 'invention.save', 'job.choose'],
-  dons: ['item.give'],
+  metiers: ['craft.start', 'ship.work', 'invention.save', 'job.choose', 'cook.save', 'cook.make'],
+  dons: ['item.give', 'trade.offer', 'trade.answer'],
 };
 /** La fonctionnalité dont dépend une action du joueur (ou null). */
 export function featureFor(type) {

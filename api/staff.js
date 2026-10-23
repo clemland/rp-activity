@@ -47,6 +47,7 @@ export default handler(['POST'], async (req, body) => {
     : op === 'bulk' ? ['joueurs']
     : op === 'techniques' ? ['techniques']
     : op === 'inventions' ? ['inventions']
+    : op === 'cooks' || op === 'cook.validate' ? ['cuisine']
     : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
     : op.startsWith('crew.') ? ['equipages', 'marine']
     : op.startsWith('ship.') ? ['equipages']
@@ -602,6 +603,40 @@ export default handler(['POST'], async (req, body) => {
       need(body.channelId, 400, 'Salon manquant.');
       await remove('shops', body.channelId);
       return { shop: null, toast: 'Boutique fermée' };
+
+    case 'cooks': {
+      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+      // Toutes les recettes de cuisine des joueurs
+      const list = [];
+      for (const [uid, p] of Object.entries(await readAll('players'))) for (const r of p.cook || []) list.push({ uid, player: fullName(p), recipe: r });
+      list.sort((a, b) => (b.recipe.at || 0) - (a.recipe.at || 0));
+      return { list };
+    }
+    case 'cook.validate': {
+      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+      // Recette de cuisine validée (son plat devient un objet du catalogue) ou refusée avec un motif
+      need(body.target && body.id != null, 400, 'Recette manquante.');
+      return retry(async () => {
+        const row = await read('players', String(body.target));
+        need(row, 404, 'Joueur introuvable.');
+        const p = row.data;
+        const r = (p.cook || []).find((x) => Number(x.id) === Number(body.id));
+        need(r, 404, 'Recette introuvable.');
+        if (body.ok) {
+          const old = r.item && catalog.items[r.item] ? catalog.items[r.item] : { value: 0, weight: 0.5 };
+          const item = normalizeItem({ ...old, name: r.name, kind: 'plat', desc: String(r.desc || '').slice(0, 400), img: r.photo || old.img || null });
+          const id = r.item && catalog.items[r.item] ? r.item : freeId(r.name, catalog.items);
+          const irow = await read('items', id);
+          await write('items', id, item, irow?.version ?? null);
+          catalog.items[id] = item;
+          Object.assign(r, { item: id, ok: true, refused: null });
+        } else {
+          Object.assign(r, { ok: false, refused: { reason: String(body.reason || 'Sans motif précisé.').slice(0, 300), at: Date.now() } });
+        }
+        await write('players', String(body.target), p, row.version);
+        return { catalog, toast: body.ok ? `Recette validée : ${r.name} (le plat est ajouté au catalogue)` : `Recette refusée : ${r.name}` };
+      });
+    }
 
     case 'item.save': {
       const item = normalizeItem(body.item || {});

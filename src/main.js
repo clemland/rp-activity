@@ -26,7 +26,7 @@ import ICON_FILES from 'virtual:icon-list';
 const { JOBS, STATS, HAKI, SLOTS, KIND, JOB_LEVELS, XP_NEED, STAT_MAX, ASK_MAX, BAG } = G;
 const itemOf = (k) => G.itemOf(k);
 /** Icône d'un objet : son image si le staff en a mis une, sinon une icône selon sa catégorie. */
-const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231, amelioration: 266 };
+const KIND_ICON = { arme: 147, conso: 192, mat: 331, tresor: 270, objet: 237, bateau: 231, amelioration: 266, ingredient: 331, plat: 192 };
 const itemIco = (k) => {
   const it = itemOf(k);
   return it.img ? `<span class="ico item-img" aria-hidden="true"><img src="${imgSrc(it.img)}" alt="" loading="lazy" draggable="false"></span>` : icon(`objet-${it.kind}`);
@@ -997,7 +997,7 @@ function renderJob() {
           <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
         </div>
       </article>`;
-    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}${inventionsHTML()}`;
+    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}${inventionsHTML()}${cookHTML()}`;
 }
 $('v-job').addEventListener('click', async (e) => {
   const cf = e.target.closest('[data-cf]')?.dataset.cf;
@@ -1746,6 +1746,385 @@ function readGameFields(r) {
   const diff = +$('rc-gdiff').value || 0;
   r.game = list.length || diff ? { list, diff } : null;
 }
+
+/** Nouveautés en test (cuisine, commerce) : visibles seulement par les testeurs. */
+function beta() {
+  return G.isBeta(ME?.uid);
+}
+/* ═══ Cuisine : mini-jeux ════════════════════════════════════════════════ */
+/** Couper : cliquer le plus vite possible. */
+const chopStep = () => (api) => {
+  const goal = 20, dur = 6;
+  let n = 0, t = 0, over = false;
+  api.area.innerHTML = `<p class="op-step">🔪 <b>Couper</b> : clique le plus vite possible ! ${goal} coupes en ${dur} secondes.</p>
+    <div class="chop"><button type="button" class="btn chop-btn" id="mg-hit">🔪 Couper !</button></div>
+    <div class="gauge"><i id="ck-p" style="width:0%"></i></div><div class="gauge-cap"><span id="ck-n">0 / ${goal}</span><span id="ck-t">${dur} s</span></div>`;
+  $('mg-hit').onclick = () => {
+    if (over) return;
+    n++;
+    $('ck-p').style.width = `${Math.min(100, (n / goal) * 100)}%`;
+    $('ck-n').textContent = `${n} / ${goal}`;
+    if (n >= goal) {
+      over = true;
+      api.msg('Bien coupé !');
+      setTimeout(() => api.next(), 500);
+    }
+  };
+  api.onTick((dt) => {
+    if (over) return;
+    t += dt;
+    $('ck-t').textContent = `${Math.max(0, Math.ceil(dur - t))} s`;
+    if (t >= dur) {
+      over = true;
+      api.fail('Trop lent : les ingrédients sont mal coupés.');
+    }
+  });
+};
+/** Cuire au four : garder la température dans la zone verte ; trop chaud, ça brûle. */
+const ovenStep = () => (api) => {
+  const lo = mgRnd(170, 210), hi = lo + 35, dur = 25, ph = mgRnd(0, 6.28);
+  let temp = 120, prog = 0, burn = 0, t = 0, hold = 0, over = false;
+  const pct = (v) => Math.max(0, Math.min(100, (v - 50) / 2.5));
+  api.area.innerHTML = `<p class="op-step">🔥 <b>Cuire au four</b> : garde la température dans la zone verte (${Math.round(lo)} à ${Math.round(hi)} °C) avec ＋ et − (ou les flèches ↑ ↓). La cuisson n’avance que dans le vert ; trop chaud, ça brûle.</p>
+    <div class="oven"><div class="oven-th"><i id="ov-z" style="bottom:${pct(lo)}%;height:${pct(hi) - pct(lo)}%"></i><b id="ov-t"></b></div>
+      <div class="oven-side"><button type="button" class="btn sm" id="ov-up">＋ Chauffer</button><button type="button" class="btn sm ghost" id="ov-dn">− Baisser</button></div></div>
+    <div class="gauge"><i id="ov-p" style="width:0%"></i></div><div class="gauge-cap"><span>Cuisson</span><span id="ov-pn">0 %</span></div>
+    <div class="gauge"><i id="ov-b" style="width:0%;background:var(--red)"></i></div><div class="gauge-cap"><span>Brûlé</span><span id="ov-bn">0 %</span></div>`;
+  for (const [id, v] of [['ov-up', 1], ['ov-dn', -1]]) {
+    const b = $(id);
+    b.onpointerdown = () => (hold = v);
+    b.onpointerup = b.onpointerleave = b.onpointercancel = () => (hold = 0);
+  }
+  const key = (e) => {
+    if (e.key === 'ArrowUp') hold = e.type === 'keydown' ? 1 : 0;
+    if (e.key === 'ArrowDown') hold = e.type === 'keydown' ? -1 : 0;
+  };
+  document.addEventListener('keydown', key);
+  document.addEventListener('keyup', key);
+  const end = (fn) => {
+    over = true;
+    document.removeEventListener('keydown', key);
+    document.removeEventListener('keyup', key);
+    fn();
+  };
+  api.onTick((dt) => {
+    if (over) return;
+    t += dt;
+    temp = Math.max(50, Math.min(300, temp + (hold * 70 + 22 * Math.sin(t * 0.8 + ph) - 10) * dt));
+    if (temp >= lo && temp <= hi) prog += (100 / 10) * dt; // 10 s dans le vert pour cuire
+    if (temp > hi) burn += (temp - hi) * 0.9 * dt;
+    $('ov-t').style.bottom = `${pct(temp)}%`;
+    $('ov-t').textContent = `${Math.round(temp)} °C`;
+    $('ov-p').style.width = `${Math.min(100, prog)}%`;
+    $('ov-pn').textContent = `${Math.min(100, Math.round(prog))} %`;
+    $('ov-b').style.width = `${Math.min(100, burn)}%`;
+    $('ov-bn').textContent = `${Math.min(100, Math.round(burn))} %`;
+    if (burn >= 100) return end(() => api.fail('Brûlé !'));
+    if (prog >= 100) return end(() => { api.msg('Cuisson parfaite !'); setTimeout(() => api.next(), 600); });
+    if (t >= dur) end(() => api.fail('Pas assez cuit.'));
+  });
+};
+/** Mélanger : faire des tours dans le bol, sans aller trop vite. */
+const stirStep = () => (api) => {
+  const turns = 5, dur = 15;
+  let total = 0, last = null, lastT = 0, t = 0, over = false;
+  api.area.innerHTML = `<p class="op-step">🥄 <b>Mélanger</b> : fais des cercles dans le bol (glisse avec la souris ou le doigt), ${turns} tours, sans aller trop vite.</p>
+    <div class="bowl" id="ck-bowl"><span aria-hidden="true">🥣</span></div>
+    <div class="gauge"><i id="st-p" style="width:0%"></i></div><div class="gauge-cap"><span id="st-n">0 / ${turns} tours</span><span id="st-t">${dur} s</span></div>`;
+  const bowl = $('ck-bowl');
+  const ang = (e) => {
+    const r = bowl.getBoundingClientRect();
+    return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
+  };
+  bowl.onpointerdown = (e) => {
+    last = ang(e);
+    lastT = performance.now();
+    bowl.setPointerCapture(e.pointerId);
+  };
+  bowl.onpointermove = (e) => {
+    if (last == null || over) return;
+    const a = ang(e), now = performance.now();
+    let d = a - last;
+    if (d > Math.PI) d -= 2 * Math.PI;
+    if (d < -Math.PI) d += 2 * Math.PI;
+    const speed = Math.abs(d) / (2 * Math.PI) / Math.max(0.001, (now - lastT) / 1000); // tours par seconde
+    last = a;
+    lastT = now;
+    if (speed > 2.2) return void api.msg('Doucement, ça éclabousse !');
+    total += Math.abs(d);
+    const done = total / (2 * Math.PI);
+    $('st-p').style.width = `${Math.min(100, (done / turns) * 100)}%`;
+    $('st-n').textContent = `${Math.min(turns, Math.floor(done))} / ${turns} tours`;
+    if (done >= turns) {
+      over = true;
+      api.msg('Bien mélangé !');
+      setTimeout(() => api.next(), 500);
+    }
+  };
+  bowl.onpointerup = bowl.onpointercancel = () => (last = null);
+  api.onTick((dt) => {
+    if (over) return;
+    t += dt;
+    $('st-t').textContent = `${Math.max(0, Math.ceil(dur - t))} s`;
+    if (t >= dur) {
+      over = true;
+      api.fail('Pas assez mélangé.');
+    }
+  });
+};
+/** Frire : retirer chaque aliment quand il est doré (zone jaune), ni avant, ni après. */
+const fryStep = () => (api) => {
+  const foods = Array.from({ length: 4 }, () => ({ p: -mgRnd(0, 45), v: mgRnd(14, 24), out: false }));
+  let miss = 0, done = 0, over = false;
+  api.area.innerHTML = `<p class="op-step">🍳 <b>Frire</b> : retire chaque aliment quand sa barre est dans la zone dorée, ni avant, ni après ! Une erreur permise.</p>
+    <div class="fry">${foods.map((f, i) => `<button type="button" class="fry-it" data-fry="${i}"><span aria-hidden="true">🍤</span><span class="fry-bar"><i class="fry-zone"></i><i class="fry-p" id="fry-${i}"></i></span></button>`).join('')}</div>`;
+  const take = (i, good, text) => {
+    const f = foods[i];
+    if (f.out || over) return;
+    f.out = true;
+    done++;
+    document.querySelector(`[data-fry="${i}"]`)?.classList.add(good ? 'ok' : 'ko');
+    if (!good) {
+      miss++;
+      api.msg(text);
+    }
+    if (miss > 1) {
+      over = true;
+      return api.fail('Trop de fritures ratées.');
+    }
+    if (done >= foods.length) {
+      over = true;
+      api.msg('Friture réussie !');
+      setTimeout(() => api.next(), 500);
+    }
+  };
+  api.area.querySelector('.fry').onclick = (e) => {
+    const b = e.target.closest('[data-fry]');
+    if (!b) return;
+    const i = +b.dataset.fry, p = foods[i].p;
+    take(i, p >= 70 && p <= 90, p < 70 ? 'Pas encore cuit !' : 'Trop cuit !');
+  };
+  api.onTick((dt) => {
+    if (over) return;
+    foods.forEach((f, i) => {
+      if (f.out) return;
+      f.p += f.v * dt;
+      const el = $(`fry-${i}`);
+      if (el) el.style.width = `${Math.max(0, Math.min(100, f.p))}%`;
+      if (f.p > 100) take(i, false, 'Brûlé !');
+    });
+  });
+};
+/** Contour d'un légume à éplucher (différent à chaque fois). */
+function peelPath() {
+  const cx = 230, cy = 130, rx = mgRnd(120, 170), ry = mgRnd(70, 100), a0 = mgRnd(0, 6.28), amp = mgRnd(0.05, 0.12), bumps = Math.floor(mgRnd(3, 6)), ph = mgRnd(0, 6.28);
+  const pts = [];
+  for (let i = 0; i <= 160; i++) {
+    const a = a0 + (i / 160) * Math.PI * 1.85, k = 1 + amp * Math.sin(a * bumps + ph);
+    pts.push({ x: cx + Math.cos(a) * rx * k, y: cy + Math.sin(a) * ry * k });
+  }
+  return pts;
+}
+const COOK_GAMES = {
+  couper: () => chopStep(),
+  four: () => ovenStep(),
+  melanger: () => stirStep(),
+  assaisonner: () => timingStep({ label: '🧂 <b>Assaisonner</b> : verse quand le curseur est dans la zone.', verb: '🧂 Verser', icon: '🧂', speed: 1.1, zone: 14, hits: 2, misses: 1, good: 'Juste ce qu’il faut !' }),
+  eplucher: () => traceStep({ label: '🥔 <b>Éplucher</b> : suis le contour du légume, du point vert au point rouge, sans lâcher.', path: peelPath(), tolerance: 11, tries: 2, bad: 'Trop épais : recommence.', good: 'Bien épluché !' }),
+  frire: () => fryStep(),
+  dresser: () => simonStep({ label: '🍽️ <b>Dresser</b> : retiens l’ordre des éléments, puis pose-les dans le même ordre.', len: 4, misses: 1, icons: ['🥩', '🥕', '🍚', '🌿'] }),
+};
+/** Toutes les étapes d'une recette de cuisine, dans l'ordre. */
+const cookGame = (r) => miniGame({ title: `Cuisine : ${r.name}`, steps: r.steps.filter((k) => COOK_GAMES[k]).map((k) => COOK_GAMES[k]()), doneText: 'Le plat est prêt !' });
+
+/* ═══ Cuisine : recettes du cuisinier (onglet Métier) ═══════════════════ */
+function cookHTML() {
+  if (S.job.id !== 'cuisinier' || !beta()) return '';
+  const list = S.cook || [];
+  const status = (r) => (r.ok ? '<span class="status ok">Validée</span>' : r.refused ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>');
+  return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🍳 Mes recettes</h2>${VIEW ? '' : '<button class="btn sm" id="ck-new">+ Nouvelle recette</button>'}</div>
+    <p class="note">Crée tes recettes : ingrédients, étapes dans l’ordre et plat final. Une fois validée par le staff, tu peux la cuisiner.</p>
+    ${list.length ? `<div class="recipes">${list.map((r) => `<article class="recipe">
+      ${r.photo ? `<img class="ck-thumb" src="${imgSrc(r.photo)}" alt="">` : ''}
+      <h3 class="rc-title">${esc(r.name)} ${status(r)}</h3>
+      ${!r.ok && r.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(r.refused.reason)}</p>` : ''}
+      <b>Il faut</b><div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('')}</div>
+      <p class="note" style="margin:4px 0">${r.steps.map((k) => G.COOK_STEPS[k]).join(' → ')}</p>
+      ${VIEW ? '' : `<div class="t-actions">${r.ok ? `<button class="btn sm" data-ck-make="${r.id}" ${Object.entries(r.needs).every(([k, q]) => G.count(S, k) >= q) ? '' : 'disabled'}>🍳 Cuisiner</button>` : ''}<button class="btn sm ghost" data-ck-edit="${r.id}">${!r.ok && r.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-ck-delr="${r.id}">Supprimer</button></div>`}
+    </article>`).join('')}</div>` : '<p class="note">Aucune recette pour l’instant.</p>'}`;
+}
+let cookDraft = null;
+const COOK_STEP_KEYS = Object.keys(G.COOK_STEPS);
+function openCook(x = null) {
+  cookDraft = { id: x?.id ?? null, name: x?.name ?? '', desc: x?.desc ?? '', photo: x?.photo ?? null, needs: { ...(x?.needs || {}) }, steps: [...(x?.steps || [])], add: COOK_STEP_KEYS[0] };
+  $('ck-title').textContent = x ? 'Modifier la recette' : 'Nouvelle recette';
+  $('ck-err').textContent = x && !x.ok && x.refused ? `Motif du refus : ${x.refused.reason}` : '';
+  renderCookEdit();
+  openDialog('d-cook');
+}
+function renderCookEdit() {
+  const d = cookDraft;
+  const ingr = Object.entries(G.ITEMS).filter(([, it]) => it.kind === 'ingredient').sort((a, b) => a[1].name.localeCompare(b[1].name));
+  $('ck-body').innerHTML = `
+    <div class="form">
+      <div class="wide"><label for="ck-name">Nom du plat</label><input id="ck-name" maxlength="60" value="${esc(d.name)}"></div>
+      <div class="wide"><label for="ck-desc">Description du plat</label><textarea id="ck-desc" rows="4" maxlength="1000" class="ck-ta">${esc(d.desc)}</textarea></div>
+      <div class="wide"><label>Photo du plat</label><div class="se-row">${d.photo ? `<img class="ck-photo" src="${imgSrc(d.photo)}" alt="">` : '<span class="note">Aucune photo.</span>'}<button type="button" class="btn sm" id="ck-pick">${d.photo ? 'Changer' : 'Choisir une image'}</button><input type="file" id="ck-file" accept="image/*" hidden></div></div>
+    </div>
+    <h3 class="ed-h">Ingrédients</h3>
+    ${ingr.length ? `<div class="se-items">${Object.entries(d.needs).map(([k, q]) => `<div class="rc-row"><span>${itemIco(k)}</span><select data-ck-ing="${esc(k)}" aria-label="Ingrédient">${ingr.map(([id, it]) => `<option value="${esc(id)}" ${id === k ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</select><input type="number" min="1" max="99" data-ck-q="${esc(k)}" value="${q}" aria-label="Quantité"><button type="button" class="close sm-close" data-ck-del="${esc(k)}" aria-label="Retirer">×</button></div>`).join('') || '<p class="note">Aucun ingrédient.</p>'}</div>
+      <button type="button" class="btn sm ghost" id="ck-add-ing">+ Ajouter un ingrédient</button>` : '<p class="note">Le staff n’a encore créé aucun objet de la catégorie « Ingrédient ».</p>'}
+    <h3 class="ed-h">Étapes (dans l’ordre)</h3>
+    ${d.steps.length ? `<ol class="ck-steps">${d.steps.map((k, i) => `<li><span>${G.COOK_STEPS[k]}</span><button type="button" class="btn sm ghost" data-ck-up="${i}" ${i ? '' : 'disabled'} aria-label="Monter">↑</button><button type="button" class="btn sm ghost" data-ck-down="${i}" ${i < d.steps.length - 1 ? '' : 'disabled'} aria-label="Descendre">↓</button><button type="button" class="close sm-close" data-ck-rm="${i}" aria-label="Retirer">×</button></li>`).join('')}</ol>` : '<p class="note">Aucune étape.</p>'}
+    <div class="mj-row"><select id="ck-step" aria-label="Étape à ajouter">${COOK_STEP_KEYS.map((k) => `<option value="${k}" ${k === d.add ? 'selected' : ''}>${G.COOK_STEPS[k]}</option>`).join('')}</select><button type="button" class="btn sm" id="ck-add-step">+ Ajouter l’étape</button></div>`;
+}
+function readCook() {
+  const d = cookDraft;
+  if (!$('ck-name')) return;
+  d.name = $('ck-name').value;
+  d.desc = $('ck-desc').value;
+  d.add = $('ck-step')?.value || d.add;
+  const needs = {};
+  document.querySelectorAll('#ck-body [data-ck-ing]').forEach((s) => {
+    const q = +document.querySelector(`#ck-body [data-ck-q="${CSS.escape(s.dataset.ckIng)}"]`)?.value || 1;
+    needs[s.value] = Math.min(99, (needs[s.value] || 0) + Math.max(1, q));
+  });
+  d.needs = needs;
+}
+$('d-cook').addEventListener('change', (e) => {
+  if (!e.target.dataset?.ckIng) return;
+  readCook();
+  renderCookEdit();
+});
+$('d-cook').addEventListener('click', async (e) => {
+  const d = cookDraft;
+  if (!d) return;
+  const t = e.target;
+  const idx = (a) => t.closest(`[${a}]`)?.getAttribute(a);
+  if (t.closest('#ck-pick')) return $('ck-file').click();
+  if (t.closest('#ck-add-ing')) {
+    readCook();
+    const free = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind === 'ingredient' && !d.needs[k]);
+    if (free) d.needs[free] = 1;
+    return renderCookEdit();
+  }
+  if (idx('data-ck-del') != null) {
+    readCook();
+    delete d.needs[idx('data-ck-del')];
+    return renderCookEdit();
+  }
+  if (t.closest('#ck-add-step')) {
+    readCook();
+    if (d.steps.length < 15) d.steps.push($('ck-step').value);
+    return renderCookEdit();
+  }
+  for (const [a, move] of [['data-ck-up', -1], ['data-ck-down', 1]]) {
+    const i = idx(a);
+    if (i == null) continue;
+    readCook();
+    const j = +i + move;
+    [d.steps[+i], d.steps[j]] = [d.steps[j], d.steps[+i]];
+    return renderCookEdit();
+  }
+  if (idx('data-ck-rm') != null) {
+    readCook();
+    d.steps.splice(+idx('data-ck-rm'), 1);
+    return renderCookEdit();
+  }
+  if (t.closest('#ck-save')) {
+    readCook();
+    if (!d.name.trim()) return void ($('ck-err').textContent = 'Donne un nom au plat.');
+    if (d.desc.trim().length < 10) return void ($('ck-err').textContent = 'Décris le plat (10 caractères minimum).');
+    if (!Object.keys(d.needs).length) return void ($('ck-err').textContent = 'Choisis au moins un ingrédient.');
+    if (!d.steps.length) return void ($('ck-err').textContent = 'Ajoute au moins une étape.');
+    $('ck-save').disabled = true;
+    $('ck-err').textContent = d.photo?.startsWith('data:') ? 'Envoi de la photo…' : '';
+    const out = await run({ type: 'cook.save', id: d.id ?? undefined, name: d.name.trim(), desc: d.desc.trim(), photo: d.photo, needs: d.needs, steps: d.steps });
+    $('ck-save').disabled = false;
+    if (out) closeDialog($('d-cook'));
+    else $('ck-err').textContent = '';
+  }
+});
+$('ck-body').addEventListener('change', async (e) => {
+  if (e.target.id !== 'ck-file') return;
+  const f = e.target.files?.[0];
+  if (!f || !f.type.startsWith('image/')) return;
+  readCook();
+  cookDraft.photo = await readImage(f, { max: 1200, maxBytes: 700 * 1024 });
+  renderCookEdit();
+});
+$('v-job').addEventListener('click', async (e) => {
+  if (e.target.closest('#ck-new')) return openCook();
+  const ed = e.target.closest('[data-ck-edit]')?.dataset.ckEdit;
+  if (ed) return openCook(S.cook.find((x) => x.id === Number(ed)));
+  const del = e.target.closest('[data-ck-delr]')?.dataset.ckDelr;
+  if (del) {
+    if (await askConfirm('La recette sera supprimée. Les plats déjà cuisinés restent.', { title: 'Supprimer cette recette ?', ok: 'Supprimer', danger: true })) run({ type: 'cook.delete', id: Number(del) });
+    return;
+  }
+  const mk = e.target.closest('[data-ck-make]')?.dataset.ckMake;
+  if (mk) {
+    const r = S.cook.find((x) => x.id === Number(mk));
+    if (!r) return;
+    if (!(await askConfirm('Les ingrédients sont pris tout de suite. Si tu rates une étape, ils sont perdus.', { title: `Cuisiner : ${r.name} ?`, ok: 'En cuisine !' }))) return;
+    const success = await cookGame(r);
+    run({ type: 'cook.make', id: r.id, success });
+  }
+});
+
+/* ═══ Commerce entre joueurs (bouton flottant) ═══════════════════════════ */
+const tradeFab = document.createElement('button');
+tradeFab.type = 'button';
+tradeFab.id = 'trade-fab';
+tradeFab.hidden = true;
+document.body.append(tradeFab);
+function updateTradeFab() {
+  const n = S?.offers?.length || 0;
+  tradeFab.hidden = !S || VIEW || !beta();
+  const html = `🤝 Commerce${n ? ` <b>${n}</b>` : ''}`;
+  if (tradeFab.innerHTML !== html) tradeFab.innerHTML = html;
+}
+setInterval(updateTradeFab, 1500);
+let tradeHere = null;
+function renderTrade() {
+  if (!S) return;
+  const offers = S.offers || [];
+  const sellable = [...new Set(S.inv.filter(Boolean).map((x) => x[0]))].filter((k) => G.ITEMS[k] && !['arme', 'bateau'].includes(G.ITEMS[k].kind));
+  const people = (tradeHere || []).filter((p) => p.uid !== S.uid);
+  $('tr-body').innerHTML = `
+    <h3 class="ed-h">Offres reçues</h3>
+    ${offers.length ? offers.map((o) => `<div class="trade-offer"><span>${itemIco(o.key)} <b>${o.qty} × ${esc(itemOf(o.key).name)}</b> de ${esc(o.fromName)} pour <b>${berry(o.price)}</b></span><span><button class="btn sm" data-tr-ok="${esc(o.id)}">Acheter</button> <button class="btn sm ghost" data-tr-no="${esc(o.id)}">Refuser</button></span></div>`).join('') : '<p class="note">Aucune offre.</p>'}
+    <h3 class="ed-h">Vendre un objet</h3>
+    ${sellable.length ? `<div class="form">
+      <div><label for="tr-item">Objet</label><select id="tr-item">${sellable.map((k) => `<option value="${esc(k)}">${esc(itemOf(k).name)} (${G.count(S, k)})</option>`).join('')}</select></div>
+      <div><label for="tr-qty">Quantité</label><input id="tr-qty" type="number" min="1" value="1"></div>
+      <div><label for="tr-price">Prix (฿)</label><input id="tr-price" type="number" min="0" value="0"></div>
+      <div><label for="tr-to">Acheteur</label><select id="tr-to">${tradeHere == null ? '<option value="">Recherche…</option>' : people.length ? people.map((p) => `<option value="${esc(p.uid)}">${esc(p.name)}</option>`).join('') : '<option value="">Personne ici</option>'}</select></div>
+    </div>
+    <p class="note">L’acheteur doit être au même endroit que toi. Il accepte ou refuse l’offre dans l’app.</p>
+    <div class="form-actions"><button class="btn" id="tr-sell">Proposer la vente</button></div>` : '<p class="note">Rien à vendre (les armes et les bateaux ne se vendent pas ici).</p>'}`;
+}
+tradeFab.addEventListener('click', async () => {
+  tradeHere = null;
+  renderTrade();
+  openDialog('d-trade');
+  const out = await run({ type: 'players.here' });
+  tradeHere = out?.players || [];
+  renderTrade();
+});
+$('d-trade').addEventListener('click', async (e) => {
+  const ok = e.target.closest('[data-tr-ok]')?.dataset.trOk, no = e.target.closest('[data-tr-no]')?.dataset.trNo;
+  if (ok || no) {
+    await run({ type: 'trade.answer', id: ok || no, accept: !!ok });
+    return renderTrade();
+  }
+  if (e.target.closest('#tr-sell')) {
+    const to = $('tr-to').value;
+    if (!to) return void toast('Personne à qui vendre ici.');
+    const out = await run({ type: 'trade.offer', key: $('tr-item').value, qty: +$('tr-qty').value || 1, price: +$('tr-price').value || 0, to });
+    if (out) closeDialog($('d-trade'));
+  }
+});
 
 /* ═══ Inventions des scientifiques ═══════════════════════════════════════ */
 function inventionsHTML() {
@@ -3195,7 +3574,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && beta(),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -3369,6 +3748,7 @@ async function enterAdmin({ target = null } = {}) {
   loadFleet();
   if (staffCan('techniques')) loadPendingTechs();
   if (staffCan('inventions')) loadPendingInventions();
+  if (staffCan('cuisine') && beta()) loadCooks();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 
@@ -4495,6 +4875,74 @@ $('v-afeat').addEventListener('change', async (e) => {
   } finally {
     setBusy(-1);
   }
+});
+
+/* ═══ Recettes de cuisine (panneau admin) ════════════════════════════════ */
+let cookList = null, cookFilter = 'wait';
+async function loadCooks() {
+  try {
+    cookList = (await API.staff('cooks')).list;
+  } catch (err) {
+    cookList = [];
+    toast(esc(err.message));
+  }
+  renderCooks();
+}
+function renderCooks() {
+  if (!tools()) return;
+  const st = (r) => (r.ok ? 'ok' : r.refused ? 'refused' : 'wait');
+  const pend = (cookList || []).filter((x) => st(x.recipe) === 'wait').length;
+  const label = document.querySelector('#scr-acook span:last-child');
+  if (label) label.textContent = pend ? `Cuisine (${pend})` : 'Cuisine';
+  const el = $('v-acook');
+  if (!cookList) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const shown = cookList.filter((x) => cookFilter === 'all' || st(x.recipe) === cookFilter);
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Recettes de cuisine</h2><p class="lede" style="margin:0">Toutes les recettes des cuisiniers. Valider ajoute le plat au catalogue (catégorie Plat), modifiable ensuite dans Gestion. Un refus demande un motif.</p></div>
+      <div class="mj-row"><select id="acook-f" aria-label="Filtre">${[['wait', 'À valider'], ['ok', 'Validées'], ['refused', 'Refusées'], ['all', 'Toutes']].map(([v, l]) => `<option value="${v}" ${v === cookFilter ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn ghost" id="acook-reload">Actualiser</button></div>
+    </div>
+    ${shown.length ? `<div class="val-list">${shown.map(({ uid, player, recipe: r }) => `
+      <article class="val-card"><div class="val-body">
+        <p class="note" style="margin:0 0 4px">Par <b>${esc(player)}</b> · ${st(r) === 'ok' ? '<span class="status ok">Validée</span>' : st(r) === 'refused' ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>'}</p>
+        <h3>${esc(r.name)}</h3>
+        ${r.photo ? `<div class="inv-gallery"><img src="${imgSrc(r.photo)}" alt=""></div>` : ''}
+        <p class="inv-desc">${esc(r.desc)}</p>
+        <p class="note" style="margin:4px 0"><b>Ingrédients :</b> ${Object.entries(r.needs).map(([k, q]) => `${q} × ${esc(itemOf(k).name)}`).join(', ')}</p>
+        <p class="note" style="margin:0 0 6px"><b>Étapes :</b> ${r.steps.map((k) => G.COOK_STEPS[k] || k).join(' → ')}</p>
+        ${r.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(r.refused.reason)}</p>` : ''}
+        <div class="val-acts">${r.ok ? '' : `<button class="btn sm" data-ac-ok="${esc(uid)}" data-cid="${r.id}">✓ Valider</button>`}<button class="btn sm ghost" data-ac-no="${esc(uid)}" data-cid="${r.id}">✗ Refuser</button><button class="btn sm ghost" data-ac-open="${esc(uid)}">Voir la fiche</button></div>
+      </div></article>`).join('')}</div>` : '<p class="note">Aucune recette ici.</p>'}`;
+}
+$('v-acook').addEventListener('change', (e) => {
+  if (e.target.id !== 'acook-f') return;
+  cookFilter = e.target.value;
+  renderCooks();
+});
+$('v-acook').addEventListener('click', async (e) => {
+  if (e.target.closest('#acook-reload')) return void loadCooks();
+  const open = e.target.closest('[data-ac-open]')?.dataset.acOpen;
+  if (open) return void openPlayer(open, { tab: 't-job' });
+  const okB = e.target.closest('[data-ac-ok]'), noB = e.target.closest('[data-ac-no]');
+  const b = okB || noB;
+  if (!b) return;
+  const target = b.dataset.acOk || b.dataset.acNo, id = Number(b.dataset.cid);
+  let reason = null;
+  if (noB) {
+    reason = await askText('Explique au cuisinier pourquoi : il verra ce motif et pourra corriger sa recette.', { title: 'Refuser la recette', ok: 'Refuser', placeholder: 'Ex. trop d’étapes, plat incohérent…', max: 300 });
+    if (!reason) return;
+  }
+  setBusy(1);
+  try {
+    const out = await API.staff('cook.validate', { target, id, ok: !!okB, reason });
+    if (out.catalog) G.setCatalog(out.catalog);
+    toast(esc(out.toast));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+  loadCooks();
 });
 
 /* ═══ Inventions à valider (panneau admin) ═══════════════════════════════ */
@@ -5901,6 +6349,7 @@ function showScreen(name) {
   if (name === 'afeat') loadFeatures();
   if (name === 'acalc') loadCalc();
   if (name === 'asea') loadSeaEvents();
+  if (name === 'acook') loadCooks();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

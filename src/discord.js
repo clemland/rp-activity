@@ -1,10 +1,22 @@
 /**
  * Connexion à Discord quand le site tourne dans une Activity.
- * Hors Discord (navigateur classique), on passe en mode démo.
+ * Hors Discord (navigateur classique) : un simple message, la démo est désactivée.
  */
 import { DiscordSDK } from '@discord/embedded-app-sdk';
 
 export const inDiscord = () => new URLSearchParams(location.search).has('frame_id');
+
+// Hors Discord : plus de démo, on invite simplement à ouvrir l'app depuis Discord
+if (!inDiscord()) {
+  document.body.innerHTML = `<main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Georgia,'Times New Roman',serif;background:#17255e">
+    <div style="max-width:420px;text-align:center;background:#f3e3bb;border:4px solid #0d1640;border-radius:16px;padding:28px 24px;color:#3d2614;box-shadow:0 8px 0 rgba(0,0,0,.35)">
+      <div style="font-size:52px;line-height:1">🏴‍☠️</div>
+      <h1 style="margin:12px 0 8px;font-size:26px">Ouvre l’app depuis Discord</h1>
+      <p style="margin:0;font-size:17px">Tape <b>/profil</b> dans le serveur pour accéder à ta fiche.</p>
+    </div>
+  </main>`;
+  throw new Error('Hors Discord : ouvre l’app depuis Discord avec /profil.'); // arrête le chargement de l'app
+}
 
 export async function connect() {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID;

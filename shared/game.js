@@ -670,8 +670,9 @@ export function playerAction(player, action, ctx = {}) {
       // Ce qui venait de la cale y retourne, le reste revient dans l'inventaire
       const back = c.fromChest || {};
       const store = ctx.store?.hold && Object.keys(back).length ? clone(ctx.store) : null;
-      if (r) {
-        for (const [k, q] of Object.entries(r.needs)) {
+      const needs = c.needs || r?.needs; // ingrédients réellement pris (bois choisi compris)
+      if (needs) {
+        for (const [k, q] of Object.entries(needs)) {
           if (!ITEMS[k]) continue;
           const toChest = store ? Math.min(q, back[k] || 0) : 0;
           if (toChest) store.hold[k] = (store.hold[k] || 0) + toChest;
@@ -701,8 +702,10 @@ export function playerAction(player, action, ctx = {}) {
     }
     case 'ship.work': {
       // Atelier du charpentier : matériaux pris d'abord ; le travail ne tient que si le mini-jeu est réussi.
-      const r = RECIPES[a.id];
-      if (!r?.work) fail('Ce travail n’existe pas.');
+      const r0 = RECIPES[a.id];
+      if (!r0?.work) fail('Ce travail n’existe pas.');
+      // Construction au bois au choix : le bois choisi s'ajoute aux ingrédients
+      const r = r0.work.type === 'construire' ? buildRecipe(r0, a.wood) : r0;
       const w = r.work;
       const ship = w.type === 'construire' ? null : clone(ctx.ship);
       if (w.type !== 'construire') {
@@ -725,7 +728,7 @@ export function playerAction(player, action, ctx = {}) {
       // Mini-jeu réussi : le travail prend ensuite le temps de la recette (à récupérer dans l'onglet Métier)
       const secs = r.seconds || 0;
       if (secs > 0) {
-        p.craft = { recipe: a.id, name: workLabel(w), gives: {}, start: now, end: now + secs * 1000, fromChest, fromShip: used ? (w.type === 'construire' ? ctx.storeId : ctx.shipId) || null : null, work: { ...w, shipId: w.type === 'construire' ? null : ctx.shipId || null } };
+        p.craft = { recipe: a.id, name: workLabel(w), gives: {}, start: now, end: now + secs * 1000, fromChest, needs: r.needs, fromShip: used ? (w.type === 'construire' ? ctx.storeId : ctx.shipId) || null : null, work: { ...w, shipId: w.type === 'construire' ? null : ctx.shipId || null } };
         out.toast = `Mini-jeu réussi ! ${workLabel(w)} : prêt dans ${duree(secs)}.`;
         break;
       }
@@ -1050,6 +1053,7 @@ export function normalizeShipCfg(c = {}) {
     damagedPct: cfgNum(c.damagedPct, D.damagedPct, 0, 100),
     woods: Object.fromEntries(Object.keys(WOODS).map((k) => [k, cfgNum(c.woods?.[k], D.woods[k], 0.1, 10)])),
     cannons: Object.fromEntries(Object.keys(CANNONS).map((k) => [k, { power: cfgNum(c.cannons?.[k]?.power, D.cannons[k].power, 0, 100), slow: cfgNum(c.cannons?.[k]?.slow, D.cannons[k].slow, 0, 20) }])),
+    woodItems: Object.fromEntries(Object.keys(WOODS).map((k) => [k, typeof c.woodItems?.[k] === 'string' && c.woodItems[k] ? c.woodItems[k].slice(0, 60) : null])), // objet de chaque bois (construction au bois au choix)
   };
 }
 export let SHIPCFG = normalizeShipCfg();
@@ -1139,7 +1143,7 @@ export function canManageShipChannels(p, ship, crew) {
 export function normalizeWork(w) {
   if (!w || !SHIP_WORKS[w.type]) return null;
   const t = w.type;
-  if (t === 'construire') return { type: t, model: String(w.model || ''), wood: WOODS[w.wood] ? w.wood : 'standard' };
+  if (t === 'construire') return { type: t, model: String(w.model || ''), wood: w.wood === 'choix' ? 'choix' : WOODS[w.wood] ? w.wood : 'standard', woodQty: int(w.woodQty ?? 0, 0, 9999) };
   if (t === 'voile') return { type: t, level: int(w.level ?? 1, 1, 10) };
   if (t === 'canon') return { type: t, size: CANNONS[w.size] ? w.size : 'leger', count: int(w.count ?? 1, 1, 20) };
   if (t === 'cale') return { type: t, amount: int(w.amount ?? 100, 10, 100000) };
@@ -1148,12 +1152,25 @@ export function normalizeWork(w) {
 }
 export function workLabel(w) {
   if (!w) return '';
-  if (w.type === 'construire') return `Construire : ${itemOf(w.model).name} (${WOODS[w.wood].name.toLowerCase()})`;
+  if (w.type === 'construire') return `Construire : ${itemOf(w.model).name} (${w.wood === 'choix' ? 'bois au choix' : WOODS[w.wood].name.toLowerCase()})`;
   if (w.type === 'voile') return `Voile niveau ${w.level}`;
   if (w.type === 'canon') return `${w.count} canon${w.count > 1 ? 's' : ''} ${CANNONS[w.size].name}${w.count > 1 ? 's' : ''}`;
   if (w.type === 'cale') return `Cale +${fmt(w.amount)} kg`;
   if (w.type === 'reparation') return `Réparer la coque (+${w.amount} %)`;
   return SHIP_WORKS[w.type];
+}
+/** Ingrédients d'une construction au bois au choix : ceux de la recette, plus le bois choisi (objet réglé par le staff). */
+export function workNeeds(recipe, wood) {
+  const needs = { ...recipe.needs };
+  const item = SHIPCFG.woodItems?.[wood], q = recipe.work?.woodQty || 0;
+  if (item && q) needs[item] = (needs[item] || 0) + q;
+  return needs;
+}
+/** Recette de construction avec le bois choisi par le charpentier. */
+function buildRecipe(r0, wood) {
+  if (r0.work.wood !== 'choix') return r0;
+  if (!WOODS[wood]) fail('Choisis le bois du bateau.');
+  return { ...r0, work: { ...r0.work, wood }, needs: workNeeds(r0, wood) };
 }
 /** Pourquoi ce travail est impossible (null s'il est possible). ship : null pour une construction. */
 export function workBlock(p, recipe, ship, crew = null) {

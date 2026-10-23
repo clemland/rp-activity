@@ -1002,6 +1002,7 @@ setInterval(() => {
 
 /* ═══ Atelier naval du charpentier ═══════════════════════════════════════ */
 let atelierShip = null;
+let atelierWood = {}; // bois choisi pour chaque recette de construction « bois au choix »
 /** Les trois statistiques d'un bateau et sa coque. */
 function shipStatsHTML(sh) {
   const st = G.shipStats(sh);
@@ -1022,11 +1023,16 @@ function atelierHTML() {
   return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">⚓ Atelier naval</h2></div>
     <p class="note">Choisis un bateau et un travail. Les matériaux sont pris au début : réussis le mini-jeu pour que le travail tienne.</p>
     ${ships.length ? `<div class="mj-row"><label for="atelier-ship">Bateau</label><select id="atelier-ship">${ships.map((x) => `<option value="${esc(x.id)}" ${x.id === atelierShip ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)})</option>`).join('')}</select>${st ? `<span class="note">Vitesse ${st.speed} · Robustesse ${st.robust} · Puissance ${st.power} · Coque ${st.hull}/${st.hullMax}</span>` : ''}</div>` : '<p class="note">Tu n’as pas de bateau à travailler (à toi, ou à ton équipage avec la permission « Choisir le bateau »). Tu peux quand même en construire un.</p>'}
-    <div class="recipes">${works.map(([id, r]) => {
+    <div class="recipes">${works.map(([id, r0]) => {
+      // Construction au bois au choix : le bois choisi s'ajoute aux ingrédients
+      const choix = r0.work.type === 'construire' && r0.work.wood === 'choix';
+      const wood = atelierWood[id] || 'standard';
+      const r = choix ? { ...r0, work: { ...r0.work, wood }, needs: G.workNeeds(r0, wood) } : r0;
       const store = r.work.type === 'construire' ? NAVD?.aboard : ship; // cale du bateau travaillé (ou de celui où l'on est à bord)
       const why = G.workBlock(S, r, r.work.type === 'construire' ? null : ship, store);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${recipeIco(r)}${esc(G.workLabel(r.work))}</h3>
+        ${choix ? `<div class="mj-row"><label>Bois</label><select data-wood-for="${esc(id)}" aria-label="Bois du bateau">${Object.entries(G.WOODS).map(([k, w]) => `<option value="${k}" ${k === wood ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div>` : ''}
         <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
@@ -1036,6 +1042,11 @@ function atelierHTML() {
     }).join('')}</div>`;
 }
 $('v-job').addEventListener('change', (e) => {
+  const wf = e.target.dataset?.woodFor;
+  if (wf) {
+    atelierWood[wf] = e.target.value;
+    return renderJob();
+  }
   if (e.target.id === 'atelier-ship') {
     atelierShip = e.target.value;
     renderJob();
@@ -1046,12 +1057,14 @@ $('v-job').addEventListener('click', (e) => {
   if (id) startWork(id);
 });
 async function startWork(id) {
-  const r = G.RECIPES[id];
-  if (!r?.work) return;
+  const r0 = G.RECIPES[id];
+  if (!r0?.work) return;
+  const wood = r0.work.type === 'construire' && r0.work.wood === 'choix' ? atelierWood[id] || 'standard' : null;
+  const r = wood ? { ...r0, work: { ...r0.work, wood }, needs: G.workNeeds(r0, wood) } : r0;
   const label = G.workLabel(r.work);
   if (!(await askConfirm('Les matériaux seront pris tout de suite. Si tu rates le mini-jeu, ils sont perdus.', { title: `${label} ?`, ok: 'Commencer' }))) return;
   const success = r.game ? await customGame(r, S.job.lvl, label) : await workGame(r, S.job.lvl, label);
-  await run({ type: 'ship.work', id, shipId: r.work.type === 'construire' ? null : atelierShip, success });
+  await run({ type: 'ship.work', id, shipId: r.work.type === 'construire' ? null : atelierShip, success, wood: wood || undefined });
 }
 /** Mini-jeu du marteau : planter les clous quand le curseur passe dans la zone dorée. Renvoie true si réussi. */
 function nailGame(diff, title) {
@@ -1137,7 +1150,8 @@ function workFieldsHTML(r) {
   const sel = (id, obj, cur) => `<select id="${id}">${Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(typeof v === 'string' ? v : v.name)}</option>`).join('')}</select>`;
   return `<div class="wide work-box"><label for="rc-work">Travail sur bateau (atelier du charpentier)</label>
     <select id="rc-work"><option value="">Aucun : recette normale</option>${Object.entries(G.SHIP_WORKS).map(([k, l]) => `<option value="${k}" ${w?.type === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
-    ${w?.type === 'construire' ? `<div class="mj-row"><label for="rc-w-model">Type</label><select id="rc-w-model">${models.map(([k, it]) => `<option value="${esc(k)}" ${k === w.model ? 'selected' : ''}>${esc(it.name)}</option>`).join('') || '<option value="">Crée d’abord un modèle (Gestion, catégorie Bateau)</option>'}</select><label for="rc-w-wood">Bois</label>${sel('rc-w-wood', G.WOODS, w.wood)}</div>` : ''}
+    ${w?.type === 'construire' ? `<div class="mj-row"><label for="rc-w-model">Type</label><select id="rc-w-model">${models.map(([k, it]) => `<option value="${esc(k)}" ${k === w.model ? 'selected' : ''}>${esc(it.name)}</option>`).join('') || '<option value="">Crée d’abord un modèle (Gestion, catégorie Bateau)</option>'}</select><label for="rc-w-wood">Bois</label><select id="rc-w-wood"><option value="choix" ${w.wood === 'choix' ? 'selected' : ''}>Au choix du charpentier</option>${Object.entries(G.WOODS).map(([k, v]) => `<option value="${k}" ${k === w.wood ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>${w.wood === 'choix' ? `<label for="rc-w-wqty">Quantité de bois</label><input id="rc-w-wqty" type="number" min="0" value="${w.woodQty || 0}">` : ''}</div>
+    ${w.wood === 'choix' ? '<p class="note" style="margin:0">Le bois choisi par le charpentier s’ajoute aux ingrédients. L’objet de chaque bois se règle dans Panneau admin > Bateaux > Réglages > Bois de construction.</p>' : ''}` : ''}
     ${w?.type === 'voile' ? `<div class="mj-row"><label for="rc-w-level">Niveau de voile obtenu</label><input id="rc-w-level" type="number" min="1" max="10" value="${w.level}"><span class="note">1-3 Apprenti · 4-6 Confirmé · 7-10 Maître. La voile doit être au niveau précédent.</span></div>` : ''}
     ${w?.type === 'canon' ? `<div class="mj-row"><label for="rc-w-size">Calibre</label>${sel('rc-w-size', G.CANNONS, w.size)}<label for="rc-w-count">Nombre</label><input id="rc-w-count" type="number" min="1" max="20" value="${w.count}"></div>` : ''}
     ${w?.type === 'cale' ? `<div class="mj-row"><label for="rc-w-amount">Cale ajoutée (kg)</label><input id="rc-w-amount" type="number" min="10" value="${w.amount}"></div>` : ''}
@@ -1154,6 +1168,7 @@ function readWorkFields(r) {
     model: $('rc-w-model')?.value ?? prev.model, wood: $('rc-w-wood')?.value ?? prev.wood,
     level: $('rc-w-level')?.value ?? prev.level, size: $('rc-w-size')?.value ?? prev.size,
     count: $('rc-w-count')?.value ?? prev.count, amount: $('rc-w-amount')?.value ?? prev.amount,
+    woodQty: $('rc-w-wqty')?.value ?? prev.woodQty,
   });
   if (t === 'construire' && !r.work.model) r.work.model = Object.keys(G.ITEMS).find((k) => G.ITEMS[k].kind === 'bateau') || '';
 }
@@ -3922,6 +3937,11 @@ function shipCfgHTML() {
       ${f('hullPerRobust', 'Points de coque par point de robustesse', C.hullPerRobust, '1')}
       ${f('damagedPct', 'Seuil d’avarie (% de la coque)', C.damagedPct, '1')}
     </div>
+    <h3 class="ed-h">Bois de construction</h3>
+    <p class="note" style="margin:0 0 6px">Pour les recettes de construction « bois au choix » : l’objet utilisé pour chaque bois.</p>
+    <div class="form">
+      ${Object.entries(G.WOODS).map(([k, w]) => `<div><label for="sc-wi-${k}">${w.name}</label><select id="sc-wi-${k}"><option value="">Aucun objet</option>${Object.entries(G.ITEMS).filter(([, it]) => it.kind !== 'bateau').sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, it]) => `<option value="${esc(id)}" ${id === C.woodItems?.[k] ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</select></div>`).join('')}
+    </div>
     <div class="form-actions"><button class="btn ghost" id="sc-reset">Valeurs par défaut</button><button class="btn" id="sc-save">Enregistrer les réglages</button></div>
   </details>`;
 }
@@ -3933,6 +3953,7 @@ $('v-ships').addEventListener('click', (e) => {
       granitBonus: v('granitBonus'), hullPerRobust: v('hullPerRobust'), damagedPct: v('damagedPct'),
       woods: Object.fromEntries(Object.keys(G.WOODS).map((k) => [k, v(`wood-${k}`)])),
       cannons: Object.fromEntries(Object.keys(G.CANNONS).map((k) => [k, { power: v(`gun-${k}-power`), slow: v(`gun-${k}-slow`) }])),
+      woodItems: Object.fromEntries(Object.keys(G.WOODS).map((k) => [k, $(`sc-wi-${k}`)?.value || null])),
     };
     return void gestCall('ship.cfg', { cfg });
   }

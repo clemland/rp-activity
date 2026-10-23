@@ -3107,7 +3107,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -4229,6 +4229,69 @@ $('v-atech').addEventListener('click', async (e) => {
     setBusy(-1);
   }
   loadPendingTechs();
+});
+
+/* ═══ Calcul de trajet (panneau admin) ═══════════════════════════════════ */
+let calcData = null, calcRes = null;
+const calcForm = { from: null, to: null, kind: 'model', ship: null };
+async function loadCalc() {
+  try {
+    calcData = await API.staff('calc', { list: true });
+  } catch (err) {
+    calcData = { islands: [], ships: [], models: [] };
+    toast(esc(err.message));
+  }
+  renderCalc();
+}
+function renderCalc() {
+  const el = $('v-acalc');
+  if (!calcData) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const f = calcForm, list = f.kind === 'ship' ? calcData.ships : calcData.models;
+  f.from ??= calcData.islands[0]?.id;
+  f.to ??= calcData.islands[1]?.id ?? calcData.islands[0]?.id;
+  if (!list.some((x) => x.id === f.ship)) f.ship = list[0]?.id ?? null;
+  const opts = (items, sel) => items.map((x) => `<option value="${esc(x.id)}" ${x.id === sel ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  el.innerHTML = `
+    <div class="sec-head"><div><h2>Calcul de trajet</h2><p class="lede" style="margin:0">Le nombre d’actions RP entre deux îles, pour un modèle de bateau ou un bateau existant (avec ses vraies statistiques).</p></div></div>
+    <section class="crew-box">
+      <div class="form">
+        <div><label for="cc-from">Départ</label><select id="cc-from">${opts(calcData.islands, f.from)}</select></div>
+        <div><label for="cc-to">Arrivée</label><select id="cc-to">${opts(calcData.islands, f.to)}</select></div>
+        <div><label for="cc-kind">Bateau</label><select id="cc-kind"><option value="model" ${f.kind === 'model' ? 'selected' : ''}>Un modèle</option><option value="ship" ${f.kind === 'ship' ? 'selected' : ''}>Un bateau existant</option></select></div>
+        <div><label for="cc-ship">${f.kind === 'ship' ? 'Bateau existant' : 'Modèle'}</label><select id="cc-ship">${opts(list, f.ship) || '<option value="">Aucun</option>'}</select></div>
+      </div>
+      <div class="form-actions"><button class="btn" id="cc-go">Calculer</button></div>
+    </section>
+    ${calcRes ? calcResHTML(calcRes) : ''}`;
+}
+function calcResHTML(r) {
+  if (r.none) return `<section class="crew-box"><h3>${esc(r.fromName)} → ${esc(r.toName)}</h3><p class="note" style="margin:0">Aucune route entre ces deux îles : vérifie les routes et leur sens sur la carte.</p></section>`;
+  return `<section class="crew-box"><h3>${esc(r.ship)} : ${esc(r.fromName)} → ${esc(r.toName)}</h3>
+    <p class="calc-big"><b>${r.base}</b> actions RP sans navigateur</p>
+    <p class="note" style="margin:0 0 4px">Avec un navigateur : de <b>${r.best}</b> (cap parfaitement tenu) à <b>${r.worst}</b> (cap jamais tenu).</p>
+    <p class="note" style="margin:0">Temps de route ${r.value}${r.via.length ? ` · via ${r.via.map(esc).join(', ')}` : ''} · route ${G.ROUTE_DIFFS[r.diff - 1].toLowerCase()} · vitesse du bateau ${r.speed} · rythme des voyages ${r.pace}</p>
+  </section>`;
+}
+$('v-acalc').addEventListener('change', (e) => {
+  const map = { 'cc-from': 'from', 'cc-to': 'to', 'cc-kind': 'kind', 'cc-ship': 'ship' };
+  const k = map[e.target.id];
+  if (!k) return;
+  calcForm[k] = e.target.value;
+  if (k === 'kind') renderCalc();
+});
+$('v-acalc').addEventListener('click', async (e) => {
+  if (!e.target.closest('#cc-go')) return;
+  const f = calcForm;
+  if (!f.ship) return void toast('Choisis un bateau.');
+  setBusy(1);
+  try {
+    calcRes = await API.staff('calc', { from: f.from, to: f.to, shipId: f.kind === 'ship' ? f.ship : null, model: f.kind === 'model' ? f.ship : null });
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+  renderCalc();
 });
 
 /* ═══ Fonctionnalités activées ou non pour les joueurs (panneau admin) ═══ */
@@ -5673,6 +5736,7 @@ function showScreen(name) {
   if (name === 'agames') renderGames();
   if (name === 'ainv') loadPendingInventions();
   if (name === 'afeat') loadFeatures();
+  if (name === 'acalc') loadCalc();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

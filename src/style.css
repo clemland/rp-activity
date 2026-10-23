@@ -1451,6 +1451,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .feat-off h2{margin:0 0 6px}
 .encounter{background:#fff3cf;border:3px solid var(--gold);border-radius:10px;padding:8px 12px;margin:4px 0 8px}
 .sea-read .btn{margin-top:4px}
+.calc-big{font-size:20px;margin:4px 0}
+.calc-big b{font-size:34px;color:var(--sea)}
 .sea-read .d1,.sea-read .d2{color:#1d7a3a}
 .sea-read .d3{color:#a8690c}
 .sea-read .d4,.sea-read .d5{color:var(--red)}

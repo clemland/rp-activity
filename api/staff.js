@@ -209,6 +209,44 @@ export default handler(['POST'], async (req, body) => {
         return { icons, toast: url ? 'Icône changée pour tout le monde' : 'Icône remise par défaut' };
       });
     }
+    case 'calc': {
+      // Calcul de trajet : actions RP entre deux îles pour un bateau (existant ou modèle)
+      const GM = await import('../shared/game.js');
+      const { map } = await loadMap();
+      const byName = (a, b) => a.name.localeCompare(b.name);
+      if (body.list) {
+        return {
+          islands: Object.entries(map.islands).map(([id, i]) => ({ id, name: i.name })).sort(byName),
+          ships: Object.entries(await readAll('ships')).map(([id, s]) => ({ id, name: s.name || id })).sort(byName),
+          models: Object.entries(GM.ITEMS).filter(([, it]) => it.kind === 'bateau').map(([id, it]) => ({ id, name: it.name })).sort(byName),
+        };
+      }
+      need(map.islands[body.from] && map.islands[body.to], 400, 'Choisis deux îles.');
+      let ship;
+      if (body.shipId) {
+        const r = await read('ships', String(body.shipId));
+        need(r, 404, 'Bateau introuvable.');
+        ship = GM.normalizeShip(r.data);
+      } else {
+        const it = GM.ITEMS[body.model];
+        need(it?.kind === 'bateau', 404, 'Modèle introuvable.');
+        ship = GM.normalizeShip({ ...(it.ship || {}), name: it.name });
+      }
+      const st = GM.shipStats(ship);
+      const head = { ship: ship.name, fromName: map.islands[body.from].name, toName: map.islands[body.to].name, speed: st.speed, pace: map.pace };
+      const t = body.from === body.to ? null : GM.travelTime(map, body.from, body.to);
+      if (!t) return { ...head, none: true };
+      const base = GM.voyageActions(t.value, st.speed, map.pace);
+      return {
+        ...head,
+        value: t.value,
+        via: t.path.slice(1, -1).map((s) => map.islands[s]?.name).filter(Boolean),
+        diff: GM.pathDifficulty(map, t.path),
+        base,
+        best: Math.max(2, Math.ceil(base * 0.8)),
+        worst: Math.max(2, Math.ceil(base * 1.25)),
+      };
+    }
     case 'features': {
       // Fonctionnalités activées ou non pour les joueurs
       const { map } = await loadMap();

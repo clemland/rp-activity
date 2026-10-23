@@ -1662,6 +1662,7 @@ function customGame(recipe, rank, title, careLevel = 0) {
   const auto = recipe.work ? 1 + Math.round(((G.workDifficulty(recipe, { job: { lvl: rank } }).speed - 0.6) / 1.4) * 4) : 2;
   return miniGame({ title, steps: [SIMPLE_GAMES[mgPick(pool)][1](g.diff || auto, rank)] });
 }
+let rcTest = { rank: 1, lvl: 1 }; // rang et gravité choisis pour tester le mini-jeu d'une recette
 /** Section « Mini-jeu » de l'éditeur de recette. */
 function gameFieldsHTML(r) {
   const g = r.game || { list: [], diff: 0 };
@@ -1669,6 +1670,9 @@ function gameFieldsHTML(r) {
   const isOp = r.care && r.care.level >= 2;
   return `<div class="wide work-box"><b>🎮 Mini-jeu</b>
     <div class="mj-row"><label for="rc-gdiff">Difficulté</label><select id="rc-gdiff">${DIFF_NAMES.map((l, i) => `<option value="${i}" ${(g.diff || 0) === i ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="mj-row"><label for="rc-trank">Tester en</label><select id="rc-trank">${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${rcTest.rank === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      ${r.care ? `<select id="rc-tlvl" aria-label="Gravité de la blessure">${G.HEALTH_LEVELS.slice(0, r.care.level).map((l, i) => `<option value="${i + 1}" ${rcTest.lvl === i + 1 ? 'selected' : ''}>Blessure ${l.toLowerCase()}</option>`).join('')}</select>` : ''}
+      <button type="button" class="btn sm" id="rc-test">▶ Tester</button></div>
     <b style="font-size:14px">${r.care ? 'Blessure légère : un de ces mini-jeux, au hasard' : 'Un de ces mini-jeux, au hasard'}</b>
     <div class="perms">${Object.entries(SIMPLE_GAMES).map(([k, [l]]) => box(k, l)).join('')}</div>
     ${isOp ? `<b style="font-size:14px">Opération (blessures sérieuses et plus) : étapes possibles, après l’anesthésie</b><div class="perms">${OP_KEYS.map((k) => box(k, OP_STEPS[k])).join('')}</div>` : ''}
@@ -1677,6 +1681,8 @@ function gameFieldsHTML(r) {
 }
 function readGameFields(r) {
   if (!$('rc-gdiff')) return;
+  if ($('rc-trank')) rcTest.rank = +$('rc-trank').value || 1;
+  if ($('rc-tlvl')) rcTest.lvl = +$('rc-tlvl').value || 1;
   const list = [...document.querySelectorAll('#rc-body [data-game]')].filter((c) => c.checked).map((c) => c.dataset.game);
   const diff = +$('rc-gdiff').value || 0;
   r.game = list.length || diff ? { list, diff } : null;
@@ -5429,6 +5435,18 @@ $('d-recipe').addEventListener('click', (e) => {
     delete recipeDraft[kind][k];
     renderRecipeEdit();
   }
+});
+/* Tester le mini-jeu d'une recette, avec les réglages en cours (rien n'est consommé ni enregistré) */
+$('d-recipe').addEventListener('click', async (e) => {
+  if (!e.target.closest('#rc-test')) return;
+  readRecipeEdit();
+  const r = recipeDraft, rank = rcTest.rank;
+  const withGame = { ...r, game: r.game || { list: [], diff: 0 } };
+  let ok;
+  if (r.care) ok = await careGame(Math.min(rcTest.lvl, r.care.level), 'test', rank, null, withGame);
+  else if (r.work) ok = r.game ? await customGame(r, rank, 'Test') : await workGame(r, rank, 'Test');
+  else ok = await customGame(withGame, rank, 'Test');
+  toast(ok ? '✅ Mini-jeu réussi' : '❌ Mini-jeu raté');
 });
 $('rc-save').addEventListener('click', () => {
   readRecipeEdit();

@@ -1976,7 +1976,7 @@ function renderCookEdit() {
       <button type="button" class="btn sm ghost" id="ck-add-ing">+ Ajouter un ingrédient</button>` : '<p class="note">Le staff n’a encore créé aucun objet de la catégorie « Ingrédient ».</p>'}
     <h3 class="ed-h">Étapes (dans l’ordre)</h3>
     ${d.steps.length ? `<ol class="ck-steps">${d.steps.map((k, i) => `<li><span>${G.COOK_STEPS[k]}</span><button type="button" class="btn sm ghost" data-ck-up="${i}" ${i ? '' : 'disabled'} aria-label="Monter">↑</button><button type="button" class="btn sm ghost" data-ck-down="${i}" ${i < d.steps.length - 1 ? '' : 'disabled'} aria-label="Descendre">↓</button><button type="button" class="close sm-close" data-ck-rm="${i}" aria-label="Retirer">×</button></li>`).join('')}</ol>` : '<p class="note">Aucune étape.</p>'}
-    <div class="mj-row"><select id="ck-step" aria-label="Étape à ajouter">${COOK_STEP_KEYS.map((k) => `<option value="${k}" ${k === d.add ? 'selected' : ''}>${G.COOK_STEPS[k]}</option>`).join('')}</select><button type="button" class="btn sm" id="ck-add-step">+ Ajouter l’étape</button></div>`;
+    <div class="mj-row"><select id="ck-step" aria-label="Étape à ajouter">${COOK_STEP_KEYS.map((k) => `<option value="${k}" ${k === d.add ? 'selected' : ''}>${G.COOK_STEPS[k]}</option>`).join('')}</select><button type="button" class="btn sm" id="ck-add-step">+ Ajouter l’étape</button><button type="button" class="btn sm ghost" id="ck-test" ${d.steps.length ? '' : 'disabled'}>▶ Tester les étapes</button></div>`;
 }
 function readCook() {
   const d = cookDraft;
@@ -2030,6 +2030,13 @@ $('d-cook').addEventListener('click', async (e) => {
     readCook();
     d.steps.splice(+idx('data-ck-rm'), 1);
     return renderCookEdit();
+  }
+  if (t.closest('#ck-test')) {
+    // Essai des étapes de la recette, dans l'ordre (rien n'est consommé)
+    readCook();
+    if (!d.steps.length) return;
+    const ok = await cookGame({ name: d.name.trim() || 'test', steps: d.steps });
+    return void toast(ok ? '✅ Toutes les étapes réussies' : '❌ Raté');
   }
   if (t.closest('#ck-save')) {
     readCook();
@@ -5030,6 +5037,10 @@ function renderGames() {
         <div class="mj-row"><label for="tg-bgame">Mini-jeu</label><select id="tg-bgame"><option value="">Au hasard</option><option value="serrer">🩹 Bandage</option><option value="nettoyer">🦠 Désinfecter</option><option value="points">🧵 Points de suture</option></select></div>
         <div><button class="btn" id="tg-band-go">Tester le bandage</button></div>
       </section>
+      ${beta() ? `<section class="crew-box"><h3>🍳 Cuisine</h3>
+        <div class="mj-row"><label for="tg-cook">Étape</label><select id="tg-cook"><option value="">Toutes les étapes, à la suite</option>${Object.entries(G.COOK_STEPS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div><button class="btn" id="tg-cook-go">Tester</button></div>
+      </section>` : ''}
       <section class="crew-box"><h3>🧭 Navigateur : lire la mer</h3>
         <div class="mj-row"><label for="tg-nrank">Rang</label><select id="tg-nrank">${ranks()}</select></div>
         <div class="mj-row"><label for="tg-ndiff">Route</label><select id="tg-ndiff">${G.ROUTE_DIFFS.map((l, i) => `<option value="${i + 1}" ${i === 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -5075,6 +5086,10 @@ $('v-agames').addEventListener('click', (e) => {
   if (e.target.closest('#tg-band-go')) {
     const rank = +$('tg-brank').value;
     return void testGame(`Bandage (${JOB_LEVELS[rank - 1]})`, () => bandageGame('test', rank, $('tg-bgame').value || null));
+  }
+  if (e.target.closest('#tg-cook-go')) {
+    const k = $('tg-cook').value;
+    return void testGame(k ? `Cuisine : ${G.COOK_STEPS[k]}` : 'Cuisine : toutes les étapes', () => cookGame({ name: 'test', steps: k ? [k] : Object.keys(G.COOK_STEPS) }));
   }
   if (e.target.closest('#tg-nav-go')) {
     const rank = +$('tg-nrank').value;

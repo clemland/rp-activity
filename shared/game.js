@@ -1122,6 +1122,7 @@ export function normalizeShip(s) {
         base: Number(v.base) || null, // actions avant la lecture de la mer
         diff: v.diff ? int(v.diff, 1, 5) : null, // difficulté de la route
         navRead: !!v.navRead, // un navigateur a lu la mer
+        event: v.event?.id ? { id: String(v.event.id).slice(0, 40), name: String(v.event.name || '').slice(0, 50) } : null, // événement du voyage (roue des vents)
         // Rencontre en mer : arrêté face à un autre bateau, jusqu'à « Reprendre la mer »
         encounter: v.encounter?.with ? { with: String(v.encounter.with), withName: String(v.encounter.withName || '').slice(0, 60), withChannel: v.encounter.withChannel ? String(v.encounter.withChannel) : null, alongside: !!v.encounter.alongside, at: Number(v.encounter.at) || 0 } : null,
         met: (Array.isArray(v.met) ? v.met : []).map(String).slice(0, 50), // bateaux déjà rencontrés pendant ce voyage
@@ -1315,12 +1316,13 @@ export const DANGERS = ['Mer d’huile', 'Mer calme', 'Mer agitée', 'Mer danger
 /** Événements en mer : choisis par le staff pour chaque niveau de mer (leurs effets seront réglés ensuite). */
 export const SEA_EVENTS_DEFAULT = {
   list: [
+    { id: 'rien', name: 'Rien à signaler' },
     { id: 'houle', name: 'Houle' }, { id: 'epave', name: 'Épave à la dérive' }, { id: 'marchand', name: 'Marchand ambulant' },
     { id: 'tempete', name: 'Tempête' }, { id: 'courants', name: 'Courants' }, { id: 'brume', name: 'Brume' },
     { id: 'recifs', name: 'Récifs' }, { id: 'monstre', name: 'Monstre marin' }, { id: 'pirates', name: 'Navire pirate' },
     { id: 'marine', name: 'Patrouille de la Marine' }, { id: 'roi', name: 'Roi des mers' }, { id: 'tourbillon', name: 'Tourbillon' },
   ],
-  levels: { 1: [], 2: ['houle', 'epave', 'marchand'], 3: ['tempete', 'courants', 'brume', 'epave'], 4: ['tempete', 'recifs', 'monstre', 'pirates', 'marine'], 5: ['tempete', 'monstre', 'roi', 'tourbillon'] },
+  levels: { 1: ['rien', 'epave', 'marchand'], 2: ['rien', 'houle', 'brume', 'epave'], 3: ['tempete', 'courants', 'brume', 'pirates'], 4: ['tempete', 'recifs', 'monstre', 'pirates', 'marine'], 5: ['roi', 'tourbillon', 'tempete', 'monstre'] },
 };
 export function normalizeSeaEvents(x) {
   const src = x && Array.isArray(x.list) ? x : SEA_EVENTS_DEFAULT;
@@ -1328,6 +1330,14 @@ export function normalizeSeaEvents(x) {
   const ids = new Set(list.map((e) => e.id));
   const levels = Object.fromEntries([1, 2, 3, 4, 5].map((l) => [l, [...new Set((src.levels?.[l] || []).map(String).filter((id) => ids.has(id)))]]));
   return { list, levels };
+}
+/** Événement d'un voyage : celui de la roue du navigateur s'il est valable, sinon un tiré au hasard parmi ceux du niveau. */
+export function pickEvent(map, level, wanted = null) {
+  const se = normalizeSeaEvents(map?.seaEvents);
+  const ids = se.levels[level] || [];
+  if (!ids.length) return null;
+  const id = wanted && ids.includes(String(wanted)) ? String(wanted) : ids[Math.floor(Math.random() * ids.length)];
+  return { id, name: se.list.find((e) => e.id === id)?.name || id };
 }
 /** Noms des événements possibles à un niveau de mer. */
 export function seaEventsAt(seaEvents, level) {
@@ -1432,7 +1442,7 @@ export function shipAction(player, ship0, action, ctx = {}) {
       if (!t) fail('Aucune route connue vers cette île.');
       const diffP = pathDifficulty(map, t.path), nr = navRoll(p, a, diffP), baseP = voyageActions(t.value, st.speed, map.pace);
       const needed = Math.max(2, Math.ceil(baseP * nr.factor));
-      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now(), danger: nr.danger, base: baseP, diff: diffP, navRead: p.job?.id === 'navigateur' && !!a.nav };
+      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now(), danger: nr.danger, base: baseP, diff: diffP, navRead: p.job?.id === 'navigateur' && !!a.nav, event: pickEvent(map, diffP, p.job?.id === 'navigateur' ? a.nav?.event : null) };
       out.toast = `Départ proposé vers ${to.name} (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;
@@ -1461,7 +1471,7 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const diffL = t ? pathDifficulty(map, t.path) : 3, nrl = navRoll(p, a, diffL);
       const baseL = voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace);
       const needed = Math.max(2, Math.ceil(baseL * nrl.factor));
-      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true, danger: nrl.danger, base: baseL, diff: diffL, navRead: p.job?.id === 'navigateur' && !!a.nav };
+      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true, danger: nrl.danger, base: baseL, diff: diffL, navRead: p.job?.id === 'navigateur' && !!a.nav, event: pickEvent(map, diffL, p.job?.id === 'navigateur' ? a.nav?.event : null) };
       out.toast = `Le Log Pose pointe vers une île inconnue (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;
@@ -1491,9 +1501,10 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const nr = navRoll(p, a, v.diff ?? 2);
       v.needed = Math.max(2, Math.ceil((v.base || v.needed) * nr.factor));
       v.danger = nr.danger;
+      v.event = ctx.map ? pickEvent(ctx.map, v.diff ?? 2, a.nav?.event) : a.nav?.event ? { id: String(a.nav.event).slice(0, 40), name: String(a.nav.sea || a.nav.event).slice(0, 50) } : v.event;
       v.navRead = true;
       v.votes[p.uid] = true;
-      out.toast = `Mer lue : ${DANGERS[v.danger - 1]}, ${v.needed} actions RP de traversée. Tu acceptes le départ.`;
+      out.toast = `Mer lue : ${v.event ? v.event.name : 'aucun événement'}, ${v.needed} actions RP de traversée. Tu acceptes le départ.`;
       sailIfReady(ship, out);
       break;
     }

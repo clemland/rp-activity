@@ -364,7 +364,7 @@ export default handler(['POST'], async (req, body) => {
       if (v2 && action.nav && out.player?.job?.id === 'navigateur' && ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.read'].includes(action.type)) {
         const cap = Math.round(Math.min(1, Math.max(0, Number(action.nav.score) || 0)) * 100), d = v2.danger || 3;
         const sea = String(action.nav.sea || '').replace(/[*_`~|<>@]/g, '').slice(0, 30);
-        await announce(out.ship.channel?.id || out.ship.position?.channelId, `🧭 **${fullName(out.player)}** lit la mer pour **${out.ship.name}** : cap tenu ${cap} %, la roue des vents tombe sur ${sea ? `**${sea}**` : 'la mer'} (${GM.DANGERS[d - 1]} ${'☠'.repeat(d)}). Traversée : ${v2.needed} actions RP${v2.unknown ? '' : ` vers ${v2.toName}`}.`);
+        await announce(out.ship.channel?.id || out.ship.position?.channelId, `🧭 **${fullName(out.player)}** lit la mer pour **${out.ship.name}** : cap tenu ${cap} %, la roue des vents tombe sur **${v2.event?.name || 'rien'}** (route ${GM.ROUTE_DIFFS[(v2.diff || 2) - 1].toLowerCase()}). Traversée : ${v2.needed} actions RP${v2.unknown ? '' : ` vers ${v2.toName}`}.`);
       }
       if (action.type === 'ship.meet' && action.choice === 'accoster' && v2?.encounter) await announce(out.ship.channel?.id, `⚓ **${out.ship.name}** accoste **${v2.encounter.withName}** : les deux navires sont bord à bord.`);
       return reply(out, { ships: { [action.shipId]: out.ship } });

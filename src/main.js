@@ -1914,7 +1914,81 @@ const WIND_SEGS = [
   { l: 'Mer d’huile', d: 1, c: '#bfe6fa' }, { l: 'Vent favorable', d: 1, c: '#9fd3ef' }, { l: 'Brise', d: 2, c: '#7fc28a' }, { l: 'Houle', d: 3, c: '#e8d38a' },
   { l: 'Brume', d: 3, c: '#d6d6d6' }, { l: 'Courants', d: 4, c: '#e6a223' }, { l: 'Tempête', d: 5, c: '#e0574d' }, { l: 'Mer déchaînée', d: 5, c: '#a46fd6' },
 ];
+/** La roue des vents : ses cases sont les événements choisis par le staff pour ce niveau de mer. */
 const windStep = (rank, res, diff = 2) => (api) => {
+  const se = G.normalizeSeaEvents(SEA);
+  const colors = ['#bfe6fa', '#9fd3ef', '#7fc28a', '#e8d38a', '#d6d6d6', '#e6a223', '#e0574d', '#a46fd6', '#f2c84b', '#8fd0c4'];
+  const segs = (se.levels[diff] || []).map((id, i) => ({ id, l: se.list.find((e) => e.id === id)?.name || id, c: colors[i % colors.length] }));
+  if (!segs.length) {
+    res.event = null;
+    res.sea = '';
+    api.area.innerHTML = '<p class="op-step">🎡 Aucun événement sur cette mer.</p>';
+    return void setTimeout(() => api.next(), 900);
+  }
+  const n = segs.length;
+  segs.forEach((s, i) => {
+    s.a0 = (i * 360) / n;
+    s.a1 = ((i + 1) * 360) / n;
+  });
+  const P = (a, r) => `${(Math.sin((a * Math.PI) / 180) * r).toFixed(2)} ${(-Math.cos((a * Math.PI) / 180) * r).toFixed(2)}`;
+  let rerolls = Math.max(0, rank - 1); // Confirmé : 1 relance, Maître : 2
+  const fs = n > 8 ? 7 : n > 5 ? 8 : 9;
+  api.area.innerHTML = `<p class="op-step">🎡 <b>La roue des vents</b> (route ${G.ROUTE_DIFFS[diff - 1].toLowerCase()}) : lance la roue, puis arrête-la. Elle décide de l’événement du voyage.${rerolls ? ` Ton expérience te permet de la relancer ${rerolls} fois.` : ''}</p>
+    <div class="windwheel"><span class="ww-ptr" aria-hidden="true">▼</span><svg viewBox="-105 -105 210 210" aria-label="Roue des vents"><g id="ww">${segs.map((s) => `${n === 1 ? `<circle r="100" fill="${s.c}" stroke="#17255e" stroke-width="2"/>` : `<path d="M 0 0 L ${P(s.a0, 100)} A 100 100 0 ${s.a1 - s.a0 > 180 ? 1 : 0} 1 ${P(s.a1, 100)} Z" fill="${s.c}" stroke="#17255e" stroke-width="2"/>`}<text transform="rotate(${(s.a0 + s.a1) / 2}) translate(0 -60) rotate(90)" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" font-weight="800" fill="#17255e">${esc(s.l)}</text>`).join('')}</g><circle r="12" fill="#17255e"/></svg></div>
+    <div class="form-actions"><button type="button" class="btn" id="mg-hit">🎡 Lancer</button></div>`;
+  let ang = 0, speed = 0, state = 'idle', decel = 0;
+  const tick = (dt) => {
+    if (state === 'idle') return;
+    if (state === 'stop') speed = Math.max(0, speed - decel * dt);
+    ang = (ang + speed * dt) % 360;
+    $('ww')?.setAttribute('transform', `rotate(${ang})`);
+    if (state !== 'stop' || speed > 0) return;
+    state = 'done';
+    api.onTick(null);
+    const local = (((360 - ang) % 360) + 360) % 360;
+    const s = segs.find((x) => local >= x.a0 && local < x.a1) || segs[n - 1];
+    res.event = s.id;
+    res.sea = s.l;
+    if (rerolls > 0) {
+      api.msg(`La roue tombe sur : ${s.l}. Tu peux la relancer, ou garder ce résultat.`);
+      $('mg-hit').disabled = false;
+      $('mg-hit').textContent = `🎡 Relancer (${rerolls})`;
+      const keep = document.createElement('button');
+      keep.type = 'button';
+      keep.className = 'btn ghost';
+      keep.id = 'mg-keep';
+      keep.textContent = '✓ Garder';
+      keep.onclick = () => api.next();
+      $('mg-hit').after(keep);
+    } else {
+      api.msg(`La roue tombe sur : ${s.l}.`);
+      setTimeout(() => api.next(), 1400);
+    }
+  };
+  const spin = () => {
+    state = 'spin';
+    speed = mgRnd(520, 680);
+    $('mg-hit').textContent = '✋ Arrêter';
+    $('mg-hit').disabled = false;
+    $('mg-keep')?.remove();
+    api.onTick(tick);
+  };
+  $('mg-hit').onclick = () => {
+    if (state === 'idle') return spin();
+    if (state === 'spin') {
+      state = 'stop';
+      decel = (speed * speed) / (2 * mgRnd(300, 700)); // s'arrête après un dernier tour imprévisible
+      $('mg-hit').disabled = true;
+      return;
+    }
+    if (state === 'done' && rerolls > 0) {
+      rerolls--;
+      spin();
+    }
+  };
+  api.onTick(tick);
+};
+const windStepOld = (rank, res, diff = 2) => (api) => {
   // Un navigateur expérimenté agrandit les cases calmes ; une route difficile agrandit les cases dangereuses
   // Seuls les états de mer possibles pour la difficulté de la route (paisible : mer d'huile ou calme…)
   const segs = WIND_SEGS.filter((s) => s.d >= Math.max(1, diff - 2) && s.d <= Math.min(5, diff + 1)).map((s) => {
@@ -1963,7 +2037,11 @@ const windStep = (rank, res, diff = 2) => (api) => {
 };
 /** Mini-jeu du navigateur au départ : renvoie { score, danger, sea }, ou null s'il abandonne. */
 async function navGame(rank, title, diff = 2) {
-  const res = { score: 0.5, danger: 3, sea: 'Houle' };
+  if (!SEA) {
+    const out = await run({ type: 'features.get' }); // les événements de la roue
+    if (out?.seaEvents) SEA = out.seaEvents;
+  }
+  const res = { score: 0.5, danger: diff, sea: '', event: null };
   const ok = await miniGame({ title, help: `Route ${G.ROUTE_DIFFS[diff - 1].toLowerCase()}. Tiens le cap, puis lance la roue des vents : ta lecture de la mer décide de la durée et des dangers du voyage.`, steps: [helmStep(rank, res, diff), windStep(rank, res, diff)], doneText: 'La mer est lue !' });
   return ok ? res : null;
 }
@@ -1976,16 +2054,13 @@ function shipOfVoyage(v) {
 function dangerHTML(v) {
   if (!VIEW) refreshFeatures(); // événements en mer à jour (au plus une fois par minute)
   const sh = shipOfVoyage(v);
-  const d = v.danger || v.diff || 2;
+  const d = v.diff || v.danger || 2;
   const btn = v.status === 'vote' && !v.navRead && S?.job?.id === 'navigateur' && sh?.passengers?.includes(S.uid) && !VIEW
     ? `<button class="btn sm" data-navread="${esc(sh.id)}">🧭 Lire la mer</button>` : '';
   const wait = v.status === 'vote' && !v.navRead ? '<small class="note" style="display:block">Un navigateur à bord doit lire la mer avant de pouvoir accepter le départ.</small>' : '';
   return `<div class="sea-read">
-    <p class="note" style="margin:2px 0 2px">Mer prévue (${v.navRead ? 'lue par le navigateur' : 'selon la route'}) : <b class="d${d}">${'☠'.repeat(d)}${'·'.repeat(5 - d)}</b> ${G.DANGERS[d - 1]}</p>
-    <p class="note" style="margin:0 0 4px">${(() => {
-      const names = G.seaEventsAt(SEA, d);
-      return names.length ? `Événements possibles : ${names.map(esc).join(', ')}` : 'Aucun événement prévu.';
-    })()}</p>${wait}${btn}</div>`;
+    <p class="note" style="margin:2px 0 2px">Route : <b class="d${d}">${G.ROUTE_DIFFS[d - 1]}</b> ${'☠'.repeat(d)}</p>
+    <p class="note" style="margin:0 0 4px">${v.event ? `Événement : <b>${esc(v.event.name)}</b> (${v.navRead ? 'lu par le navigateur' : 'tiré au hasard'})` : 'Aucun événement.'}</p>${wait}${btn}</div>`;
 }
 /** Rencontre en mer : un autre bateau en vue, accoster ou reprendre la mer. */
 function encounterHTML(v) {
@@ -4256,11 +4331,11 @@ function renderSeaEvents() {
   if (!seaDraft) return void (el.innerHTML = '<p class="note">Chargement…</p>');
   el.innerHTML = `
     <div class="sec-head">
-      <div><h2>Événements en mer</h2><p class="lede" style="margin:0">Coche les événements qui peuvent arriver à chaque niveau de mer (le danger du voyage, de 1 à 5). Leurs effets seront réglés ensuite.</p></div>
+      <div><h2>Événements en mer</h2><p class="lede" style="margin:0">Pour chaque niveau de mer (la difficulté de la route), coche les événements qui figurent sur la roue des vents. Le navigateur fait tourner la roue au départ ; sans navigateur, un événement est tiré au hasard. Leurs effets seront réglés ensuite.</p></div>
       <button class="btn" id="sea-save">Enregistrer</button>
     </div>
     <div class="sea-table"><table>
-      <thead><tr><th>Événement</th>${G.DANGERS.map((n, i) => `<th>${i + 1}<br><small>${esc(n)}</small></th>`).join('')}<th></th></tr></thead>
+      <thead><tr><th>Événement</th>${G.ROUTE_DIFFS.map((n, i) => `<th>${i + 1}<br><small>${esc(n)}</small></th>`).join('')}<th></th></tr></thead>
       <tbody>${seaDraft.list.map((ev) => `<tr>
         <td><input data-sea-name="${esc(ev.id)}" value="${esc(ev.name)}" maxlength="50" aria-label="Nom de l’événement"></td>
         ${[1, 2, 3, 4, 5].map((l) => `<td><input type="checkbox" data-sea-lvl="${l}" data-sea-id="${esc(ev.id)}" ${seaDraft.levels[l].includes(ev.id) ? 'checked' : ''} aria-label="${esc(ev.name)}, niveau ${l}"></td>`).join('')}

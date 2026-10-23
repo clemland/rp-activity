@@ -127,6 +127,8 @@ export function careBlock(doctor, patient, h, recipe) {
   if (doctor.uid === patient.uid && h.level > 1) return 'On ne s’opère pas soi-même : seules les blessures légères se soignent seul.';
   if (doctor.uid !== patient.uid && (!doctor.position?.channelId || doctor.position.channelId !== patient.position?.channelId)) return 'Le patient doit être au même endroit que toi (le dernier salon RP où vous avez écrit).';
   if (Object.entries(recipe.needs).some(([k, q]) => count(doctor, k) < q)) return 'Matériel manquant.';
+  const missT = missingTools(doctor, recipe);
+  if (missT.length) return `Outil manquant : ${missT.join(', ')}.`;
   return null;
 }
 export function normalizeHealth(h = {}) {
@@ -488,6 +490,7 @@ export function normalizeRecipe(x) {
     lvl: int(x.lvl, 1, 3),
     seconds: int(x.seconds, 0, CRAFT_MAX_SECONDS),
     needs: items(x.needs),
+    tools: items(x.tools), // requis mais non consommés (outils)
     gives,
     work,
     care,
@@ -514,10 +517,17 @@ export function takeItems(p, store, needs) {
   }
   return fromChest;
 }
+/** Outils d'une recette : requis mais non consommés (inventaire, armes équipées comprises, ou cale). */
+export const toolCount = (p, store, k) => count(p, k) + (store?.hold?.[k] || 0);
+export function missingTools(p, r, store = null) {
+  return Object.entries(r.tools || {}).filter(([k, q]) => toolCount(p, store, k) < q + (r.needs?.[k] || 0)).map(([k]) => itemOf(k).name);
+}
 export function craftBlock(p, r, crew = null) {
   if (r.job && r.job !== p.job.id) return `Réservé au métier ${JOBS[r.job].name}.`;
   if (r.job && p.job.lvl < r.lvl) return `Demande le niveau ${JOB_LEVELS[r.lvl - 1]}.`;
   if (Object.entries(r.needs).some(([k, q]) => stockOf(p, crew, k) < q)) return 'Objets manquants (inventaire et cale).';
+  const miss = missingTools(p, r, crew);
+  if (miss.length) return `Outil manquant : ${miss.join(', ')}.`;
   return null;
 }
 

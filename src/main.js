@@ -916,6 +916,15 @@ function needChip([k, q], have = true, store = NAVD?.aboard) {
   const h = G.stockOf(S, store, k), it = itemOf(k); // inventaire + cale du bateau où l'on est à bord
   return `<span class="need ${have ? (h >= q ? 'have' : 'miss') : ''}">${itemIco(k)}${esc(it.name)} ${have ? `${h}/${q}` : `× ${q}`}</span>`;
 }
+/** Outils d'une recette (requis, gardés) : en vert si on les a, en rouge sinon. */
+function toolsHTML(r, store = NAVD?.aboard) {
+  const list = Object.entries(r.tools || {});
+  if (!list.length) return '';
+  return `<b>Outils (gardés)</b><div class="needs">${list.map(([k, q]) => {
+    const h = G.toolCount(S, store, k) - (r.needs?.[k] || 0);
+    return `<span class="need ${h >= q ? 'have' : 'miss'}">${itemIco(k)}🔧 ${esc(itemOf(k).name)}${q > 1 ? ` × ${q}` : ''}</span>`;
+  }).join('')}</div>`;
+}
 function renderJob() {
   if (!S) return;
   const job = S.job.id ? JOBS[S.job.id] : null;
@@ -960,6 +969,7 @@ function renderJob() {
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
         <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
+        ${toolsHTML(r)}
 
         <div class="recipe-foot">
           ${why ? `<span class="req">${esc(why)}</span>` : '<span></span>'}
@@ -1037,6 +1047,7 @@ function atelierHTML() {
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
         <div class="needs">${Object.entries(r.needs).map((x) => needChip(x, true, store)).join('') || '<span class="note">Rien</span>'}</div>
+        ${toolsHTML(r, store)}
         <div class="recipe-foot">${why ? `<span class="req">${esc(why)}</span>` : '<span></span>'}<button class="btn sm" data-work="${esc(id)}" ${why ? 'disabled' : ''}>Travailler</button></div>
       </article>`;
     }).join('')}</div>`;
@@ -1996,7 +2007,7 @@ function patientsHTML(cares) {
     const ok = h.healAt ? [] : cares.filter(([, r]) => r.care.level >= h.level && (!r.care.type || r.care.type === h.type));
     const self = p.uid === S.uid, key = `${p.uid}:${h.id}`;
     return `<div class="member-row care-row"><span class="m-name"><b>${esc(p.name)}</b>${self ? ' (toi)' : ''} · ${esc(h.label)} <small class="note">${esc(G.injuryName(h.type))}</small> <span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.healAt ? ` <small class="ok">💚 déjà soignée, guérie ${healIn(h)}</small>` : ''}</span>
-      <select data-care-rec="${esc(key)}" aria-label="Soin">${ok.map(([id, r]) => `<option value="${esc(id)}">${esc(G.recipeLabel(r))} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans matériel'}</option>`).join('') || '<option value="">Aucun soin assez fort</option>'}</select>
+      <select data-care-rec="${esc(key)}" aria-label="Soin">${ok.map(([id, r]) => `<option value="${esc(id)}">${esc(G.recipeLabel(r))} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans matériel'}${Object.keys(r.tools || {}).length ? ` · outils : ${Object.keys(r.tools).map((k) => esc(itemOf(k).name)).join(', ')}` : ''}</option>`).join('') || '<option value="">Aucun soin assez fort</option>'}</select>
       <span class="m-acts"><button class="btn sm" data-care-ask="${esc(key)}" ${ok.length ? '' : 'disabled'}>${self ? 'Me soigner' : 'Proposer le soin'}</button></span></div>`;
   }).join('')).join('')}</div>`;
 }
@@ -5427,7 +5438,10 @@ function renderRecipeEdit() {
     <button type="button" class="btn sm ghost" data-rc-add="gives">+ Ajouter un objet produit</button>
     <h3 class="ed-h">Ingrédients</h3>
     <div class="se-items">${rows(r.needs, 'needs') || '<p class="note">Aucun ingrédient.</p>'}</div>
-    <button type="button" class="btn sm ghost" data-rc-add="needs">+ Ajouter un ingrédient</button>`;
+    <button type="button" class="btn sm ghost" data-rc-add="needs">+ Ajouter un ingrédient</button>
+    <h3 class="ed-h">Outils (requis, non consommés)</h3>
+    <div class="se-items">${rows(r.tools || {}, 'tools') || '<p class="note">Aucun outil : il faut seulement les ingrédients.</p>'}</div>
+    <button type="button" class="btn sm ghost" data-rc-add="tools">+ Ajouter un outil</button>`;
 }
 function readRecipeEdit() {
   const r = recipeDraft;
@@ -5438,7 +5452,7 @@ function readRecipeEdit() {
   readWorkFields(r);
   readCareFields(r);
   readGameFields(r);
-  for (const kind of ['needs', 'gives']) {
+  for (const kind of ['needs', 'gives', 'tools']) {
     const next = {};
     document.querySelectorAll(`#rc-body .rc-row[data-kind="${kind}"]`).forEach((row) => {
       const k = row.querySelector('[data-f=k]').value, q = Math.max(1, Math.round(+row.querySelector('[data-f=q]').value || 1));
@@ -5457,6 +5471,7 @@ $('d-recipe').addEventListener('click', (e) => {
   const add = e.target.closest('[data-rc-add]')?.dataset.rcAdd;
   if (add) {
     readRecipeEdit();
+    recipeDraft[add] ??= {};
     const free = Object.keys(G.ITEMS).find((k) => !recipeDraft[add][k]) || Object.keys(G.ITEMS)[0];
     recipeDraft[add][free] = (recipeDraft[add][free] || 0) + 1;
     return renderRecipeEdit();

@@ -1434,6 +1434,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .map-links .lk.d4{stroke:#ff9a6b}
 .map-links .lk.d5{stroke:#ff5252}
 .route-dir{grid-template-columns:1fr auto auto 90px 26px}
+.gest-grid .gest-group{grid-column:1/-1;margin:10px 0 0;padding-top:8px}
+.gest-grid .gest-group:first-child{margin-top:0;border-top:none;padding-top:0}
 .sea-read .d1,.sea-read .d2{color:#1d7a3a}
 .sea-read .d3{color:#a8690c}
 .sea-read .d4,.sea-read .d5{color:var(--red)}

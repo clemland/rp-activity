@@ -5070,8 +5070,29 @@ function renderGestion() {
   if (!tools()) return;
   const q = gestQuery.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   const match = (s) => !q || s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().includes(q);
-  const items = Object.entries(G.ITEMS).filter(([, it]) => match(it.name)).sort((a, b) => a[1].name.localeCompare(b[1].name));
-  const recs = Object.entries(G.RECIPES).filter(([, r]) => match(G.recipeLabel(r))).sort((a, b) => G.recipeLabel(a[1]).localeCompare(G.recipeLabel(b[1])));
+  // Filtres et tri (barre sous la recherche)
+  const rIdx = (id) => G.RARITIES.findIndex((r) => r.key === G.rarityOf(id).key);
+  const kindIdx = (k) => Object.keys(KIND).indexOf(k);
+  const items = Object.entries(G.ITEMS)
+    .filter(([id, it]) => match(it.name) && (!gestF.kind || it.kind === gestF.kind) && (!gestF.rarity || G.rarityOf(id).key === gestF.rarity))
+    .sort((a, b) => {
+      const byName = a[1].name.localeCompare(b[1].name);
+      if (gestF.sort === 'kind') return kindIdx(a[1].kind) - kindIdx(b[1].kind) || byName;
+      if (gestF.sort === 'rarity') return rIdx(b[0]) - rIdx(a[0]) || byName;
+      if (gestF.sort === 'value') return (b[1].value || 0) - (a[1].value || 0) || byName;
+      if (gestF.sort === 'weight') return (b[1].weight || 0) - (a[1].weight || 0) || byName;
+      return byName;
+    });
+  const rType = (r) => (r.work ? 'work' : r.care ? 'care' : 'craft');
+  const jobIdx = (j) => (j ? Object.keys(JOBS).indexOf(j) : 99);
+  const recs = Object.entries(G.RECIPES)
+    .filter(([, r]) => match(G.recipeLabel(r)) && (!gestF.job || (gestF.job === 'none' ? !r.job : r.job === gestF.job)) && (!gestF.rtype || rType(r) === gestF.rtype))
+    .sort((a, b) => {
+      const byName = G.recipeLabel(a[1]).localeCompare(G.recipeLabel(b[1]));
+      if (gestF.rsort === 'job') return jobIdx(a[1].job) - jobIdx(b[1].job) || byName;
+      if (gestF.rsort === 'time') return (a[1].seconds || 0) - (b[1].seconds || 0) || byName;
+      return byName;
+    });
   $('v-gest').innerHTML = `
     <div class="sec-head">
       <div><h2>Gestion</h2><p class="lede" style="margin:0">Les objets et les recettes du RP. La boutique de ce salon se gère dans l’écran Boutique.</p></div>
@@ -5085,13 +5106,14 @@ function renderGestion() {
       <input class="mj-search gest-search" id="gest-q" type="search" placeholder="Chercher…" value="${esc(gestQuery)}" aria-label="Chercher">
       <button class="btn" id="gest-new">${gestTab === 'items' ? '+ Nouvel objet' : gestTab === 'injuries' ? '+ Nouvelle catégorie' : '+ Nouvelle recette'}</button>
     </div>
+    ${gestFiltersHTML()}
     ${gestTab === 'injuries' ? injuriesHTML() : gestTab === 'items'
-      ? items.length ? `<div class="gest-grid">${items.map(([id, it]) => `
+      ? items.length ? `<div class="gest-grid">${items.map(([id, it], i) => `${gestF.sort === 'kind' && (i === 0 || items[i - 1][1].kind !== it.kind) ? `<h3 class="ed-h gest-group">${KIND[it.kind]}</h3>` : ''}
           <button class="gest-card" data-item="${esc(id)}">
             <span class="slot-ico">${itemIco(id)}</span>
             <span><b ${G.rarityOf(id).key !== 'commun' ? `style="color:${G.rarityOf(id).color}"` : ''}>${esc(it.name)}</b><small>${KIND[it.kind]} · ${G.rarityOf(id).name} · ${it.value ? berry(it.value) : 'invendable'}${it.kind === 'bateau' ? ` · cale ${G.kg(it.ship.capacity)}, vitesse ${it.ship.sail}, ${it.ship.berths} places${it.ship.cannons ? `, ${it.ship.cannons} canons` : ''}` : ` · ${G.kg(it.weight || 0)}`}${it.kind === 'amelioration' ? ` · +${fmt(it.upgrade.amount)} ${G.UPGRADES[it.upgrade.type].unit}` : ''}</small></span>
           </button>`).join('')}</div>` : '<p class="note">Aucun objet. Crée le premier avec « + Nouvel objet ».</p>'
-      : recs.length ? `<div class="gest-grid">${recs.map(([id, r]) => `
+      : recs.length ? `<div class="gest-grid">${recs.map(([id, r], i) => `${gestF.rsort === 'job' && (i === 0 || recs[i - 1][1].job !== r.job) ? `<h3 class="ed-h gest-group">${r.job ? JOBS[r.job].name : 'Tous métiers'}</h3>` : ''}
           <button class="gest-card" data-recipe="${esc(id)}">
             <span class="slot-ico">${recipeIco(r)}</span>
             <span><b>${esc(G.recipeLabel(r))}</b><small>${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans ingrédient'}</small></span>
@@ -5131,6 +5153,32 @@ $('v-gest').addEventListener('click', (e) => {
   if (it) return openItemEdit(it);
   const rc = e.target.closest('[data-recipe]')?.dataset.recipe;
   if (rc) return openRecipeEdit(rc);
+});
+/** Filtres et tri de Gestion (objets et recettes). */
+let gestF = { kind: '', rarity: '', sort: 'name', job: '', rtype: '', rsort: 'name' };
+function gestFiltersHTML() {
+  const sel = (key, label, opts) => `<label class="flt"><span>${label}</span><select data-gf="${key}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${gestF[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+  if (gestTab === 'items') {
+    return `<div class="filters">
+      ${sel('kind', 'Catégorie', [['', 'Toutes'], ...Object.entries(KIND)])}
+      ${sel('rarity', 'Rareté', [['', 'Toutes'], ...G.RARITIES.map((r) => [r.key, r.name])])}
+      ${sel('sort', 'Trier par', [['name', 'Nom'], ['kind', 'Catégorie'], ['rarity', 'Rareté'], ['value', 'Valeur'], ['weight', 'Poids']])}
+    </div>`;
+  }
+  if (gestTab === 'recipes') {
+    return `<div class="filters">
+      ${sel('job', 'Métier', [['', 'Tous'], ...Object.entries(JOBS).map(([k, j]) => [k, j.name]), ['none', 'Tous métiers (sans métier)']])}
+      ${sel('rtype', 'Type', [['', 'Toutes'], ['craft', 'Fabrication'], ['work', 'Travail sur bateau'], ['care', 'Soin']])}
+      ${sel('rsort', 'Trier par', [['name', 'Nom'], ['job', 'Métier'], ['time', 'Durée']])}
+    </div>`;
+  }
+  return '';
+}
+$('v-gest').addEventListener('change', (e) => {
+  const k = e.target.dataset?.gf;
+  if (!k) return;
+  gestF[k] = e.target.value;
+  renderGestion();
 });
 /** Onglet « Blessures » de Gestion : catégories de blessures. */
 function injuriesHTML() {

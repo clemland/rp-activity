@@ -1446,6 +1446,9 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .feat-st{font-weight:800;font-size:14px;padding:2px 10px;border-radius:999px;border:2px solid currentColor}
 .feat-st.ok{color:#1d7a3a}
 .feat-st.no{color:var(--red)}
+.feat-off{text-align:center;padding:40px 16px}
+.feat-off span{font-size:54px;display:block;margin-bottom:6px}
+.feat-off h2{margin:0 0 6px}
 .sea-read .d1,.sea-read .d2{color:#1d7a3a}
 .sea-read .d3{color:#a8690c}
 .sea-read .d4,.sea-read .d5{color:var(--red)}

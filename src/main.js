@@ -916,6 +916,18 @@ function needChip([k, q], have = true, store = NAVD?.aboard) {
   const h = G.stockOf(S, store, k), it = itemOf(k); // inventaire + cale du bateau où l'on est à bord
   return `<span class="need ${have ? (h >= q ? 'have' : 'miss') : ''}">${itemIco(k)}${esc(it.name)} ${have ? `${h}/${q}` : `× ${q}`}</span>`;
 }
+/** Fonctionnalités activées ou non (vérifiées à l'ouverture de l'onglet Métier, au plus une fois par minute). */
+let FEAT = {}, featAt = 0;
+function refreshFeatures() {
+  if (VIEW || Date.now() - featAt < 60_000) return;
+  featAt = Date.now();
+  run({ type: 'features.get' }).then((out) => {
+    if (!out?.features) return;
+    const before = JSON.stringify(FEAT);
+    FEAT = out.features;
+    if (JSON.stringify(FEAT) !== before) renderJob();
+  });
+}
 /** Outils d'une recette (requis, gardés) : en vert si on les a, en rouge sinon. */
 function toolsHTML(r, store = NAVD?.aboard) {
   const list = Object.entries(r.tools || {});
@@ -926,6 +938,11 @@ function toolsHTML(r, store = NAVD?.aboard) {
   }).join('')}</div>`;
 }
 function renderJob() {
+  if ($('v-job')?.offsetParent) refreshFeatures(); // onglet visible : on vérifie si les métiers sont ouverts
+  if (FEAT.metiers === false && !VIEW) {
+    $('v-job').innerHTML = '<div class="feat-off"><span aria-hidden="true">🛠️</span><h2>Fonctionnalité désactivée pour le moment</h2><p class="note">Les métiers reviendront bientôt.</p></div>';
+    return;
+  }
   if (!S) return;
   const job = S.job.id ? JOBS[S.job.id] : null;
   const recs = Object.entries(G.RECIPES).filter(([, r]) => !r.work && !r.care && (!r.job || r.job === S.job.id));

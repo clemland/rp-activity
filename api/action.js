@@ -60,6 +60,11 @@ export default handler(['POST'], async (req, body) => {
     if (typeof ph === 'string') action.photo = await ingest(ph, 'photos', me.uid);
     else if (ph?.url) action.photo = { ...ph, url: await ingest(ph.url, 'photos', me.uid) };
   }
+  // État des fonctionnalités (l'app masque l'onglet Métier quand les métiers sont désactivés)
+  if (action.type === 'features.get') {
+    const { map: fm0 } = await loadMap();
+    return { features: fm0.features || {} };
+  }
   // Fonctionnalité désactivée par le staff (écran « Fonctionnalités »)
   const feat = GM.featureFor(action.type);
   if (feat) {

@@ -1328,21 +1328,41 @@ export function normalizeSeaEvents(x) {
   const src = x && Array.isArray(x.list) ? x : SEA_EVENTS_DEFAULT;
   const list = src.list.filter((e) => e && String(e.name || '').trim()).slice(0, 60).map((e, i) => ({ id: String(e.id || `ev${i}`).slice(0, 40), name: String(e.name).trim().slice(0, 50) }));
   const ids = new Set(list.map((e) => e.id));
-  const levels = Object.fromEntries([1, 2, 3, 4, 5].map((l) => [l, [...new Set((src.levels?.[l] || []).map(String).filter((id) => ids.has(id)))]]));
+  // Probabilités par niveau de mer : { id: % } (anciennes listes cochées : parts égales)
+  const levels = Object.fromEntries([1, 2, 3, 4, 5].map((l) => {
+    const lv = src.levels?.[l], w = {};
+    if (Array.isArray(lv)) {
+      const keep = [...new Set(lv.map(String).filter((id) => ids.has(id)))];
+      for (const id of keep) w[id] = Math.round((100 / keep.length) * 10) / 10;
+    } else if (lv && typeof lv === 'object') {
+      for (const [id, v] of Object.entries(lv)) {
+        const n = Math.max(0, Math.min(100, Number(v) || 0));
+        if (ids.has(id) && n > 0) w[id] = Math.round(n * 10) / 10;
+      }
+    }
+    return [l, w];
+  }));
   return { list, levels };
 }
 /** Événement d'un voyage : celui de la roue du navigateur s'il est valable, sinon un tiré au hasard parmi ceux du niveau. */
 export function pickEvent(map, level, wanted = null) {
   const se = normalizeSeaEvents(map?.seaEvents);
-  const ids = se.levels[level] || [];
+  const w = se.levels[level] || {};
+  const ids = Object.keys(w);
   if (!ids.length) return null;
-  const id = wanted && ids.includes(String(wanted)) ? String(wanted) : ids[Math.floor(Math.random() * ids.length)];
+  let id = wanted && ids.includes(String(wanted)) ? String(wanted) : null;
+  if (!id) {
+    // Tirage selon les probabilités du niveau
+    const tot = ids.reduce((s, k) => s + w[k], 0);
+    let r = Math.random() * tot;
+    id = ids.find((k) => (r -= w[k]) < 0) || ids[ids.length - 1];
+  }
   return { id, name: se.list.find((e) => e.id === id)?.name || id };
 }
 /** Noms des événements possibles à un niveau de mer. */
 export function seaEventsAt(seaEvents, level) {
   const se = normalizeSeaEvents(seaEvents);
-  return (se.levels[level] || []).map((id) => se.list.find((e) => e.id === id)?.name).filter(Boolean);
+  return Object.keys(se.levels[level] || {}).map((id) => se.list.find((e) => e.id === id)?.name).filter(Boolean);
 }
 /** Risques d'un voyage selon son danger (affichés dans l'encadré ; serviront aux événements en mer). */
 export const RISKS = [

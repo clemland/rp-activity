@@ -1918,7 +1918,7 @@ const WIND_SEGS = [
 const windStep = (rank, res, diff = 2) => (api) => {
   const se = G.normalizeSeaEvents(SEA);
   const colors = ['#bfe6fa', '#9fd3ef', '#7fc28a', '#e8d38a', '#d6d6d6', '#e6a223', '#e0574d', '#a46fd6', '#f2c84b', '#8fd0c4'];
-  const segs = (se.levels[diff] || []).map((id, i) => ({ id, l: se.list.find((e) => e.id === id)?.name || id, c: colors[i % colors.length] }));
+  const segs = Object.entries(se.levels[diff] || {}).map(([id, w], i) => ({ id, w, l: se.list.find((e) => e.id === id)?.name || id, c: colors[i % colors.length] }));
   if (!segs.length) {
     res.event = null;
     res.sea = '';
@@ -1926,9 +1926,13 @@ const windStep = (rank, res, diff = 2) => (api) => {
     return void setTimeout(() => api.next(), 900);
   }
   const n = segs.length;
-  segs.forEach((s, i) => {
-    s.a0 = (i * 360) / n;
-    s.a1 = ((i + 1) * 360) / n;
+  // Cases proportionnelles aux probabilités du niveau de mer
+  const totW = segs.reduce((a, s) => a + s.w, 0) || 1;
+  let acc = 0;
+  segs.forEach((s) => {
+    s.a0 = acc;
+    acc += (s.w / totW) * 360;
+    s.a1 = acc;
   });
   const P = (a, r) => `${(Math.sin((a * Math.PI) / 180) * r).toFixed(2)} ${(-Math.cos((a * Math.PI) / 180) * r).toFixed(2)}`;
   let rerolls = Math.max(0, rank - 1); // Confirmé : 1 relance, Maître : 2
@@ -4326,21 +4330,27 @@ async function loadSeaEvents() {
   }
   renderSeaEvents();
 }
+/** Total des probabilités d'un niveau de mer (en rouge s'il ne fait pas 100 %). */
+function seaTotHTML(l) {
+  const sum = Math.round(Object.values(seaDraft.levels[l]).reduce((a, b) => a + b, 0) * 10) / 10;
+  return `<th id="sea-tot-${l}" class="${sum === 100 || sum === 0 ? '' : 'warn'}">${sum} %</th>`;
+}
 function renderSeaEvents() {
   const el = $('v-asea');
   if (!seaDraft) return void (el.innerHTML = '<p class="note">Chargement…</p>');
   el.innerHTML = `
     <div class="sec-head">
-      <div><h2>Événements en mer</h2><p class="lede" style="margin:0">Pour chaque niveau de mer (la difficulté de la route), coche les événements qui figurent sur la roue des vents. Le navigateur fait tourner la roue au départ ; sans navigateur, un événement est tiré au hasard. Leurs effets seront réglés ensuite.</p></div>
+      <div><h2>Événements en mer</h2><p class="lede" style="margin:0">Pour chaque niveau de mer (la difficulté de la route), donne la probabilité de chaque événement, en %. Vide ou 0 : l’événement n’arrive jamais à ce niveau. Les cases de la roue des vents suivent ces probabilités, comme le tirage sans navigateur. Si une colonne ne fait pas 100 %, les chances sont prises en proportion. Leurs effets seront réglés ensuite.</p></div>
       <button class="btn" id="sea-save">Enregistrer</button>
     </div>
     <div class="sea-table"><table>
       <thead><tr><th>Événement</th>${G.ROUTE_DIFFS.map((n, i) => `<th>${i + 1}<br><small>${esc(n)}</small></th>`).join('')}<th></th></tr></thead>
       <tbody>${seaDraft.list.map((ev) => `<tr>
         <td><input data-sea-name="${esc(ev.id)}" value="${esc(ev.name)}" maxlength="50" aria-label="Nom de l’événement"></td>
-        ${[1, 2, 3, 4, 5].map((l) => `<td><input type="checkbox" data-sea-lvl="${l}" data-sea-id="${esc(ev.id)}" ${seaDraft.levels[l].includes(ev.id) ? 'checked' : ''} aria-label="${esc(ev.name)}, niveau ${l}"></td>`).join('')}
+        ${[1, 2, 3, 4, 5].map((l) => `<td><input type="number" min="0" max="100" step="any" data-sea-lvl="${l}" data-sea-id="${esc(ev.id)}" value="${seaDraft.levels[l][ev.id] ?? ''}" placeholder="0" aria-label="${esc(ev.name)}, niveau ${l}, en %"> %</td>`).join('')}
         <td><button type="button" class="close sm-close" data-sea-del="${esc(ev.id)}" aria-label="Supprimer ${esc(ev.name)}">×</button></td>
       </tr>`).join('')}</tbody>
+      <tfoot><tr><th>Total</th>${[1, 2, 3, 4, 5].map((l) => seaTotHTML(l)).join('')}<th></th></tr></tfoot>
     </table></div>
     <button type="button" class="btn sm ghost" id="sea-add">+ Ajouter un événement</button>`;
 }
@@ -4350,19 +4360,20 @@ $('v-asea').addEventListener('input', (e) => {
   const ev = seaDraft.list.find((x) => x.id === id);
   if (ev) ev.name = e.target.value;
 });
-$('v-asea').addEventListener('change', (e) => {
+$('v-asea').addEventListener('input', (e) => {
   const l = e.target.dataset?.seaLvl, id = e.target.dataset?.seaId;
   if (!l || !id) return;
-  const set = new Set(seaDraft.levels[l]);
-  if (e.target.checked) set.add(id);
-  else set.delete(id);
-  seaDraft.levels[l] = [...set];
+  const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+  if (v > 0) seaDraft.levels[l][id] = v;
+  else delete seaDraft.levels[l][id];
+  const t = $(`sea-tot-${l}`);
+  if (t) t.outerHTML = seaTotHTML(l);
 });
 $('v-asea').addEventListener('click', async (e) => {
   const del = e.target.closest('[data-sea-del]')?.dataset.seaDel;
   if (del) {
     seaDraft.list = seaDraft.list.filter((x) => x.id !== del);
-    for (const l of [1, 2, 3, 4, 5]) seaDraft.levels[l] = seaDraft.levels[l].filter((x) => x !== del);
+    for (const l of [1, 2, 3, 4, 5]) delete seaDraft.levels[l][del];
     return renderSeaEvents();
   }
   if (e.target.closest('#sea-add')) {

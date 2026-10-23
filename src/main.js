@@ -1757,7 +1757,7 @@ function readGameFields(r) {
 let jobView = 'metier';
 const jobSwitchHTML = () => `<div class="job-switch" role="tablist">${[['metier', '🛠️ Métier'], ['cuisine', '🍳 Cuisine']].map(([k, l]) => `<button type="button" role="tab" class="${jobView === k ? 'on' : ''}" aria-selected="${jobView === k}" data-jobview="${k}">${l}</button>`).join('')}</div>`;
 function renameJobTab() {
-  const tab = document.querySelector('[aria-controls="t-job"], [data-tab="t-job"], [href="#t-job"]');
+  const tab = $('t-job');
   if (!tab) return;
   const want = beta() && !VIEW ? 'Savoir-faire' : 'Métier';
   const walker = document.createTreeWalker(tab, NodeFilter.SHOW_TEXT);

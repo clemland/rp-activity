@@ -152,7 +152,7 @@ export const JOBS = {
   charpentier: { name: 'Charpentier', pic: 'hammer' },
   scientifique: { name: 'Scientifique', pic: 'potion' },
   medecin: { name: 'Médecin', pic: 'stetho' },
-  cuisinier: { name: 'Cuisinier', pic: 'potion' }, // sans niveau : il crée ses recettes, validées par le staff
+  cuisinier: { name: 'Cuisinier', pic: 'potion', noLevel: true }, // sans niveau : il crée ses recettes, validées par le staff
 };
 
 /** Testeurs des nouveautés pas encore ouvertes à tous (cuisine, commerce). */

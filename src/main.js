@@ -957,8 +957,8 @@ function renderJob() {
     <div class="job-head">
       <div class="badge">${icon(`metier-${S.job.id || 'aucun'}`)}</div>
       <div>
-        <h2>${job ? esc(job.name) : 'Aucun métier'} ${job ? `<span class="pips" aria-label="Niveau ${S.job.lvl} sur 3">${[1, 2, 3].map((i) => `<i class="${i <= S.job.lvl ? 'on' : ''}"></i>`).join('')}</span>` : ''}</h2>
-        ${job ? `<p class="lede" style="margin:0">${JOB_LEVELS[S.job.lvl - 1]}</p>` : ''}
+        <h2>${job ? esc(job.name) : 'Aucun métier'} ${job && !job.noLevel ? `<span class="pips" aria-label="Niveau ${S.job.lvl} sur 3">${[1, 2, 3].map((i) => `<i class="${i <= S.job.lvl ? 'on' : ''}"></i>`).join('')}</span>` : ''}</h2>
+        ${job && !job.noLevel ? `<p class="lede" style="margin:0">${JOB_LEVELS[S.job.lvl - 1]}</p>` : ''}
       </div>
     </div>
 
@@ -986,7 +986,7 @@ function renderJob() {
       const why = G.craftBlock(S, r, NAVD?.aboard);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${Object.keys(r.gives).slice(0, 1).map((k) => itemIco(k)).join('')}${esc(G.recipeLabel(r))}</h3>
-        <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}${r.game?.list?.length ? ' · 🎮 mini-jeu' : ''}</p>
+        <p class="note">${r.job ? `${JOBS[r.job].name}${JOBS[r.job].noLevel ? '' : ` · ${JOB_LEVELS[r.lvl - 1]}`}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}${r.game?.list?.length ? ' · 🎮 mini-jeu' : ''}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
         <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
@@ -1064,7 +1064,7 @@ function atelierHTML() {
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${recipeIco(r)}${esc(G.workLabel(r.work))}</h3>
         ${choix ? `<div class="mj-row"><label>Bois</label><select data-wood-for="${esc(id)}" aria-label="Bois du bateau">${Object.entries(G.WOODS).map(([k, w]) => `<option value="${k}" ${k === wood ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div>` : ''}
-        <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>
+        <p class="note">${r.job ? `${JOBS[r.job].name}${JOBS[r.job].noLevel ? '' : ` · ${JOB_LEVELS[r.lvl - 1]}`}` : 'Tous métiers'}${r.work.type === 'voile' ? ` · rang ${JOB_LEVELS[G.sailRank(r.work.level) - 1]}` : ''}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
         <div class="needs">${Object.entries(r.needs).map((x) => needChip(x, true, store)).join('') || '<span class="note">Rien</span>'}</div>
@@ -3328,7 +3328,7 @@ function openEdit() {
       ${num('berry', 'Berrys', S.berry, 0, 99999999999)}
       ${num('statPts', 'Points de stats', S.statPts, 0, 999)}
       ${STATS.map((s) => num(`st_${s.key}`, s.name, S.stats[s.key], 0, STAT_MAX)).join('')}
-      <div><label for="f-jobLvl">Niveau de métier</label><select id="f-jobLvl" name="jobLvl">${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${S.job.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div ${JOBS[S.job.id]?.noLevel ? 'hidden' : ''}><label for="f-jobLvl">Niveau de métier</label><select id="f-jobLvl" name="jobLvl">${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${S.job.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     </div>`;
   $('edit-err').textContent = '';
   openDialog('d-edit');
@@ -3428,7 +3428,7 @@ function renderMjTab() {
       <span><small>Niveau</small><b>${S.level}</b></span>
       <span><small>Berrys</small><b>${berry(S.berry)}</b></span>
       <span><small>Points à répartir</small><b>${S.statPts}</b></span>
-      <span><small>Métier</small><b>${job ? `${esc(job.name)} · ${JOB_LEVELS[S.job.lvl - 1]}` : 'Aucun'}</b></span>
+      <span><small>Métier</small><b>${job ? `${esc(job.name)}${job.noLevel ? '' : ` · ${JOB_LEVELS[S.job.lvl - 1]}`}` : 'Aucun'}</b></span>
       <span><small>Volonté</small>${stars(S.volonte)}</span>
     </div>
 
@@ -6007,7 +6007,7 @@ function renderGestion() {
       : recs.length ? `<div class="gest-grid">${recs.map(([id, r], i) => `${gestF.rsort === 'job' && (i === 0 || recs[i - 1][1].job !== r.job) ? `<h3 class="ed-h gest-group">${r.job ? JOBS[r.job].name : 'Tous métiers'}</h3>` : ''}
           <button class="gest-card" data-recipe="${esc(id)}">
             <span class="slot-ico">${recipeIco(r)}</span>
-            <span><b>${esc(G.recipeLabel(r))}</b><small>${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans ingrédient'}</small></span>
+            <span><b>${esc(G.recipeLabel(r))}</b><small>${r.job ? `${JOBS[r.job].name}${JOBS[r.job].noLevel ? '' : ` · ${JOB_LEVELS[r.lvl - 1]}`}` : 'Tous métiers'} · ${r.seconds ? G.duree(r.seconds) : 'immédiat'} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans ingrédient'}</small></span>
           </button>`).join('')}</div>` : `<p class="note">${Object.keys(G.ITEMS).length ? 'Aucune recette. Crée la première avec « + Nouvelle recette ».' : 'Crée d’abord des objets : une recette transforme des objets en d’autres objets.'}</p>`}`;
 }
 $('v-gest').addEventListener('input', (e) => {
@@ -6205,7 +6205,7 @@ function renderRecipeEdit() {
   $('rc-body').innerHTML = `
     <div class="form">
       <div><label for="rc-job">Métier</label><select id="rc-job"><option value="">Tous les métiers</option>${Object.entries(JOBS).map(([k, j]) => `<option value="${k}" ${r.job === k ? 'selected' : ''}>${j.name}</option>`).join('')}</select></div>
-      <div><label for="rc-lvl">Maîtrise requise</label><select id="rc-lvl" ${r.job ? '' : 'disabled'}>${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label for="rc-lvl">Maîtrise requise</label><select id="rc-lvl" ${r.job && !JOBS[r.job]?.noLevel ? '' : 'disabled'}>${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.lvl === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div><label for="rc-time">Temps de fabrication</label><div class="rc-time"><input id="rc-time" type="number" min="0" value="${r.seconds / unit}"><select id="rc-unit">${Object.entries(UNITS).map(([u, l]) => `<option value="${u}" ${+u === unit ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <div class="wide"><label for="rc-desc">Description (facultative)</label><input id="rc-desc" value="${esc(r.desc)}" maxlength="400"></div>
       ${workFieldsHTML(r)}

@@ -84,6 +84,30 @@ export default handler(['POST'], async (req, body) => {
       return { name: fullName(row.data) };
     }
 
+    case 'group': {
+      // /fiche groupe : équipage ou escouade d'un joueur (logo, banque commune, bateau attribué, membres et grades)
+      need(body.userId, 400, 'Joueur manquant.');
+      const row = await read('players', String(body.userId));
+      need(row, 404, 'Ce joueur n’a pas de fiche.');
+      need(row.data.crewId, 404, 'Ce joueur ne fait partie d’aucun équipage ni d’aucune escouade.');
+      const c = await read('crews', row.data.crewId);
+      need(c, 404, 'Équipage introuvable.');
+      const cr = normalizeCrew(c.data);
+      const members = [];
+      for (const uid of cr.members) {
+        const npc = cr.npcs?.[uid];
+        const prow = npc ? null : await read('players', uid);
+        members.push({ name: npc ? `${npc.name} (PNJ)` : prow?.data?.id?.name || 'Fiche supprimée', rank: rankName(cr, uid), captain: uid === cr.captain });
+      }
+      members.sort((a, b) => b.captain - a.captain);
+      let ship = null;
+      if (cr.ship) {
+        const s = await read('ships', cr.ship);
+        if (s) ship = { name: s.data.name, type: s.data.type || '', photo: s.data.photo || s.data.icon || null };
+      }
+      return { crew: { name: cr.name, kind: cr.kind, flag: cr.flag || null, bank: cr.bank ?? cr.berry ?? 0, members, ship } };
+    }
+
     case 'profile': {
       // /fiche : la fiche d'un joueur et son équipage (nom, type, grade), pour dessiner l'image
       need(body.userId, 400, 'Joueur manquant.');

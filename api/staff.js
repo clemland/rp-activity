@@ -605,7 +605,6 @@ export default handler(['POST'], async (req, body) => {
       return { shop: null, toast: 'Boutique fermée' };
 
     case 'cooks': {
-      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
       // Toutes les recettes de cuisine des joueurs
       const list = [];
       for (const [uid, p] of Object.entries(await readAll('players'))) for (const r of p.cook || []) list.push({ uid, player: fullName(p), recipe: r });
@@ -613,7 +612,6 @@ export default handler(['POST'], async (req, body) => {
       return { list };
     }
     case 'cook.validate': {
-      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
       // Recette de cuisine validée (son plat devient un objet du catalogue) ou refusée avec un motif
       need(body.target && body.id != null, 400, 'Recette manquante.');
       return retry(async () => {

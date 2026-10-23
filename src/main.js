@@ -943,7 +943,7 @@ function toolsHTML(r, store = NAVD?.aboard) {
 }
 function renderJob() {
   renameJobTab();
-  if (beta() && !VIEW && jobView === 'cuisine') {
+  if (nouveautes() && !VIEW && jobView === 'cuisine') {
     $('v-job').innerHTML = jobSwitchHTML() + cookHTML();
     return;
   }
@@ -1003,7 +1003,7 @@ function renderJob() {
         </div>
       </article>`;
     }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}${inventionsHTML()}`;
-  if (beta() && !VIEW) $('v-job').insertAdjacentHTML('afterbegin', jobSwitchHTML()); // sous-onglets Métier / Cuisine
+  if (nouveautes() && !VIEW) $('v-job').insertAdjacentHTML('afterbegin', jobSwitchHTML()); // sous-onglets Métier / Cuisine
 }
 $('v-job').addEventListener('click', async (e) => {
   const cf = e.target.closest('[data-cf]')?.dataset.cf;
@@ -1759,7 +1759,7 @@ const jobSwitchHTML = () => `<div class="job-switch" role="tablist">${[['metier'
 function renameJobTab() {
   const tab = $('t-job');
   if (!tab) return;
-  const want = beta() && !VIEW ? 'Savoir-faire' : 'Métier';
+  const want = nouveautes() && !VIEW ? 'Savoir-faire' : 'Métier';
   const walker = document.createTreeWalker(tab, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) if (/Métier|Savoir-faire/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Métier|Savoir-faire/, want);
 }
@@ -1772,6 +1772,10 @@ $('v-job').addEventListener('click', (e) => {
 /** Nouveautés en test (cuisine, commerce) : visibles seulement par les testeurs. */
 function beta() {
   return G.isBeta(ME?.uid);
+}
+/** Nouveautés visibles : ouvertes à tous (G.NEW_OPEN), sinon seulement pour les testeurs. */
+function nouveautes() {
+  return G.NEW_OPEN || beta();
 }
 /* ═══ Cuisine : mini-jeux ════════════════════════════════════════════════ */
 /** Couper : cliquer le plus vite possible. */
@@ -1961,7 +1965,7 @@ const cookGame = (r) => miniGame({ title: `Cuisine : ${r.name}`, steps: r.steps.
 
 /* ═══ Cuisine : recettes du cuisinier (onglet Métier) ═══════════════════ */
 function cookHTML() {
-  if (!beta()) return '';
+  if (!nouveautes()) return '';
   const list = S.cook || [];
   const status = (r) => (r.ok ? '<span class="status ok">Validée</span>' : r.refused ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>');
   return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🍳 Mes recettes</h2>${VIEW ? '' : '<button class="btn sm" id="ck-new">+ Nouvelle recette</button>'}</div>
@@ -2109,7 +2113,7 @@ tradeFab.hidden = true;
 document.body.append(tradeFab);
 function updateTradeFab() {
   const n = S?.offers?.length || 0;
-  tradeFab.hidden = !S || VIEW || !beta();
+  tradeFab.hidden = !S || VIEW || !nouveautes();
   const html = `🤝 Commerce${n ? ` <b>${n}</b>` : ''}`;
   if (tradeFab.innerHTML !== html) tradeFab.innerHTML = html;
 }
@@ -3603,7 +3607,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && beta(),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -3777,7 +3781,7 @@ async function enterAdmin({ target = null } = {}) {
   loadFleet();
   if (staffCan('techniques')) loadPendingTechs();
   if (staffCan('inventions')) loadPendingInventions();
-  if (staffCan('cuisine') && beta()) loadCooks();
+  if (staffCan('cuisine') && nouveautes()) loadCooks();
   if (target) await openPlayer(target, { tab: 't-mj' });
 }
 
@@ -5059,7 +5063,7 @@ function renderGames() {
         <div class="mj-row"><label for="tg-bgame">Mini-jeu</label><select id="tg-bgame"><option value="">Au hasard</option><option value="serrer">🩹 Bandage</option><option value="nettoyer">🦠 Désinfecter</option><option value="points">🧵 Points de suture</option></select></div>
         <div><button class="btn" id="tg-band-go">Tester le bandage</button></div>
       </section>
-      ${beta() ? `<section class="crew-box"><h3>🍳 Cuisine</h3>
+      ${nouveautes() ? `<section class="crew-box"><h3>🍳 Cuisine</h3>
         <div class="mj-row"><label for="tg-cook">Étape</label><select id="tg-cook"><option value="">Toutes les étapes, à la suite</option>${Object.entries(G.COOK_STEPS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
         <div><button class="btn" id="tg-cook-go">Tester</button></div>
       </section>` : ''}

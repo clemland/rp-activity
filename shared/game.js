@@ -158,7 +158,8 @@ export const JOBS = {
 /** Testeurs des nouveautés pas encore ouvertes à tous (cuisine, commerce). */
 export const BETA_USERS = ['464061688069488640'];
 export const isBeta = (uid) => BETA_USERS.includes(String(uid));
-export const betaAction = (type) => typeof type === 'string' && (type.startsWith('cook.') || type.startsWith('trade.'));
+export const NEW_OPEN = true; // nouveautés (cuisine, commerce) ouvertes à tous
+export const betaAction = (type) => !NEW_OPEN && typeof type === 'string' && (type.startsWith('cook.') || type.startsWith('trade.'));
 /** Étapes de cuisine (mini-jeux) que le cuisinier enchaîne dans l'ordre de sa recette. */
 export const COOK_STEPS = { couper: '🔪 Couper', four: '🔥 Cuire au four', melanger: '🥄 Mélanger', assaisonner: '🧂 Assaisonner', eplucher: '🥔 Éplucher', frire: '🍳 Frire', dresser: '🍽️ Dresser' };
 /** Catégories d'objets. Seules les armes s'équipent. */

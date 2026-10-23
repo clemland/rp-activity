@@ -920,9 +920,9 @@ function needChip([k, q], have = true, store = NAVD?.aboard) {
 function toolsHTML(r, store = NAVD?.aboard) {
   const list = Object.entries(r.tools || {});
   if (!list.length) return '';
-  return `<b>Outils (gardés)</b><div class="needs">${list.map(([k, q]) => {
+  return `<b>Outils</b><div class="needs">${list.map(([k, q]) => {
     const h = G.toolCount(S, store, k) - (r.needs?.[k] || 0);
-    return `<span class="need ${h >= q ? 'have' : 'miss'}">${itemIco(k)}🔧 ${esc(itemOf(k).name)}${q > 1 ? ` × ${q}` : ''}</span>`;
+    return `<span class="need ${h >= q ? 'have' : 'miss'}">${itemIco(k)}${esc(itemOf(k).name)}${q > 1 ? ` × ${q}` : ''}</span>`;
   }).join('')}</div>`;
 }
 function renderJob() {
@@ -5439,7 +5439,7 @@ function renderRecipeEdit() {
     <h3 class="ed-h">Ingrédients</h3>
     <div class="se-items">${rows(r.needs, 'needs') || '<p class="note">Aucun ingrédient.</p>'}</div>
     <button type="button" class="btn sm ghost" data-rc-add="needs">+ Ajouter un ingrédient</button>
-    <h3 class="ed-h">Outils (requis, non consommés)</h3>
+    <h3 class="ed-h">Outils</h3>
     <div class="se-items">${rows(r.tools || {}, 'tools') || '<p class="note">Aucun outil : il faut seulement les ingrédients.</p>'}</div>
     <button type="button" class="btn sm ghost" data-rc-add="tools">+ Ajouter un outil</button>`;
 }

@@ -5370,7 +5370,7 @@ $('d-recipe').addEventListener('click', (e) => {
 });
 $('rc-save').addEventListener('click', () => {
   readRecipeEdit();
-  if (!Object.keys(recipeDraft.gives).length && !recipeDraft.work) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet, ou être un travail sur bateau.');
+  if (!Object.keys(recipeDraft.gives).length && !recipeDraft.work && !recipeDraft.care) return void ($('rc-err').textContent = 'La recette doit produire au moins un objet, ou être un travail sur bateau, ou un soin.');
   gestCall('recipe.save', { id: recipeDraftId, recipe: recipeDraft }, $('d-recipe'));
 });
 $('rc-del').addEventListener('click', async () => {

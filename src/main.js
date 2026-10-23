@@ -1153,7 +1153,7 @@ async function dockDialog(shipId) {
   $('dock-title').textContent = `Amarrer sur ${out.island}`;
   const sel = $('dock-to');
   delete sel.dataset.enhanced;
-  sel.previousElementSibling?.classList.contains('sel-search') && sel.previousElementSibling.remove();
+  if (sel.parentElement?.classList.contains('sel-wrap')) sel.parentElement.replaceWith(sel); // on retire l'ancien filtre
   sel.innerHTML = out.options.map((o) => `<option value="${esc(o.id)}">${o.parentId ? '' : '#'}${esc(o.name)}</option>`).join('');
   $('dock-ok').onclick = async () => {
     const channelId = sel.value;
@@ -1182,7 +1182,11 @@ function enhanceSelect(sel) {
     }
     if (first && sel.selectedOptions[0]?.hidden) sel.value = first.value; // le premier choix qui correspond
   });
-  sel.before(q);
+  // Le filtre et le menu restent ensemble dans la même case (lignes en grille : ingrédients, boutique, butins…)
+  const wrap = document.createElement('span');
+  wrap.className = 'sel-wrap';
+  sel.replaceWith(wrap);
+  wrap.append(q, sel);
 }
 let enhanceQueued = false;
 new MutationObserver(() => {

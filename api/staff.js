@@ -250,7 +250,7 @@ export default handler(['POST'], async (req, body) => {
     case 'features': {
       // Fonctionnalités activées ou non pour les joueurs
       const { map } = await loadMap();
-      return { features: map.features || {} };
+      return { features: map.features || {}, seaEvents: map.seaEvents || null };
     }
     case 'inventions': {
       // Toutes les inventions en attente de validation, avec le niveau de métier de leur auteur
@@ -388,7 +388,8 @@ export default handler(['POST'], async (req, body) => {
       if (input.photo !== undefined) ship.photo = input.photo ? await ingest(input.photo, 'bateaux', id) : null;
       // Nouveau bateau : son salon RP est créé tout seul (sauf espace « aucun » ou salon déjà indiqué)
       let chanNote = '';
-      if (!old && !ship.channel && ship.space !== 'none') {
+      // Le salon du bateau est créé à son premier départ, pas à sa création
+      if (false) {
         const cfg = (await read('meta', 'ships:config'))?.data || {};
         if (!(ship.space === 'forum' ? cfg.categoryId : cfg.forumId)) chanNote = ' · salon non créé : fais d’abord /bateau config';
         else {
@@ -417,7 +418,7 @@ export default handler(['POST'], async (req, body) => {
         });
       }
       if (old && old.name !== ship.name && ship.channel) await renameShipChannel(ship).catch(() => {}); // le salon suit le nom du bateau
-      return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}${ship.channel ? ` · salon ${ship.channel.name} créé` : chanNote}` };
+      return { id, ship, toast: old ? `Bateau modifié : ${ship.name}` : `Bateau créé : ${ship.name}${ship.channel ? ` · salon ${ship.channel.name}` : ' · son salon sera créé à son premier départ'}` };
     }
 
     case 'ship.upgrade': {
@@ -465,6 +466,7 @@ export default handler(['POST'], async (req, body) => {
     case 'map.dir':
     case 'map.pace':
     case 'map.features':
+    case 'map.seaevents':
     case 'map.diff': {
       // Images d'abord (hors de la boucle de réessai)
       let bg, img;
@@ -497,6 +499,10 @@ export default handler(['POST'], async (req, body) => {
       return retry(async () => {
         const { map, version } = await loadMap();
         let toast = 'Carte mise à jour', id = body.id;
+        if (body.op === 'map.seaevents') {
+          map.seaEvents = body.seaEvents || null;
+          toast = 'Événements en mer enregistrés';
+        }
         if (body.op === 'map.features') {
           map.features = { ...(map.features || {}), ...Object.fromEntries(Object.entries(body.features || {}).map(([k, v]) => [k, !!v])) };
           toast = 'Fonctionnalités enregistrées';

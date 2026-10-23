@@ -1453,6 +1453,14 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .sea-read .btn{margin-top:4px}
 .calc-big{font-size:20px;margin:4px 0}
 .calc-big b{font-size:34px;color:var(--sea)}
+/* ═══ Événements en mer ═══ */
+.sea-table{overflow-x:auto;margin:12px 0}
+.sea-table table{border-collapse:collapse;width:100%;background:var(--card);border:3px solid var(--ink)}
+.sea-table th,.sea-table td{border:1px solid rgba(23,37,94,.25);padding:6px 8px;text-align:center}
+.sea-table th:first-child,.sea-table td:first-child{text-align:left}
+.sea-table th small{font-weight:600;color:var(--muted)}
+.sea-table td input[type=checkbox]{width:20px;height:20px;accent-color:var(--sea)}
+.sea-table td input:not([type]){width:100%;min-width:160px;font:inherit;padding:3px 6px;border:2px solid var(--ink);border-radius:4px;background:#fff}
 .sea-read .d1,.sea-read .d2{color:#1d7a3a}
 .sea-read .d3{color:#a8690c}
 .sea-read .d4,.sea-read .d5{color:var(--red)}

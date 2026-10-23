@@ -1312,6 +1312,28 @@ export function pathDifficulty(map, path) {
   return d;
 }
 export const DANGERS = ['Mer d’huile', 'Mer calme', 'Mer agitée', 'Mer dangereuse', 'Mer mortelle'];
+/** Événements en mer : choisis par le staff pour chaque niveau de mer (leurs effets seront réglés ensuite). */
+export const SEA_EVENTS_DEFAULT = {
+  list: [
+    { id: 'houle', name: 'Houle' }, { id: 'epave', name: 'Épave à la dérive' }, { id: 'marchand', name: 'Marchand ambulant' },
+    { id: 'tempete', name: 'Tempête' }, { id: 'courants', name: 'Courants' }, { id: 'brume', name: 'Brume' },
+    { id: 'recifs', name: 'Récifs' }, { id: 'monstre', name: 'Monstre marin' }, { id: 'pirates', name: 'Navire pirate' },
+    { id: 'marine', name: 'Patrouille de la Marine' }, { id: 'roi', name: 'Roi des mers' }, { id: 'tourbillon', name: 'Tourbillon' },
+  ],
+  levels: { 1: [], 2: ['houle', 'epave', 'marchand'], 3: ['tempete', 'courants', 'brume', 'epave'], 4: ['tempete', 'recifs', 'monstre', 'pirates', 'marine'], 5: ['tempete', 'monstre', 'roi', 'tourbillon'] },
+};
+export function normalizeSeaEvents(x) {
+  const src = x && Array.isArray(x.list) ? x : SEA_EVENTS_DEFAULT;
+  const list = src.list.filter((e) => e && String(e.name || '').trim()).slice(0, 60).map((e, i) => ({ id: String(e.id || `ev${i}`).slice(0, 40), name: String(e.name).trim().slice(0, 50) }));
+  const ids = new Set(list.map((e) => e.id));
+  const levels = Object.fromEntries([1, 2, 3, 4, 5].map((l) => [l, [...new Set((src.levels?.[l] || []).map(String).filter((id) => ids.has(id)))]]));
+  return { list, levels };
+}
+/** Noms des événements possibles à un niveau de mer. */
+export function seaEventsAt(seaEvents, level) {
+  const se = normalizeSeaEvents(seaEvents);
+  return (se.levels[level] || []).map((id) => se.list.find((e) => e.id === id)?.name).filter(Boolean);
+}
 /** Risques d'un voyage selon son danger (affichés dans l'encadré ; serviront aux événements en mer). */
 export const RISKS = [
   'aucun incident, seulement l’usure normale de la coque.',
@@ -1970,7 +1992,7 @@ export function normalizeMap(m = {}) {
   // Difficulté des routes : { "a|b": 1 à 5 } (2 par défaut)
   const diff = {};
   for (const [k, v] of Object.entries(m.diff || {})) if (links[k] !== undefined) diff[k] = int(v, 1, 5);
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, diff, features: normalizeFeatures(m.features), pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, diff, features: normalizeFeatures(m.features), seaEvents: normalizeSeaEvents(m.seaEvents), pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
 }
 /** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {

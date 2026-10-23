@@ -101,6 +101,27 @@ export default handler(['POST'], async (req, body) => {
       return { player: p, crew };
     }
 
+    case 'ship.channel.deleted': {
+      // Le salon d'un bateau a été supprimé : on l'oublie, et un voyage en cours est annulé (retour au port de départ)
+      need(body.channelId, 400, 'Salon manquant.');
+      const cid = String(body.channelId), names = [];
+      for (const [sid, raw] of Object.entries(await readAll('ships'))) {
+        if (String(raw.channel?.id || '') !== cid) continue;
+        await retry(async () => {
+          const r = await read('ships', sid);
+          const sh = normalizeShip(r.data);
+          if (sh.voyage) {
+            if (!sh.position && sh.voyage.port) sh.position = sh.voyage.port;
+            sh.voyage = null;
+          }
+          sh.channel = null;
+          await write('ships', sid, sh, r.version);
+        });
+        names.push(raw.name);
+      }
+      return { ships: names };
+    }
+
     case 'ship.embed': {
       // Fiche du bateau pour le premier message de son salon (/bateau salon)
       const row = await read('ships', String(body.shipId || ''));
@@ -259,8 +280,8 @@ export default handler(['POST'], async (req, body) => {
           }
         }
       }
-      // Agir en RP ailleurs que sur son bateau (son salon, ou le salon où il est à quai) : on descend du bord.
-      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+      // Désactivé : on ne descend plus du bord en écrivant ailleurs (bouton « Descendre » seulement)
+      if (false) {
         const here = [String(body.channelId), body.parentId ? String(body.parentId) : null];
         for (const [sid, sh] of Object.entries(await readAll('ships'))) {
           if (!(sh.passengers || []).includes(body.userId)) continue;

@@ -63,7 +63,7 @@ export default handler(['POST'], async (req, body) => {
   // État des fonctionnalités (l'app masque l'onglet Métier quand les métiers sont désactivés)
   if (action.type === 'features.get') {
     const { map: fm0 } = await loadMap();
-    return { features: fm0.features || {} };
+    return { features: fm0.features || {}, seaEvents: fm0.seaEvents || null };
   }
   // Fonctionnalité désactivée par le staff (écran « Fonctionnalités »)
   const feat = GM.featureFor(action.type);
@@ -317,7 +317,7 @@ export default handler(['POST'], async (req, body) => {
       if (row.data.position && !row.data.position.parentId && player.position?.channelId === row.data.position.channelId) row.data.position.parentId = player.position.parentId || null;
       const out = shipAction(player, row.data, action, { crew: cs.crew, channelId, now: Date.now(), map: action.type.startsWith('ship.voyage') ? (await loadMap()).map : null });
       // Monter à bord d'un petit bateau sans salon : son post est créé tout de suite
-      if ((out.boarded || out.accepted) && !out.ship.channel && out.ship.space === 'post') {
+      if (false) { // salon créé au premier départ seulement, plus à l'embarquement
         const ch = await ensureShipChannel(out.ship, me.uid).catch(() => null);
         if (ch) {
           out.ship.channel = ch;

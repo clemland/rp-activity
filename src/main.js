@@ -917,15 +917,19 @@ function needChip([k, q], have = true, store = NAVD?.aboard) {
   return `<span class="need ${have ? (h >= q ? 'have' : 'miss') : ''}">${itemIco(k)}${esc(it.name)} ${have ? `${h}/${q}` : `× ${q}`}</span>`;
 }
 /** Fonctionnalités activées ou non (vérifiées à l'ouverture de l'onglet Métier, au plus une fois par minute). */
-let FEAT = {}, featAt = 0;
+let FEAT = {}, featAt = 0, SEA = null; // SEA : événements en mer par niveau (réglés par le staff)
 function refreshFeatures() {
   if (VIEW || Date.now() - featAt < 60_000) return;
   featAt = Date.now();
   run({ type: 'features.get' }).then((out) => {
     if (!out?.features) return;
-    const before = JSON.stringify(FEAT);
+    const before = JSON.stringify([FEAT, SEA]);
     FEAT = out.features;
-    if (JSON.stringify(FEAT) !== before) renderJob();
+    SEA = out.seaEvents || SEA;
+    if (JSON.stringify([FEAT, SEA]) !== before) {
+      renderJob();
+      if (typeof renderAll === 'function') renderAll();
+    }
   });
 }
 /** Outils d'une recette (requis, gardés) : en vert si on les a, en rouge sinon. */
@@ -1908,11 +1912,12 @@ const helmStep = (rank, res, diff = 2) => (api) => {
 /** La roue des vents : on la lance, on l'arrête ; la case décide du danger du voyage. */
 const WIND_SEGS = [
   { l: 'Mer d’huile', d: 1, c: '#bfe6fa' }, { l: 'Vent favorable', d: 1, c: '#9fd3ef' }, { l: 'Brise', d: 2, c: '#7fc28a' }, { l: 'Houle', d: 3, c: '#e8d38a' },
-  { l: 'Brume', d: 3, c: '#d6d6d6' }, { l: 'Courants', d: 4, c: '#e6a223' }, { l: 'Tempête', d: 5, c: '#e0574d' }, { l: 'Rois des mers', d: 5, c: '#a46fd6' },
+  { l: 'Brume', d: 3, c: '#d6d6d6' }, { l: 'Courants', d: 4, c: '#e6a223' }, { l: 'Tempête', d: 5, c: '#e0574d' }, { l: 'Mer déchaînée', d: 5, c: '#a46fd6' },
 ];
 const windStep = (rank, res, diff = 2) => (api) => {
   // Un navigateur expérimenté agrandit les cases calmes ; une route difficile agrandit les cases dangereuses
-  const segs = WIND_SEGS.map((s) => {
+  // Seuls les états de mer possibles pour la difficulté de la route (paisible : mer d'huile ou calme…)
+  const segs = WIND_SEGS.filter((s) => s.d >= Math.max(1, diff - 2) && s.d <= Math.min(5, diff + 1)).map((s) => {
     const calm = s.d <= 2, rough = s.d >= 4;
     const w = 1 + (calm ? 0.45 : rough ? -0.25 : 0) * (rank - 1) + (calm ? -0.22 : rough ? 0.35 : 0.05) * (diff - 2);
     return { ...s, w: Math.max(0.2, w) };
@@ -1969,6 +1974,7 @@ function shipOfVoyage(v) {
 }
 /** Mer prévue et risques d'un voyage ; bouton « Lire la mer » pour un navigateur à bord pendant le vote. */
 function dangerHTML(v) {
+  if (!VIEW) refreshFeatures(); // événements en mer à jour (au plus une fois par minute)
   const sh = shipOfVoyage(v);
   const d = v.danger || v.diff || 2;
   const btn = v.status === 'vote' && !v.navRead && S?.job?.id === 'navigateur' && sh?.passengers?.includes(S.uid) && !VIEW
@@ -1976,7 +1982,10 @@ function dangerHTML(v) {
   const wait = v.status === 'vote' && !v.navRead ? '<small class="note" style="display:block">Un navigateur à bord doit lire la mer avant de pouvoir accepter le départ.</small>' : '';
   return `<div class="sea-read">
     <p class="note" style="margin:2px 0 2px">Mer prévue (${v.navRead ? 'lue par le navigateur' : 'selon la route'}) : <b class="d${d}">${'☠'.repeat(d)}${'·'.repeat(5 - d)}</b> ${G.DANGERS[d - 1]}</p>
-    <p class="note" style="margin:0 0 4px">Risques : ${esc(G.RISKS[d - 1])}</p>${wait}${btn}</div>`;
+    <p class="note" style="margin:0 0 4px">${(() => {
+      const names = G.seaEventsAt(SEA, d);
+      return names.length ? `Événements possibles : ${names.map(esc).join(', ')}` : 'Aucun événement prévu.';
+    })()}</p>${wait}${btn}</div>`;
 }
 /** Rencontre en mer : un autre bateau en vue, accoster ou reprendre la mer. */
 function encounterHTML(v) {
@@ -3107,7 +3116,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -4229,6 +4238,74 @@ $('v-atech').addEventListener('click', async (e) => {
     setBusy(-1);
   }
   loadPendingTechs();
+});
+
+/* ═══ Événements en mer par niveau de mer (panneau admin) ════════════════ */
+let seaDraft = null;
+async function loadSeaEvents() {
+  try {
+    seaDraft = G.normalizeSeaEvents((await API.staff('features')).seaEvents);
+  } catch (err) {
+    seaDraft = G.normalizeSeaEvents(null);
+    toast(esc(err.message));
+  }
+  renderSeaEvents();
+}
+function renderSeaEvents() {
+  const el = $('v-asea');
+  if (!seaDraft) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Événements en mer</h2><p class="lede" style="margin:0">Coche les événements qui peuvent arriver à chaque niveau de mer (le danger du voyage, de 1 à 5). Leurs effets seront réglés ensuite.</p></div>
+      <button class="btn" id="sea-save">Enregistrer</button>
+    </div>
+    <div class="sea-table"><table>
+      <thead><tr><th>Événement</th>${G.DANGERS.map((n, i) => `<th>${i + 1}<br><small>${esc(n)}</small></th>`).join('')}<th></th></tr></thead>
+      <tbody>${seaDraft.list.map((ev) => `<tr>
+        <td><input data-sea-name="${esc(ev.id)}" value="${esc(ev.name)}" maxlength="50" aria-label="Nom de l’événement"></td>
+        ${[1, 2, 3, 4, 5].map((l) => `<td><input type="checkbox" data-sea-lvl="${l}" data-sea-id="${esc(ev.id)}" ${seaDraft.levels[l].includes(ev.id) ? 'checked' : ''} aria-label="${esc(ev.name)}, niveau ${l}"></td>`).join('')}
+        <td><button type="button" class="close sm-close" data-sea-del="${esc(ev.id)}" aria-label="Supprimer ${esc(ev.name)}">×</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <button type="button" class="btn sm ghost" id="sea-add">+ Ajouter un événement</button>`;
+}
+$('v-asea').addEventListener('input', (e) => {
+  const id = e.target.dataset?.seaName;
+  if (!id) return;
+  const ev = seaDraft.list.find((x) => x.id === id);
+  if (ev) ev.name = e.target.value;
+});
+$('v-asea').addEventListener('change', (e) => {
+  const l = e.target.dataset?.seaLvl, id = e.target.dataset?.seaId;
+  if (!l || !id) return;
+  const set = new Set(seaDraft.levels[l]);
+  if (e.target.checked) set.add(id);
+  else set.delete(id);
+  seaDraft.levels[l] = [...set];
+});
+$('v-asea').addEventListener('click', async (e) => {
+  const del = e.target.closest('[data-sea-del]')?.dataset.seaDel;
+  if (del) {
+    seaDraft.list = seaDraft.list.filter((x) => x.id !== del);
+    for (const l of [1, 2, 3, 4, 5]) seaDraft.levels[l] = seaDraft.levels[l].filter((x) => x !== del);
+    return renderSeaEvents();
+  }
+  if (e.target.closest('#sea-add')) {
+    seaDraft.list.push({ id: `ev${Date.now()}`, name: 'Nouvel événement' });
+    return renderSeaEvents();
+  }
+  if (e.target.closest('#sea-save')) {
+    setBusy(1);
+    try {
+      const out = await API.staff('map.seaevents', { seaEvents: seaDraft });
+      toast(esc(out?.toast || 'Événements en mer enregistrés'));
+      featAt = 0; // l'encadré des voyages se met à jour
+    } catch (err) {
+      toast(esc(err.message));
+    } finally {
+      setBusy(-1);
+    }
+  }
 });
 
 /* ═══ Calcul de trajet (panneau admin) ═══════════════════════════════════ */
@@ -5737,6 +5814,7 @@ function showScreen(name) {
   if (name === 'ainv') loadPendingInventions();
   if (name === 'afeat') loadFeatures();
   if (name === 'acalc') loadCalc();
+  if (name === 'asea') loadSeaEvents();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

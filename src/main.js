@@ -1962,12 +1962,45 @@ async function navGame(rank, title, diff = 2) {
   const ok = await miniGame({ title, help: `Route ${G.ROUTE_DIFFS[diff - 1].toLowerCase()}. Tiens le cap, puis lance la roue des vents : ta lecture de la mer décide de la durée et des dangers du voyage.`, steps: [helmStep(rank, res, diff), windStep(rank, res, diff)], doneText: 'La mer est lue !' });
   return ok ? res : null;
 }
-/** État de la mer prévu pour un voyage (lu par le navigateur au départ). */
-function dangerHTML(v) {
-  return v.danger
-    ? `<p class="note sea-read" style="margin:2px 0 4px">Mer prévue : <b class="d${v.danger}">${'☠'.repeat(v.danger)}${'·'.repeat(5 - v.danger)}</b> ${G.DANGERS[v.danger - 1]}</p>`
-    : '<p class="note" style="margin:2px 0 4px">Mer non lue : pas de navigateur au départ.</p>';
+/** Le bateau d'un voyage (parmi les bateaux connus de l'app). */
+function shipOfVoyage(v) {
+  const all = typeof SHIPS !== 'undefined' && SHIPS ? Object.values(SHIPS) : [];
+  return all.find((s) => s.voyage === v) || (NAVD?.aboard?.voyage === v ? NAVD.aboard : null);
 }
+/** Mer prévue et risques d'un voyage ; bouton « Lire la mer » pour un navigateur à bord pendant le vote. */
+function dangerHTML(v) {
+  const sh = shipOfVoyage(v);
+  const d = v.danger || v.diff || 2;
+  const btn = v.status === 'vote' && !v.navRead && S?.job?.id === 'navigateur' && sh?.passengers?.includes(S.uid) && !VIEW
+    ? `<button class="btn sm" data-navread="${esc(sh.id)}">🧭 Lire la mer</button>` : '';
+  const wait = v.status === 'vote' && !v.navRead ? '<small class="note" style="display:block">Un navigateur à bord doit lire la mer avant de pouvoir accepter le départ.</small>' : '';
+  return `<div class="sea-read">
+    <p class="note" style="margin:2px 0 2px">Mer prévue (${v.navRead ? 'lue par le navigateur' : 'selon la route'}) : <b class="d${d}">${'☠'.repeat(d)}${'·'.repeat(5 - d)}</b> ${G.DANGERS[d - 1]}</p>
+    <p class="note" style="margin:0 0 4px">Risques : ${esc(G.RISKS[d - 1])}</p>${wait}${btn}</div>`;
+}
+/** Rencontre en mer : un autre bateau en vue, accoster ou reprendre la mer. */
+function encounterHTML(v) {
+  const e = v.encounter;
+  if (!e) return '';
+  const sh = shipOfVoyage(v);
+  const can = sh && !VIEW && G.canManageShip(S, sh, CREW);
+  return `<div class="encounter"><b>⛵ ${e.alongside ? `Bord à bord avec ${esc(e.withName)}` : `Un navire est en vue : ${esc(e.withName)} !`}</b>
+    <p class="note" style="margin:2px 0 6px">${e.alongside ? 'Les passagers peuvent écrire dans le salon de l’autre bateau sans quitter le leur. Le voyage reprend quand vous repartez.' : 'Le bateau est à l’arrêt : les messages RP ne font plus avancer le voyage. Accostez pour jouer la rencontre, ou reprenez la mer.'}</p>
+    ${can ? `<div class="form-actions" style="justify-content:flex-start">${e.alongside ? '' : `<button class="btn sm" data-meet="${esc(sh.id)}" data-choice="accoster">⚓ Accoster</button>`}<button class="btn sm ghost" data-meet="${esc(sh.id)}" data-choice="repartir">⛵ Reprendre la mer</button></div>` : '<p class="note" style="margin:0">Le capitaine décide d’accoster ou de repartir.</p>'}
+  </div>`;
+}
+document.addEventListener('click', async (e) => {
+  const nr = e.target.closest('[data-navread]')?.dataset.navread;
+  if (nr) {
+    const all = typeof SHIPS !== 'undefined' && SHIPS ? Object.values(SHIPS) : [];
+    const sh = all.find((s) => s.id === nr) || (NAVD?.aboard?.id === nr ? NAVD.aboard : null);
+    const nav = await navGame(S.job.lvl, 'Lire la mer', sh?.voyage?.diff ?? 2);
+    if (nav) run({ type: 'ship.voyage.read', shipId: nr, nav });
+    return;
+  }
+  const m = e.target.closest('[data-meet]');
+  if (m) run({ type: 'ship.meet', shipId: m.dataset.meet, choice: m.dataset.choice });
+});
 
 /* ═══ Utiliser et donner des objets ═══════════════════════════════════════ */
 document.addEventListener('click', (e) => {
@@ -2273,7 +2306,7 @@ function voyageHTML(sh) {
   }
   const pct = Math.round((v.done / Math.max(1, v.needed)) * 100);
   return `<div class="crew-box voyage-box"><h3>${v.status === 'arrived' ? `⚓ En vue de ${esc(v.toName)} !` : `🌊 En mer vers ${esc(v.toName)}`}</h3>
-    ${dangerHTML(v)}<div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>Traversée depuis ${esc(v.fromName)}</span><span>${v.done} / ${v.needed} actions</span></div>
+    ${encounterHTML(v)}${dangerHTML(v)}<div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>Traversée depuis ${esc(v.fromName)}</span><span>${v.done} / ${v.needed} actions</span></div>
     <p class="note" style="margin:0">${v.status === 'arrived' ? `Le premier passager qui écrit un message RP sur ${esc(v.toName)} met le bateau à quai à cet endroit.` : `Chaque message RP de ${G.RP_MIN_CHARS} caractères ou plus d’un passager dans ${sh.channel ? `<b>${esc(sh.channel.name)}</b>` : 'le salon du bateau'} fait avancer le bateau. Écrire ailleurs, c’est passer par-dessus bord !`}</p></div>`;
 }
 $('v-amap').addEventListener('change', (e) => {

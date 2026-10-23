@@ -103,6 +103,17 @@ export async function channelById(channelId) {
   });
 }
 
+/** Message du bot dans un salon (annonces de rencontre en mer). */
+export async function postMessage(channelId, content) {
+  if (!env.botToken || !channelId) return;
+  try {
+    await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bot ${env.botToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+    });
+  } catch {}
+}
 /** Posts ouverts (fils actifs) du serveur principal : [{ id, name, parent_id }], gardés 1 minute. */
 export async function activeThreads() {
   if (!env.guildId || !env.botToken) return [];

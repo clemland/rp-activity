@@ -15,7 +15,7 @@ import { env } from './_lib/env.js';
 import { staffPerms } from './_lib/discord.js';
 import { shipEmbed } from './_lib/shipchan.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep, dockShip, rankName } from '../shared/game.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep, dockShip, rankName, shipStats, crossing } from '../shared/game.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
 
 const RP_KEY = 'rp:channels';
@@ -204,19 +204,49 @@ export default handler(['POST'], async (req, body) => {
               return sh;
             });
             if (s) res.voyage = { ship: s.name, done: s.voyage.done, needed: s.voyage.needed, to: s.voyage.unknown && s.voyage.status !== 'arrived' ? '???' : s.voyage.toName, arrived: s.voyage.status === 'arrived' };
+            // Rencontre en mer : deux bateaux sur la même route, au même endroit, s'arrêtent tous les deux
+            if (s && s.voyage.status === 'sea' && !s.voyage.encounter) {
+              for (const [oid, o0] of Object.entries(await readAll('ships'))) {
+                if (oid === sid) continue;
+                const o = normalizeShip(o0);
+                if (!crossing(s, sid, o, oid)) continue;
+                const meet = (id, otherId, other) => retry(async () => {
+                  const r = await read('ships', id);
+                  const sh = normalizeShip(r.data);
+                  if (sh.voyage?.status !== 'sea' || sh.voyage.encounter) return false;
+                  sh.voyage.encounter = { with: otherId, withName: other.name, withChannel: other.channel?.id || null, alongside: false, at: Date.now() };
+                  sh.voyage.met = [...(sh.voyage.met || []), otherId];
+                  await write('ships', id, sh, r.version);
+                  return true;
+                });
+                if (!(await meet(sid, oid, o))) break;
+                await meet(oid, sid, s);
+                res.encounter = { ship: s.name, other: o.name };
+                const { postMessage } = await import('./_lib/discord.js');
+                const txt = (mine, other) => `⛵ **Un navire est en vue : ${other} !** ${mine} s’arrête. Ouvrez l’app (écran Navigation) pour accoster ou reprendre la mer.`;
+                if (s.channel?.id) await postMessage(s.channel.id, txt(s.name, o.name));
+                if (o.channel?.id) await postMessage(o.channel.id, txt(o.name, s.name));
+                break;
+              }
+            }
           } else if (v.status === 'arrived' && !inShip) {
             carte ??= (await loadMap()).map;
             if (islandOf(carte, here) !== v.to) continue;
+            let wear = 0;
             const s = await retry(async () => {
               const r = await read('ships', sid);
               const sh = normalizeShip(r.data);
               if (sh.voyage?.status !== 'arrived') return null;
               dockShip(sh, here, carte, Date.now());
+              // Usure du voyage : la coque perd 1 à 3 % de sa vie maximale
+              const st = shipStats(sh);
+              wear = 1 + Math.floor(Math.random() * 3);
+              sh.hull = Math.max(0, st.hull - Math.ceil((st.hullMax * wear) / 100));
               await write('ships', sid, sh, r.version);
               return sh;
             });
             if (s) {
-              res.docked = { ship: s.name, where: here.name };
+              res.docked = { ship: s.name, where: wear ? `${here.name} (la coque a souffert : −${wear} %)` : here.name, wear };
               // Les passagers découvrent l'île : elle apparaît sur leur carte
               for (const uid of s.passengers) {
                 await retry(async () => {
@@ -234,7 +264,8 @@ export default handler(['POST'], async (req, body) => {
         const here = [String(body.channelId), body.parentId ? String(body.parentId) : null];
         for (const [sid, sh] of Object.entries(await readAll('ships'))) {
           if (!(sh.passengers || []).includes(body.userId)) continue;
-          const stays = [sh.channel?.id, sh.position?.channelId].some((c) => c && here.includes(String(c)));
+          // Bord à bord avec un autre bateau : écrire dans son salon ne fait pas passer par-dessus bord
+          const stays = [sh.channel?.id, sh.position?.channelId, sh.voyage?.encounter?.withChannel].some((c) => c && here.includes(String(c)));
           if (stays) continue;
           await retry(async () => {
             const r = await read('ships', sid);

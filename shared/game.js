@@ -1119,6 +1119,12 @@ export function normalizeShip(s) {
         votes: Object.fromEntries(Object.entries(v.votes || {}).filter(([, x]) => x).map(([u]) => [u, true])),
         port: pos(v.port), at: Number(v.at) || 0, unknown: !!v.unknown,
         danger: v.danger ? int(v.danger, 1, 5) : null, // lecture de la mer par le navigateur (1 à 5)
+        base: Number(v.base) || null, // actions avant la lecture de la mer
+        diff: v.diff ? int(v.diff, 1, 5) : null, // difficulté de la route
+        navRead: !!v.navRead, // un navigateur a lu la mer
+        // Rencontre en mer : arrêté face à un autre bateau, jusqu'à « Reprendre la mer »
+        encounter: v.encounter?.with ? { with: String(v.encounter.with), withName: String(v.encounter.withName || '').slice(0, 60), withChannel: v.encounter.withChannel ? String(v.encounter.withChannel) : null, alongside: !!v.encounter.alongside, at: Number(v.encounter.at) || 0 } : null,
+        met: (Array.isArray(v.met) ? v.met : []).map(String).slice(0, 50), // bateaux déjà rencontrés pendant ce voyage
       }
     : null;
   // Log Pose : rechargé sur l'île de Grand Line où le bateau est à quai
@@ -1283,7 +1289,7 @@ export const FEATURES = {
   dons: { name: 'Dons d’objets', icon: '🎁', desc: 'Donner un objet à un autre joueur.', off: 'Les dons d’objets sont désactivés pour le moment.' },
 };
 const FEATURE_TYPES = {
-  voyage: ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.vote'],
+  voyage: ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.vote', 'ship.voyage.read'],
   boutique: ['shop.buy', 'shop.sell'],
   metiers: ['craft.start', 'ship.work', 'invention.save', 'job.choose'],
   dons: ['item.give'],
@@ -1306,6 +1312,24 @@ export function pathDifficulty(map, path) {
   return d;
 }
 export const DANGERS = ['Mer d’huile', 'Mer calme', 'Mer agitée', 'Mer dangereuse', 'Mer mortelle'];
+/** Risques d'un voyage selon son danger (affichés dans l'encadré ; serviront aux événements en mer). */
+export const RISKS = [
+  'aucun incident, seulement l’usure normale de la coque.',
+  'houle légère ; parfois une bonne surprise (épave, marchand).',
+  'tempête (dégâts de coque), courants (traversée plus longue), brume.',
+  'fortes tempêtes, récifs, monstres marins, pirates ou Marine.',
+  'Rois des mers, tourbillons, naufrage possible si la coque est trop abîmée.',
+];
+/** Deux bateaux en mer se croisent : même route (dans un sens ou dans l'autre), au même endroit, pas encore rencontrés. */
+export function crossing(a, aid, b, bid) {
+  const va = a.voyage, vb = b.voyage;
+  if (va?.status !== 'sea' || vb?.status !== 'sea' || va.encounter || vb.encounter) return false;
+  if ((va.met || []).includes(bid) || (vb.met || []).includes(aid)) return false;
+  const pa = va.done / Math.max(1, va.needed), pb = vb.done / Math.max(1, vb.needed);
+  if (va.from === vb.from && va.to === vb.to) return Math.abs(pa - pb) <= 0.12;
+  if (va.from === vb.to && va.to === vb.from) return Math.abs(pa - (1 - pb)) <= 0.12;
+  return false;
+}
 export function navRoll(p, a, diff = null) {
   if (p.job?.id !== 'navigateur' || !a?.nav) return { factor: 1, danger: diff }; // sans navigateur : le danger de la route
   const score = Math.min(1, Math.max(0, Number(a.nav.score) || 0)); // part du temps passée au cap
@@ -1315,7 +1339,7 @@ export function navRoll(p, a, diff = null) {
 export const voyageActions = (distance, speed, pace = 0.5) => Math.max(2, Math.ceil(distance * pace * Math.sqrt(10 / Math.max(1, speed))));
 /** Une action RP pendant la traversée : le bateau avance, et arrive en vue de l'île au bout du compte. */
 export function voyageStep(ship) {
-  if (ship.voyage?.status !== 'sea') return ship;
+  if (ship.voyage?.status !== 'sea' || ship.voyage.encounter) return ship; // arrêté face à un autre bateau
   ship.voyage.done = Math.min(ship.voyage.needed, ship.voyage.done + 1);
   if (ship.voyage.done >= ship.voyage.needed) ship.voyage.status = 'arrived';
   return ship;
@@ -1384,9 +1408,9 @@ export function shipAction(player, ship0, action, ctx = {}) {
       if (!to || to.kind !== 'island' || (!to.visible && !(p.discovered || []).includes(a.to)) || !to.accessible || a.to === from) fail('Destination impossible.');
       const t = travelTime(map, from, a.to);
       if (!t) fail('Aucune route connue vers cette île.');
-      const nr = navRoll(p, a, pathDifficulty(map, t.path));
-      const needed = Math.max(2, Math.ceil(voyageActions(t.value, st.speed, map.pace) * nr.factor));
-      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now(), danger: nr.danger };
+      const diffP = pathDifficulty(map, t.path), nr = navRoll(p, a, diffP), baseP = voyageActions(t.value, st.speed, map.pace);
+      const needed = Math.max(2, Math.ceil(baseP * nr.factor));
+      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now(), danger: nr.danger, base: baseP, diff: diffP, navRead: p.job?.id === 'navigateur' && !!a.nav };
       out.toast = `Départ proposé vers ${to.name} (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;
@@ -1412,9 +1436,10 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const target = isl.choose ? isl.next[int(a.choice ?? 0, 0, 99)] : ship.logPose.target;
       if (!target || !map.islands[target]) fail('Le Log Pose ne pointe vers aucune île : le staff doit définir l’île suivante.');
       const t = travelTime(map, from, target);
-      const nrl = navRoll(p, a, t ? pathDifficulty(map, t.path) : 3);
-      const needed = Math.max(2, Math.ceil(voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace) * nrl.factor));
-      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true, danger: nrl.danger };
+      const diffL = t ? pathDifficulty(map, t.path) : 3, nrl = navRoll(p, a, diffL);
+      const baseL = voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace);
+      const needed = Math.max(2, Math.ceil(baseL * nrl.factor));
+      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true, danger: nrl.danger, base: baseL, diff: diffL, navRead: p.job?.id === 'navigateur' && !!a.nav };
       out.toast = `Le Log Pose pointe vers une île inconnue (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;
@@ -1428,9 +1453,40 @@ export function shipAction(player, ship0, action, ctx = {}) {
         out.toast = 'Tu as refusé : le départ est annulé.';
         break;
       }
+      if (p.job?.id === 'navigateur' && !v.navRead) fail('Lis d’abord la mer (bouton « 🧭 Lire la mer »).');
       v.votes[p.uid] = true;
       out.toast = 'Tu as accepté le départ.';
       sailIfReady(ship, out);
+      break;
+    }
+    case 'ship.voyage.read': {
+      // Un navigateur à bord lit la mer : durée et danger ajustés, et ça vaut son acceptation
+      const v = ship.voyage;
+      if (v?.status !== 'vote') fail('Aucun départ en attente.');
+      if (!ship.passengers.includes(p.uid)) fail('Tu n’es pas à bord.');
+      if (p.job?.id !== 'navigateur') fail('Seul un navigateur lit la mer.');
+      if (v.navRead) fail('La mer a déjà été lue.');
+      const nr = navRoll(p, a, v.diff ?? 2);
+      v.needed = Math.max(2, Math.ceil((v.base || v.needed) * nr.factor));
+      v.danger = nr.danger;
+      v.navRead = true;
+      v.votes[p.uid] = true;
+      out.toast = `Mer lue : ${DANGERS[v.danger - 1]}, ${v.needed} actions RP de traversée. Tu acceptes le départ.`;
+      sailIfReady(ship, out);
+      break;
+    }
+    case 'ship.meet': {
+      // Rencontre en mer : accoster (bord à bord) ou reprendre la mer
+      const e = ship.voyage?.encounter;
+      if (!e) fail('Aucun navire en vue.');
+      if (!canPilot(p, ship, ctx.crew)) fail('Seul le capitaine (ou un grade qui choisit le bateau) décide.');
+      if (a.choice === 'accoster') {
+        e.alongside = true;
+        out.toast = `${ship.name} accoste ${e.withName} : vous êtes bord à bord.`;
+      } else {
+        ship.voyage.encounter = null;
+        out.toast = `${ship.name} reprend la mer.`;
+      }
       break;
     }
     case 'ship.voyage.cancel': {

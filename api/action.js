@@ -165,8 +165,15 @@ export default handler(['POST'], async (req, body) => {
         for (const [k, q] of Object.entries(r.needs)) removeItem(player, k, q);
         let toast = `Soin raté : « ${h.label} » n’est pas soigné. Le matériel est perdu.`;
         if (action.success) {
-          patient.health = patient.health.filter((x) => x.id !== h.id);
-          toast = `Blessure soignée : « ${h.label} »${self ? '' : ` (${fullName(patient)})`} !`;
+          const secs = r.seconds || 0;
+          if (secs > 0) {
+            // Soin réussi : la blessure guérit au bout du temps de la recette (convalescence)
+            patient.health = patient.health.map((x) => (x.id === h.id ? { ...x, healAt: now + secs * 1000, healBy: fullName(player) } : x));
+            toast = `Soin réussi : « ${h.label} » sera guéri dans ${GM.duree(secs)}${self ? '' : ` (${fullName(patient)})`}.`;
+          } else {
+            patient.health = patient.health.filter((x) => x.id !== h.id);
+            toast = `Blessure soignée : « ${h.label} »${self ? '' : ` (${fullName(patient)})`} !`;
+          }
           if (!self) {
             player.careOut = player.careOut.filter((x) => x.id !== req.id);
             patient.careIn = patient.careIn.filter((x) => x.id !== req.id);

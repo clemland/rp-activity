@@ -227,6 +227,8 @@ function badgeHTML() {
   return '';
 }
 
+/** Temps restant avant la guérison d'une blessure soignée (convalescence). */
+const healIn = (h) => (h.healAt - Date.now() > 0 ? `dans ${G.duree((h.healAt - Date.now()) / 1000)}` : 'bientôt');
 /** Étiquette de santé sous le nom : « Intact », ou le résumé des blessures et maladies (dépliable). */
 function healthHTML(p) {
   const list = p.health || [];
@@ -238,7 +240,7 @@ function healthHTML(p) {
   };
   const sum = `${list.length} blessure${list.length > 1 ? 's' : ''}`;
   return `<details class="health"><summary class="hp-tag lvl-${worst}">${worst >= 3 ? '🩸' : '🩹'} ${sum} · ${G.HEALTH_LEVELS[worst - 1]}</summary>
-    <ul>${list.map((h) => `<li><b>🩹 ${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small><span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.desc ? `<br><small>${esc(h.desc)}</small>` : ''}</li>`).join('')}</ul></details>`;
+    <ul>${list.map((h) => `<li><b>🩹 ${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small><span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.healAt ? ` <small class="ok">💚 en convalescence, guérie ${healIn(h)}</small>` : ''}${h.desc ? `<br><small>${esc(h.desc)}</small>` : ''}</li>`).join('')}</ul></details>`;
 }
 /** Îles découvertes du joueur (onglet Édition MJ) : cases à cocher. */
 function discoveredHTML() {
@@ -261,7 +263,7 @@ function healthToolsHTML() {
   const list = S.health || [];
   return `<h3 class="ed-h">État de santé</h3>
     <div class="mj-tools">
-      ${list.length ? `<div class="member-list">${list.map((h) => `<div class="member-row"><span class="m-name">🩹 <b>${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small>${h.desc ? ` <small class="note">${esc(h.desc)}</small>` : ''}</span><span class="rank-badge hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span><span class="m-acts"><button class="btn sm ghost" data-health-del="${esc(h.id)}">Guérir</button></span></div>`).join('')}</div>` : '<p class="note" style="margin:0">💚 Intact : aucune blessure, aucune maladie.</p>'}
+      ${list.length ? `<div class="member-list">${list.map((h) => `<div class="member-row"><span class="m-name">🩹 <b>${esc(h.label)}</b> <small class="note">${esc(G.injuryName(h.type))}</small>${h.desc ? ` <small class="note">${esc(h.desc)}</small>` : ''}${h.healAt ? ` <small class="ok">💚 convalescence : guérie ${healIn(h)}</small>` : ''}</span><span class="rank-badge hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span><span class="m-acts"><button class="btn sm ghost" data-health-del="${esc(h.id)}">Guérir</button></span></div>`).join('')}</div>` : '<p class="note" style="margin:0">💚 Intact : aucune blessure, aucune maladie.</p>'}
       <div class="mj-row health-row">
         <label for="mjh-type">Catégorie</label><select id="mjh-type" aria-label="Catégorie">${Object.entries(G.injuryTypes()).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
         <label for="mjh-level">Gravité</label><select id="mjh-level" aria-label="Gravité">${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join('')}</select>
@@ -1899,9 +1901,9 @@ function patientsHTML(cares) {
   const list = cabinet.patients.filter((p) => p.health.length);
   if (!list.length) return '<p class="note">Aucun blessé au même endroit que toi.</p>';
   return `<div class="crew-box"><h3>Blessés autour de toi</h3>${list.map((p) => p.health.map((h) => {
-    const ok = cares.filter(([, r]) => r.care.level >= h.level && (!r.care.type || r.care.type === h.type));
+    const ok = h.healAt ? [] : cares.filter(([, r]) => r.care.level >= h.level && (!r.care.type || r.care.type === h.type));
     const self = p.uid === S.uid, key = `${p.uid}:${h.id}`;
-    return `<div class="member-row care-row"><span class="m-name"><b>${esc(p.name)}</b>${self ? ' (toi)' : ''} · ${esc(h.label)} <small class="note">${esc(G.injuryName(h.type))}</small> <span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span></span>
+    return `<div class="member-row care-row"><span class="m-name"><b>${esc(p.name)}</b>${self ? ' (toi)' : ''} · ${esc(h.label)} <small class="note">${esc(G.injuryName(h.type))}</small> <span class="hp-lvl-${h.level}">${G.HEALTH_LEVELS[h.level - 1]}</span>${h.healAt ? ` <small class="ok">💚 déjà soignée, guérie ${healIn(h)}</small>` : ''}</span>
       <select data-care-rec="${esc(key)}" aria-label="Soin">${ok.map(([id, r]) => `<option value="${esc(id)}">${esc(G.recipeLabel(r))} · ${Object.entries(r.needs).map(([k, q]) => `${q} ${esc(itemOf(k).name)}`).join(', ') || 'sans matériel'}</option>`).join('') || '<option value="">Aucun soin assez fort</option>'}</select>
       <span class="m-acts"><button class="btn sm" data-care-ask="${esc(key)}" ${ok.length ? '' : 'disabled'}>${self ? 'Me soigner' : 'Proposer le soin'}</button></span></div>`;
   }).join('')).join('')}</div>`;
@@ -2098,7 +2100,7 @@ function careFieldsHTML(r) {
   return `<div class="wide work-box"><label for="rc-care">Soin (cabinet du médecin)</label>
     <select id="rc-care"><option value="">Aucun</option>${G.HEALTH_LEVELS.map((l, i) => `<option value="${i + 1}" ${r.care?.level === i + 1 ? 'selected' : ''}>Soigne les blessures jusqu’à : ${l}</option>`).join('')}</select>
     ${r.care ? `<select id="rc-care-type" aria-label="Catégorie soignée"><option value="">Toutes les catégories</option>${Object.entries(G.INJURIES).map(([k, c]) => `<option value="${esc(k)}" ${r.care.type === k ? 'selected' : ''}>${esc(c.name)} seulement</option>`).join('')}</select>` : ''}
-    ${r.care ? '<p class="note" style="margin:0">Un soin s’utilise dans le cabinet du médecin : retire la ligne « Résultat » et choisis le métier Médecin. Le rang nécessaire dépend de la gravité soignée (Légère : Apprenti, Sérieuse et Grave : Confirmé, Critique : Maître).</p>' : ''}
+    ${r.care ? '<p class="note" style="margin:0">Un soin s’utilise dans le cabinet du médecin : retire la ligne « Résultat » et choisis le métier Médecin. Le temps de fabrication devient le temps de guérison : après un soin réussi, la blessure disparaît au bout de ce délai (0 = tout de suite). Le rang nécessaire dépend de la gravité soignée (Légère : Apprenti, Sérieuse et Grave : Confirmé, Critique : Maître).</p>' : ''}
   </div>`;
 }
 function readCareFields(r) {

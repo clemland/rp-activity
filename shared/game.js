@@ -119,6 +119,7 @@ export function careBlock(doctor, patient, h, recipe) {
   if (doctor.job?.id !== 'medecin') return 'Seul un médecin peut soigner.';
   if (!recipe?.care) return 'Ce soin n’existe pas.';
   if (!h) return 'Cette blessure n’existe plus (déjà soignée ?).';
+  if (h.healAt) return 'Cette blessure est déjà soignée : la guérison est en cours.';
   const g = HEALTH_LEVELS[h.level - 1].toLowerCase();
   if (h.level > recipe.care.level) return `Ce soin ne suffit pas pour une blessure ${g}.`;
   if (recipe.care.type && recipe.care.type !== h.type) return `Ce soin ne traite pas : ${injuryName(h.type)}.`;
@@ -136,6 +137,8 @@ export function normalizeHealth(h = {}) {
     label: str(h.label, 80),
     desc: str(h.desc, 300),
     at: Number(h.at) || Date.now(),
+    healAt: Number(h.healAt) || null, // soignée : guérie à cette date (convalescence)
+    healBy: str(h.healBy, 60),
   };
 }
 
@@ -247,6 +250,7 @@ export function normalize(p) {
   p.crewId ??= null;
   p.position ??= null; // dernier salon RP où il a écrit
     p.health = (Array.isArray(p.health) ? p.health : []).filter((h) => h && str(h.label, 80)).map(normalizeHealth).slice(0, 30);
+  p.health = p.health.filter((h) => !h.healAt || h.healAt > Date.now()); // convalescence terminée : guéri
   p.discovered = [...new Set((Array.isArray(p.discovered) ? p.discovered : []).map(String))].slice(0, 500); // îles découvertes
   const freshReq = (l) => (Array.isArray(l) ? l : []).filter((x) => x?.id && Date.now() - (x.at || 0) < 3_600_000).slice(-10);
   p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
@@ -715,7 +719,7 @@ export function playerAction(player, action, ctx = {}) {
       const it = ITEMS[a.key];
       if (!it?.heal) fail('Cet objet ne soigne rien.');
       if (count(p, a.key) < 1) fail('Tu n’en as pas.');
-      const ok = p.health.filter((h) => h.level <= it.heal.level && (!it.heal.type || it.heal.type === h.type)).sort((x, y) => y.level - x.level);
+      const ok = p.health.filter((h) => !h.healAt && h.level <= it.heal.level && (!it.heal.type || it.heal.type === h.type)).sort((x, y) => y.level - x.level);
       if (!ok.length) fail(`${it.name} ne soigne aucune de tes blessures.`);
       const h = ok[0];
       removeItem(p, a.key, 1);

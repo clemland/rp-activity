@@ -497,7 +497,8 @@ export function normalizeGame(g) {
   if (!g) return null;
   const list = [...new Set((Array.isArray(g.list) ? g.list : []).filter((k) => GAME_KEYS.includes(k)))];
   const diff = int(g.diff ?? 0, 0, 5);
-  return list.length || diff ? { list, diff } : null;
+  const time = int(g.time ?? 0, 0, 600); // durée d'une opération en secondes (0 = automatique)
+  return list.length || diff || time ? { list, diff, time } : null;
 }
 /** Une recette se désigne par ce qu'elle produit : « 2 × Planche, 1 × Clou ». */
 export const recipeLabel = (r) => r?.care ? `Soin : ${r.care.type ? injuryName(r.care.type).toLowerCase() : 'blessure'} ${HEALTH_LEVELS[r.care.level - 1].toLowerCase()} au plus` : r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';

@@ -1689,13 +1689,14 @@ function opSteps(level) {
  * only : une seule étape (test dans le panneau admin).
  */
 function opGame2(level, title, rank = S?.job?.lvl || 1, only = null, opts = {}) {
-  const drain = Math.max(1, 1.5 + level * 1.2 - (rank - G.careRank(level)) * 0.8);
+  // Vitesse de chute des constantes (% par seconde) : durée choisie par le staff, sinon selon la gravité et le rang
+  const drain = opts.time ? 100 / opts.time : Math.max(0.8, 0.8 + level * 0.6 - (rank - G.careRank(level)) * 0.4);
   const s = opSteps(opts.diff || level); // difficulté choisie par le staff, sinon la gravité
   const pool = opts.list?.length ? opts.list : ['incision', 'suture', 'hemorragie'];
   const steps = only && s[only]
     ? [s[only]()]
     : [s.anesthesie(), ...(opts.all ? pool : [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, level >= 4 ? 3 : 2))).map((k) => (s[k] ? s[k]() : SIMPLE_GAMES[k][1](opts.diff || level, rank)))];
-  return miniGame({ title, help: 'Garde le patient en vie : ses constantes baissent pendant toute l’opération.', drain, steps });
+  return miniGame({ title, help: `Garde le patient en vie : ses constantes baissent pendant toute l’opération (environ ${Math.round(100 / drain)} s sans erreur).`, drain, steps });
 }
 
 /* ═══ Mini-jeux choisis recette par recette ══════════════════════════════ */
@@ -1717,7 +1718,7 @@ function customGame(recipe, rank, title, careLevel = 0) {
   const chosen = g.list.filter((k) => OP_KEYS.includes(k) || SIMPLE_GAMES[k]);
   if (careLevel >= 2) {
     // Opération : anesthésie, puis des étapes tirées parmi TOUT ce qui est coché
-    return opGame2(careLevel, `Opération : ${title}`, rank, null, { list: chosen.length ? chosen : OP_KEYS, diff: g.diff || 0, all: chosen.length > 0 });
+    return opGame2(careLevel, `Opération : ${title}`, rank, null, { list: chosen.length ? chosen : OP_KEYS, diff: g.diff || 0, all: chosen.length > 0, time: g.time || 0 });
   }
   // Jeu simple : les gestes médicaux deviennent leur version simple
   const SIMPLE_OF = { incision: 'trace', suture: 'points', hemorragie: 'desinfecter' };
@@ -1735,6 +1736,7 @@ function gameFieldsHTML(r) {
   const isOp = r.care && r.care.level >= 2;
   return `<div class="wide work-box"><b>🎮 Mini-jeu</b>
     <div class="mj-row"><label for="rc-gdiff">Difficulté</label><select id="rc-gdiff">${DIFF_NAMES.map((l, i) => `<option value="${i}" ${(g.diff || 0) === i ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${r.care ? `<div class="mj-row"><label for="rc-gtime">Durée de l’opération</label><input id="rc-gtime" type="number" min="0" max="600" value="${g.time || 0}" style="width:90px"><span class="note">secondes avant que les constantes tombent à zéro (0 = automatique)</span></div>` : ''}
     <div class="mj-row"><label for="rc-trank">Tester en</label><select id="rc-trank">${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${rcTest.rank === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select>
       ${r.care ? `<select id="rc-tlvl" aria-label="Gravité de la blessure">${G.HEALTH_LEVELS.slice(0, r.care.level).map((l, i) => `<option value="${i + 1}" ${rcTest.lvl === i + 1 ? 'selected' : ''}>Blessure ${l.toLowerCase()}</option>`).join('')}</select>` : ''}
       <button type="button" class="btn sm" id="rc-test">▶ Tester</button></div>
@@ -1750,7 +1752,8 @@ function readGameFields(r) {
   if ($('rc-tlvl')) rcTest.lvl = +$('rc-tlvl').value || 1;
   const list = [...document.querySelectorAll('#rc-body [data-game]')].filter((c) => c.checked).map((c) => c.dataset.game);
   const diff = +$('rc-gdiff').value || 0;
-  r.game = list.length || diff ? { list, diff } : null;
+  const time = Math.max(0, Math.min(600, Math.round(+$('rc-gtime')?.value || 0)));
+  r.game = list.length || diff || time ? { list, diff, time } : null;
 }
 
 /** Onglet « Savoir-faire » : sous-onglets Métier et Cuisine (testeurs seulement pour l'instant). */
@@ -5075,6 +5078,7 @@ function renderGames() {
       <section class="crew-box"><h3>🔪 Opération</h3>
         <div class="mj-row"><label for="tg-glvl">Gravité</label><select id="tg-glvl">${G.HEALTH_LEVELS.slice(1).map((l, i) => `<option value="${i + 2}">${l}</option>`).join('')}</select></div>
         <div class="mj-row"><label for="tg-orank">Rang</label><select id="tg-orank">${ranks(2)}</select></div>
+        <div class="mj-row"><label for="tg-otime">Durée</label><input id="tg-otime" type="number" min="0" max="600" value="0" style="width:90px"><span class="note">secondes (0 = automatique)</span></div>
         <div class="mj-row"><label for="tg-ostep">Étape</label><select id="tg-ostep"><option value="">Opération complète</option>${Object.entries(OP_STEPS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
         <div><button class="btn" id="tg-op-go">Tester l’opération</button></div>
       </section>
@@ -5134,7 +5138,7 @@ $('v-agames').addEventListener('click', (e) => {
   if (e.target.closest('#tg-op-go')) {
     const lvl = +$('tg-glvl').value, rank = +$('tg-orank').value, g = G.HEALTH_LEVELS[lvl - 1].toLowerCase();
     const only = $('tg-ostep').value || null, what = only ? OP_STEPS[only] : 'Opération';
-    return void testGame(`${what} · ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame2(lvl, `Test : ${what.toLowerCase()} ${g}`, rank, only));
+    return void testGame(`${what} · ${g} (${JOB_LEVELS[rank - 1]})`, () => opGame2(lvl, `Test : ${what.toLowerCase()} ${g}`, rank, only, { time: +$('tg-otime').value || 0 }));
   }
 });
 

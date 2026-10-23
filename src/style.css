@@ -1415,6 +1415,21 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .inv-img img{max-height:110px}
 .inv-img .sm-close{position:absolute;top:-8px;right:-8px}
 .inv-desc{white-space:pre-wrap}
+/* ═══ v52 : navigateur ═══ */
+.helm-wrap{display:grid;gap:8px;justify-items:center}
+.compass{width:min(320px,100%);display:block}
+.helm-row{display:flex;gap:14px;align-items:center}
+.wheel{width:120px;height:120px;cursor:grab;touch-action:none;filter:drop-shadow(0 3px 3px rgba(0,0,0,.35))}
+.wheel:active{cursor:grabbing}
+.helm-wrap .gauge{width:min(320px,100%)}
+.helm-wrap .gauge-cap{width:min(320px,100%)}
+.windwheel{position:relative;width:min(300px,100%);margin:6px auto 0}
+.windwheel svg{display:block;width:100%;filter:drop-shadow(0 3px 4px rgba(0,0,0,.3))}
+.ww-ptr{position:absolute;top:-6px;left:50%;transform:translateX(-50%);font-size:26px;color:var(--ink);z-index:2;line-height:1}
+.sea-read b{letter-spacing:2px}
+.sea-read .d1,.sea-read .d2{color:#1d7a3a}
+.sea-read .d3{color:#a8690c}
+.sea-read .d4,.sea-read .d5{color:var(--red)}
 .sel-search{display:block;width:100%;max-width:260px;font:inherit;font-size:14px;color:var(--brown);background:#fff;border:2px dashed rgba(23,37,94,.45);border-radius:5px;padding:3px 8px;margin:0 0 4px}
 .mj-row .sel-search,.se-item .sel-search,.loot-row .sel-search,.rc-row .sel-search{margin:0}
 .ship-stats .ico{--s:16px;vertical-align:-3px}

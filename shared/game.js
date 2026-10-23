@@ -1082,6 +1082,7 @@ export function normalizeShip(s) {
         needed: int(v.needed, 1, 1000), done: int(v.done, 0, 1000), by: String(v.by || ''),
         votes: Object.fromEntries(Object.entries(v.votes || {}).filter(([, x]) => x).map(([u]) => [u, true])),
         port: pos(v.port), at: Number(v.at) || 0, unknown: !!v.unknown,
+        danger: v.danger ? int(v.danger, 1, 5) : null, // lecture de la mer par le navigateur (1 à 5)
       }
     : null;
   // Log Pose : rechargé sur l'île de Grand Line où le bateau est à quai
@@ -1224,6 +1225,13 @@ export function canPilot(p, ship, crew) {
   if (ship.owner?.kind === 'crew') return !!crew && crew.id === ship.owner.id && crewCan(crew, p.uid, 'helm');
   return false;
 }
+/** Lecture de la mer par un navigateur (mini-jeu) : durée du voyage et danger. Sans navigateur : durée normale, danger inconnu. */
+export const DANGERS = ['Mer d’huile', 'Mer calme', 'Mer agitée', 'Mer dangereuse', 'Mer mortelle'];
+export function navRoll(p, a) {
+  if (p.job?.id !== 'navigateur' || !a?.nav) return { factor: 1, danger: null };
+  const score = Math.min(1, Math.max(0, Number(a.nav.score) || 0)); // part du temps passée au cap
+  return { factor: 1.25 - 0.45 * score, danger: int(a.nav.danger ?? 3, 1, 5) };
+}
 /** Actions RP pour une traversée : distance × rythme × √(10 ÷ vitesse), 2 au minimum. */
 export const voyageActions = (distance, speed, pace = 0.5) => Math.max(2, Math.ceil(distance * pace * Math.sqrt(10 / Math.max(1, speed))));
 /** Une action RP pendant la traversée : le bateau avance, et arrive en vue de l'île au bout du compte. */
@@ -1297,8 +1305,9 @@ export function shipAction(player, ship0, action, ctx = {}) {
       if (!to || to.kind !== 'island' || (!to.visible && !(p.discovered || []).includes(a.to)) || !to.accessible || a.to === from) fail('Destination impossible.');
       const t = travelTime(map, from, a.to);
       if (!t) fail('Aucune route connue vers cette île.');
-      const needed = voyageActions(t.value, st.speed, map.pace);
-      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now() };
+      const nr = navRoll(p, a);
+      const needed = Math.max(2, Math.ceil(voyageActions(t.value, st.speed, map.pace) * nr.factor));
+      ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now(), danger: nr.danger };
       out.toast = `Départ proposé vers ${to.name} (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;
@@ -1324,8 +1333,9 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const target = isl.choose ? isl.next[int(a.choice ?? 0, 0, 99)] : ship.logPose.target;
       if (!target || !map.islands[target]) fail('Le Log Pose ne pointe vers aucune île : le staff doit définir l’île suivante.');
       const t = travelTime(map, from, target);
-      const needed = voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace);
-      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true };
+      const nrl = navRoll(p, a);
+      const needed = Math.max(2, Math.ceil(voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace) * nrl.factor));
+      ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true, danger: nrl.danger };
       out.toast = `Le Log Pose pointe vers une île inconnue (${needed} actions) : les passagers doivent accepter.`;
       sailIfReady(ship, out);
       break;

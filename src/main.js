@@ -1242,7 +1242,7 @@ function mgScatter(n, minDist = 15) {
  * Fenêtre de mini-jeu : enchaîne des étapes. Avec drain > 0, les constantes vitales baissent
  * pendant toute la partie (opération). Renvoie true si toutes les étapes sont réussies.
  */
-function miniGame({ title, help = '', drain = 0, steps }) {
+function miniGame({ title, help = '', drain = 0, steps, doneText = null }) {
   return new Promise((resolve) => {
     const d = $('d-mg'), area = $('mg-area');
     $('mg-title').textContent = title;
@@ -1285,7 +1285,7 @@ function miniGame({ title, help = '', drain = 0, steps }) {
         if (done) return;
         tickFn = null;
         i++;
-        if (i >= steps.length) return finish(true, drain ? 'Opération réussie : le patient est sauvé !' : 'Travail réussi !');
+        if (i >= steps.length) return finish(true, drain ? 'Opération réussie : le patient est sauvé !' : doneText || 'Travail réussi !');
         $('mg-step').textContent = steps.length > 1 ? `Étape ${i + 1} sur ${steps.length}` : '';
         steps[i](api);
       },
@@ -1702,6 +1702,142 @@ $('v-job').addEventListener('click', async (e) => {
   if (del && (await askConfirm('L’invention sera supprimée de ta fiche.', { title: 'Supprimer cette invention ?', ok: 'Supprimer', danger: true }))) run({ type: 'invention.delete', id: Number(del) });
 });
 
+/* ═══ Navigateur : lire la mer (tenir le cap, puis la roue des vents) ════ */
+const wheelSVG = () => `<circle r="40" fill="none" stroke="#7a4a1e" stroke-width="8"/><circle r="11" fill="#a8690c" stroke="#5a3a1e" stroke-width="3"/>${Array.from({ length: 8 }, (_, i) => `<g transform="rotate(${i * 45})"><line x1="0" y1="-11" x2="0" y2="-52" stroke="#7a4a1e" stroke-width="6" stroke-linecap="round"/><circle cy="-54" r="5" fill="#a8690c"/></g>`).join('')}`;
+/** Tenir le cap : le vent pousse l'aiguille, la barre la ramène. Score = part du temps passée dans la zone verte. */
+const helmStep = (rank, res) => (api) => {
+  const dur = 12, sector = 16 + rank * 5, drift0 = 16 + Math.random() * 6 - rank * 2;
+  const w = [[mgRnd(0.3, 0.6), mgRnd(0, 6.28)], [mgRnd(0.9, 1.6), mgRnd(0, 6.28)]];
+  let t = 0, inside = 0, h = mgRnd(-30, 30), rot = 0, drag = null, hold = 0;
+  api.area.innerHTML = `<p class="op-step">☸ <b>Tenir le cap</b> : tourne la barre (glisse dessus, ou ◀ ▶, ou les flèches du clavier) pour garder l’aiguille dans la zone verte malgré le vent.</p>
+    <div class="helm-wrap">
+      <svg class="compass" viewBox="-110 -110 220 120" aria-hidden="true">
+        <path d="M -100 0 A 100 100 0 0 1 100 0" fill="#fffaea" stroke="#17255e" stroke-width="4"/>
+        <path id="hz" fill="rgba(47,154,85,.45)" d=""/>
+        <line id="hn" x1="0" y1="0" x2="0" y2="-92" stroke="#c7352c" stroke-width="5" stroke-linecap="round"/>
+        <circle r="7" fill="#17255e"/>
+      </svg>
+      <div class="helm-row"><button type="button" class="btn sm" id="hl" aria-label="Tourner à gauche">◀</button>
+        <svg class="wheel" id="hw" viewBox="-60 -60 120 120" aria-label="Barre du navire">${wheelSVG()}</svg>
+        <button type="button" class="btn sm" id="hr" aria-label="Tourner à droite">▶</button></div>
+      <div class="gauge" aria-label="Temps restant"><i id="htime" style="width:100%"></i></div>
+      <div class="gauge-cap"><span>Au cap : <b id="hpct">0 %</b></span><span id="hleft"></span></div>
+    </div>`;
+  const arc = (a) => [Math.sin((a * Math.PI) / 180) * 100, -Math.cos((a * Math.PI) / 180) * 100];
+  const [x0, y0] = arc(-sector / 2), [x1, y1] = arc(sector / 2);
+  $('hz').setAttribute('d', `M 0 0 L ${x0} ${y0} A 100 100 0 0 1 ${x1} ${y1} Z`);
+  const wheel = $('hw');
+  const center = () => {
+    const r = wheel.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  wheel.onpointerdown = (e) => {
+    const c = center();
+    drag = Math.atan2(e.clientY - c.y, e.clientX - c.x);
+    wheel.setPointerCapture(e.pointerId);
+  };
+  wheel.onpointermove = (e) => {
+    if (drag == null) return;
+    const c = center(), a = Math.atan2(e.clientY - c.y, e.clientX - c.x);
+    let d = ((a - drag) * 180) / Math.PI;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    rot = Math.max(-180, Math.min(180, rot + d));
+    drag = a;
+  };
+  wheel.onpointerup = wheel.onpointercancel = () => (drag = null);
+  for (const [id, v] of [['hl', -1], ['hr', 1]]) {
+    const b = $(id);
+    b.onpointerdown = () => (hold = v);
+    b.onpointerup = b.onpointerleave = b.onpointercancel = () => (hold = 0);
+  }
+  const key = (e) => {
+    if (e.key === 'ArrowLeft') hold = e.type === 'keydown' ? -1 : 0;
+    if (e.key === 'ArrowRight') hold = e.type === 'keydown' ? 1 : 0;
+  };
+  document.addEventListener('keydown', key);
+  document.addEventListener('keyup', key);
+  api.onTick((dt) => {
+    t += dt;
+    rot = Math.max(-180, Math.min(180, rot + hold * 240 * dt));
+    if (drag == null && !hold) rot *= 1 - Math.min(1, 0.8 * dt); // la barre revient doucement si on la lâche
+    const wind = drift0 * (Math.sin(t * w[0][0] * 2 + w[0][1]) + 0.6 * Math.sin(t * w[1][0] * 2 + w[1][1]));
+    h = Math.max(-90, Math.min(90, h + (wind + rot * 0.35) * dt));
+    if (Math.abs(h) <= sector / 2) inside += dt;
+    $('hn').setAttribute('transform', `rotate(${h})`);
+    wheel.style.transform = `rotate(${rot * 2}deg)`;
+    $('htime').style.width = `${Math.max(0, 100 - (t / dur) * 100)}%`;
+    $('hpct').textContent = `${Math.round((inside / Math.max(t, 0.001)) * 100)} %`;
+    $('hleft').textContent = `${Math.max(0, Math.ceil(dur - t))} s`;
+    if (t < dur) return;
+    document.removeEventListener('keydown', key);
+    document.removeEventListener('keyup', key);
+    res.score = inside / dur;
+    api.msg(`Cap tenu ${Math.round(res.score * 100)} % du temps.`);
+    api.onTick(null);
+    setTimeout(() => api.next(), 900);
+  });
+};
+/** La roue des vents : on la lance, on l'arrête ; la case décide du danger du voyage. */
+const WIND_SEGS = [
+  { l: 'Mer d’huile', d: 1, c: '#bfe6fa' }, { l: 'Vent favorable', d: 1, c: '#9fd3ef' }, { l: 'Brise', d: 2, c: '#7fc28a' }, { l: 'Houle', d: 3, c: '#e8d38a' },
+  { l: 'Brume', d: 3, c: '#d6d6d6' }, { l: 'Courants', d: 4, c: '#e6a223' }, { l: 'Tempête', d: 5, c: '#e0574d' }, { l: 'Rois des mers', d: 5, c: '#a46fd6' },
+];
+const windStep = (rank, res) => (api) => {
+  // Un navigateur expérimenté agrandit les cases calmes et réduit les dangereuses
+  const segs = WIND_SEGS.map((s) => ({ ...s, w: Math.max(0.35, 1 + (s.d <= 2 ? 0.45 : s.d >= 4 ? -0.25 : 0) * (rank - 1)) }));
+  const total = segs.reduce((a, s) => a + s.w, 0);
+  let a0 = 0;
+  for (const s of segs) {
+    s.a0 = a0;
+    s.a1 = a0 + (s.w / total) * 360;
+    a0 = s.a1;
+  }
+  const P = (a, r) => `${(Math.sin((a * Math.PI) / 180) * r).toFixed(2)} ${(-Math.cos((a * Math.PI) / 180) * r).toFixed(2)}`;
+  api.area.innerHTML = `<p class="op-step">🎡 <b>La roue des vents</b> : lance la roue, puis arrête-la. Elle décide de l’état de la mer pendant le voyage${rank > 1 ? ' (ton expérience agrandit les cases calmes)' : ''}.</p>
+    <div class="windwheel"><span class="ww-ptr" aria-hidden="true">▼</span><svg viewBox="-105 -105 210 210" aria-label="Roue des vents"><g id="ww">${segs.map((s) => `<path d="M 0 0 L ${P(s.a0, 100)} A 100 100 0 ${s.a1 - s.a0 > 180 ? 1 : 0} 1 ${P(s.a1, 100)} Z" fill="${s.c}" stroke="#17255e" stroke-width="2"/><text transform="rotate(${(s.a0 + s.a1) / 2}) translate(0 -60) rotate(90)" text-anchor="middle" dominant-baseline="middle" font-size="9" font-weight="800" fill="#17255e">${esc(s.l)}</text>`).join('')}</g><circle r="12" fill="#17255e"/></svg></div>
+    <div class="form-actions"><button type="button" class="btn" id="mg-hit">🎡 Lancer</button></div>`;
+  let ang = 0, speed = 0, state = 'idle', decel = 0;
+  $('mg-hit').onclick = () => {
+    if (state === 'idle') {
+      state = 'spin';
+      speed = mgRnd(520, 680);
+      $('mg-hit').textContent = '✋ Arrêter';
+    } else if (state === 'spin') {
+      state = 'stop';
+      decel = (speed * speed) / (2 * mgRnd(300, 700)); // s'arrête après un dernier tour imprévisible
+      $('mg-hit').disabled = true;
+    }
+  };
+  api.onTick((dt) => {
+    if (state === 'idle') return;
+    if (state === 'stop') speed = Math.max(0, speed - decel * dt);
+    ang = (ang + speed * dt) % 360;
+    $('ww').setAttribute('transform', `rotate(${ang})`);
+    if (state !== 'stop' || speed > 0) return;
+    state = 'done';
+    const local = (((360 - ang) % 360) + 360) % 360;
+    const s = segs.find((x) => local >= x.a0 && local < x.a1) || segs[segs.length - 1];
+    res.danger = s.d;
+    res.sea = s.l;
+    api.msg(`La mer sera : ${s.l} (danger ${s.d}/5).`);
+    api.onTick(null);
+    setTimeout(() => api.next(), 1400);
+  });
+};
+/** Mini-jeu du navigateur au départ : renvoie { score, danger, sea }, ou null s'il abandonne. */
+async function navGame(rank, title) {
+  const res = { score: 0.5, danger: 3, sea: 'Houle' };
+  const ok = await miniGame({ title, help: 'Tiens le cap, puis lance la roue des vents : ta lecture de la mer décide de la durée et des dangers du voyage.', steps: [helmStep(rank, res), windStep(rank, res)], doneText: 'La mer est lue !' });
+  return ok ? res : null;
+}
+/** État de la mer prévu pour un voyage (lu par le navigateur au départ). */
+function dangerHTML(v) {
+  return v.danger
+    ? `<p class="note sea-read" style="margin:2px 0 4px">Mer prévue : <b class="d${v.danger}">${'☠'.repeat(v.danger)}${'·'.repeat(5 - v.danger)}</b> ${G.DANGERS[v.danger - 1]}</p>`
+    : '<p class="note" style="margin:2px 0 4px">Mer non lue : pas de navigateur au départ.</p>';
+}
+
 /* ═══ Utiliser et donner des objets ═══════════════════════════════════════ */
 document.addEventListener('click', (e) => {
   const use = e.target.closest('[data-use]')?.dataset.use;
@@ -1999,13 +2135,13 @@ function voyageHTML(sh) {
   if (v.status === 'vote') {
     const pax = sh.passengers;
     return `<div class="crew-box voyage-box"><h3>⛵ Départ proposé vers ${esc(v.toName)}</h3>
-      <p class="note" style="margin:0">${v.needed} actions RP de traversée · proposé par ${navName(v.by)}</p>
+      <p class="note" style="margin:0">${v.needed} actions RP de traversée · proposé par ${navName(v.by)}</p>${dangerHTML(v)}
       <div class="pax">${pax.map((u) => `<span>${v.votes[u] ? '✅' : '⏳'} ${navName(u)}</span>`).join('')}</div>
       <div class="mj-row">${pax.includes(me) && !v.votes[me] ? `<button class="btn sm" data-voy-yes="${esc(sh.id)}">Accepter</button><button class="btn sm ghost" data-voy-no="${esc(sh.id)}">Refuser</button>` : ''}${v.by === me ? `<button class="btn sm ghost danger-txt" data-voy-cancel="${esc(sh.id)}">Annuler le départ</button>` : ''}</div></div>`;
   }
   const pct = Math.round((v.done / Math.max(1, v.needed)) * 100);
   return `<div class="crew-box voyage-box"><h3>${v.status === 'arrived' ? `⚓ En vue de ${esc(v.toName)} !` : `🌊 En mer vers ${esc(v.toName)}`}</h3>
-    <div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>Traversée depuis ${esc(v.fromName)}</span><span>${v.done} / ${v.needed} actions</span></div>
+    ${dangerHTML(v)}<div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>Traversée depuis ${esc(v.fromName)}</span><span>${v.done} / ${v.needed} actions</span></div>
     <p class="note" style="margin:0">${v.status === 'arrived' ? `Le premier passager qui écrit un message RP sur ${esc(v.toName)} met le bateau à quai à cet endroit.` : `Chaque message RP de ${G.RP_MIN_CHARS} caractères ou plus d’un passager dans ${sh.channel ? `<b>${esc(sh.channel.name)}</b>` : 'le salon du bateau'} fait avancer le bateau. Écrire ailleurs, c’est passer par-dessus bord !`}</p></div>`;
 }
 $('v-amap').addEventListener('change', (e) => {
@@ -2078,9 +2214,20 @@ $('v-nav').addEventListener('click', async (e) => {
     return;
   }
   const vl = e.target.closest('[data-voy-logpose]')?.dataset.voyLogpose;
-  if (vl) return void run({ type: 'ship.voyage.logpose', shipId: vl, choice: +($('voy-path')?.value ?? 0) });
+  if (vl) {
+    const choice = +($('voy-path')?.value ?? 0);
+    const nav = S.job.id === 'navigateur' ? await navGame(S.job.lvl, 'Lire la mer') : undefined;
+    if (nav === null) return; // abandonné
+    return void run({ type: 'ship.voyage.logpose', shipId: vl, choice, nav });
+  }
   const vp = e.target.closest('[data-voy-propose]')?.dataset.voyPropose;
-  if (vp) return void run({ type: 'ship.voyage.propose', shipId: vp, to: $('voy-to').value });
+  if (vp) {
+    const to = $('voy-to').value;
+    // Un navigateur lit la mer avant de proposer le départ : durée et dangers du voyage
+    const nav = S.job.id === 'navigateur' ? await navGame(S.job.lvl, 'Lire la mer') : undefined;
+    if (nav === null) return; // abandonné
+    return void run({ type: 'ship.voyage.propose', shipId: vp, to, nav });
+  }
   const vy = e.target.closest('[data-voy-yes]')?.dataset.voyYes;
   if (vy) return void run({ type: 'ship.voyage.vote', shipId: vy, accept: true });
   const vn = e.target.closest('[data-voy-no]')?.dataset.voyNo;
@@ -3996,6 +4143,10 @@ function renderGames() {
         <div class="mj-row"><label for="tg-bgame">Mini-jeu</label><select id="tg-bgame"><option value="">Au hasard</option><option value="serrer">🩹 Bandage</option><option value="nettoyer">🦠 Désinfecter</option><option value="points">🧵 Points de suture</option></select></div>
         <div><button class="btn" id="tg-band-go">Tester le bandage</button></div>
       </section>
+      <section class="crew-box"><h3>🧭 Navigateur : lire la mer</h3>
+        <div class="mj-row"><label for="tg-nrank">Rang</label><select id="tg-nrank">${ranks()}</select></div>
+        <div><button class="btn" id="tg-nav-go">Tester la navigation</button></div>
+      </section>
       <section class="crew-box"><h3>🔪 Opération</h3>
         <div class="mj-row"><label for="tg-glvl">Gravité</label><select id="tg-glvl">${G.HEALTH_LEVELS.slice(1).map((l, i) => `<option value="${i + 2}">${l}</option>`).join('')}</select></div>
         <div class="mj-row"><label for="tg-orank">Rang</label><select id="tg-orank">${ranks(2)}</select></div>
@@ -4036,6 +4187,19 @@ $('v-agames').addEventListener('click', (e) => {
   if (e.target.closest('#tg-band-go')) {
     const rank = +$('tg-brank').value;
     return void testGame(`Bandage (${JOB_LEVELS[rank - 1]})`, () => bandageGame('test', rank, $('tg-bgame').value || null));
+  }
+  if (e.target.closest('#tg-nav-go')) {
+    const rank = +$('tg-nrank').value;
+    return void (async () => {
+      const r = await navGame(rank, 'Test : lire la mer');
+      gameLog.unshift({
+        ok: !!r,
+        label: r ? `Navigation (${JOB_LEVELS[rank - 1]}) : cap ${Math.round(r.score * 100)} %, traversée ×${(1.25 - 0.45 * r.score).toFixed(2)}, ${r.sea} (${r.danger}/5)` : `Navigation (${JOB_LEVELS[rank - 1]}) : abandonnée`,
+        at: new Date().toLocaleTimeString('fr-FR'),
+      });
+      gameLog.length = Math.min(gameLog.length, 15);
+      renderGames();
+    })();
   }
   if (e.target.closest('#tg-op-go')) {
     const lvl = +$('tg-glvl').value, rank = +$('tg-orank').value, g = G.HEALTH_LEVELS[lvl - 1].toLowerCase();

@@ -46,7 +46,7 @@ export async function shipEmbed(ship) {
       { name: 'Puissance', value: String(st.power), inline: true },
     ],
     ...(img ? { image: { url: img } } : {}),
-    footer: { text: 'Pendant un voyage, chaque message RP de 400 caractères ou plus écrit dans le salon du bateau le fait avancer. /bateau infos met cette fiche à jour.' },
+
   };
 }
 
@@ -55,9 +55,8 @@ export async function createShipChannel(ship, cfg) {
   const message = { embeds: [await shipEmbed(ship)], allowed_mentions: { parse: [] } };
   if (ship.space === 'forum' && cfg.categoryId) {
     const f = await botPost(`/guilds/${env.guildId}/channels`, { name: ship.name.slice(0, 100), type: 15, parent_id: cfg.categoryId });
-    // Grand bateau : la fiche va dans un post « Infos », le pont reçoit un simple message d'accueil
+    // Grand bateau : la fiche va dans un post « Infos » (les autres lieux s'ajoutent avec /bateau post)
     await botPost(`/channels/${f.id}/threads`, { name: '📜 Infos', message }).catch(() => null);
-    await botPost(`/channels/${f.id}/threads`, { name: 'Le pont', message: { content: `⚓ Le pont de **${ship.name}**. Pendant un voyage, chaque message RP de 400 caractères ou plus écrit dans ce forum fait avancer le bateau.`, allowed_mentions: { parse: [] } } }).catch(() => null);
     return { id: f.id, kind: 'forum', name: f.name };
   }
   if (ship.space === 'post' && cfg.forumId) {

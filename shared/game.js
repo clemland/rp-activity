@@ -1044,7 +1044,7 @@ export const SHIP_WORKS = {
   reparation: 'Réparer la coque',
 };
 /** Rang de charpentier nécessaire pour un niveau de voile : 1-3 Apprenti, 4-6 Confirmé, 7-10 Maître. */
-export const sailRank = (level) => (level <= 3 ? 1 : level <= 6 ? 2 : 3);
+export const sailRank = (level) => Math.min(3, Math.max(1, level)); // voile 1 Apprenti, 2 Confirmé, 3 Maître
 /** Réglages des bateaux, modifiables par le staff (Panneau admin > Bateaux > Réglages). */
 export const SHIP_DEFAULTS = {
   sailBonus: 2, engineBonus: 6, holdSlow: 0.005, granitBonus: 10, hullPerRobust: 10, damagedPct: 25,
@@ -1089,7 +1089,7 @@ export function normalizeShipStats(x) {
     berths: int(x.berths ?? 4, 1, 1000), // places (personnes à bord)
     speed: int(x.speed ?? 10, 1, 200), // vitesse de base du type
     robust: int(x.robust ?? 10, 1, 1000), // robustesse de base du type
-    sail: int(x.sail ?? 1, 1, 100), // niveau de voile (renforcé à l'atelier, jusqu'à 10)
+    sail: int(x.sail ?? 0, 0, 3), // niveau de voile : 0 d'origine, 1 à 3 renforcée à l'atelier
   };
 }
 /** Nouveau bateau, à partir d'un modèle (objet « Bateau ») ou de caractéristiques libres. */
@@ -1154,7 +1154,7 @@ export function normalizeWork(w) {
   if (!w || !SHIP_WORKS[w.type]) return null;
   const t = w.type;
   if (t === 'construire') return { type: t, model: String(w.model || ''), wood: w.wood === 'choix' ? 'choix' : WOODS[w.wood] ? w.wood : 'standard', woodQty: int(w.woodQty ?? 0, 0, 9999) };
-  if (t === 'voile') return { type: t, level: int(w.level ?? 1, 1, 10) };
+  if (t === 'voile') return { type: t, level: int(w.level ?? 1, 1, 3) };
   if (t === 'canon') return { type: t, size: CANNONS[w.size] ? w.size : 'leger', count: int(w.count ?? 1, 1, 20) };
   if (t === 'cale') return { type: t, amount: int(w.amount ?? 100, 10, 100000) };
   if (t === 'reparation') return { type: t, amount: int(w.amount ?? 25, 1, 100) };
@@ -1203,7 +1203,7 @@ export function workDifficulty(recipe, p) {
   const w = recipe.work || {};
   const base = {
     construire: 0.5 + Object.keys(WOODS).indexOf(w.wood) * 0.15,
-    voile: 0.3 + (w.level || 1) * 0.07,
+    voile: 0.3 + (w.level || 1) * 0.2,
     canon: { leger: 0.4, moyen: 0.55, lourd: 0.7 }[w.size] ?? 0.5,
     cale: 0.4, granit: 0.8, plongee: 0.85, moteur: 0.7, reparation: 0.3,
   }[w.type] ?? 0.5;
@@ -1253,7 +1253,7 @@ export function upgradeShip(ship, type, amount, { by = null, item = null, now = 
     ship.guns = { ...(ship.guns || {}), leger: Math.max(0, (ship.guns?.leger ?? ship.cannons ?? 0) + n) };
     normalizeShip(ship);
   }
-  if (type === 'voile') ship.sail = Math.max(1, ship.sail + n);
+  if (type === 'voile') ship.sail = Math.max(0, Math.min(3, ship.sail + n));
   ship.upgrades = [...(ship.upgrades || []), { type, amount: n, item, by, at: now }].slice(-100);
   return ship;
 }

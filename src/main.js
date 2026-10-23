@@ -1163,7 +1163,7 @@ function workFieldsHTML(r) {
     <select id="rc-work"><option value="">Aucun : recette normale</option>${Object.entries(G.SHIP_WORKS).map(([k, l]) => `<option value="${k}" ${w?.type === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
     ${w?.type === 'construire' ? `<div class="mj-row"><label for="rc-w-model">Type</label><select id="rc-w-model">${models.map(([k, it]) => `<option value="${esc(k)}" ${k === w.model ? 'selected' : ''}>${esc(it.name)}</option>`).join('') || '<option value="">Crée d’abord un modèle (Gestion, catégorie Bateau)</option>'}</select><label for="rc-w-wood">Bois</label><select id="rc-w-wood"><option value="choix" ${w.wood === 'choix' ? 'selected' : ''}>Au choix du charpentier</option>${Object.entries(G.WOODS).map(([k, v]) => `<option value="${k}" ${k === w.wood ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>${w.wood === 'choix' ? `<label for="rc-w-wqty">Quantité de bois</label><input id="rc-w-wqty" type="number" min="0" value="${w.woodQty || 0}">` : ''}</div>
     ${w.wood === 'choix' ? '<p class="note" style="margin:0">Le bois choisi par le charpentier s’ajoute aux ingrédients. L’objet de chaque bois se règle dans Panneau admin > Bateaux > Réglages > Bois de construction.</p>' : ''}` : ''}
-    ${w?.type === 'voile' ? `<div class="mj-row"><label for="rc-w-level">Niveau de voile obtenu</label><input id="rc-w-level" type="number" min="1" max="10" value="${w.level}"><span class="note">1-3 Apprenti · 4-6 Confirmé · 7-10 Maître. La voile doit être au niveau précédent.</span></div>` : ''}
+    ${w?.type === 'voile' ? `<div class="mj-row"><label for="rc-w-level">Niveau de voile obtenu</label><input id="rc-w-level" type="number" min="1" max="3" value="${w.level}"><span class="note">Niveau 1 : Apprenti · 2 : Confirmé · 3 : Maître. La voile doit être au niveau précédent (0 = voile d’origine).</span></div>` : ''}
     ${w?.type === 'canon' ? `<div class="mj-row"><label for="rc-w-size">Calibre</label>${sel('rc-w-size', G.CANNONS, w.size)}<label for="rc-w-count">Nombre</label><input id="rc-w-count" type="number" min="1" max="20" value="${w.count}"></div>` : ''}
     ${w?.type === 'cale' ? `<div class="mj-row"><label for="rc-w-amount">Cale ajoutée (kg)</label><input id="rc-w-amount" type="number" min="10" value="${w.amount}"></div>` : ''}
     ${w?.type === 'reparation' ? `<div class="mj-row"><label for="rc-w-amount">Coque réparée (%)</label><input id="rc-w-amount" type="number" min="1" max="100" value="${w.amount}"></div>` : ''}
@@ -3271,7 +3271,7 @@ function shipCard(sh, { actions = '', upgrade = false, extra = '' } = {}) {
     <div>
       <h3>${sh.icon && sh.photo ? `<span class="ico item-img"><img src="${imgSrc(sh.icon)}" alt=""></span>` : ''}${esc(sh.name)}</h3>
       ${extra}
-      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>Voile niv. ${sh.sail}</span><span>Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
+      ${shipStatsHTML(sh)}<div class="ship-stats"><span>${esc(sh.type)}</span><span>${esc(G.WOODS[sh.wood]?.name || 'Bois standard')}</span><span>${aboard} / ${sh.berths} à bord</span><span>${sh.sail ? `Voile niv. ${sh.sail}` : 'Voile d’origine'}</span><span>Cale : ${G.kg(G.holdWeight(sh))} / ${G.kg(sh.capacity)}</span>${sh.engine ? `<span>${icon('ship-engine')} Moteur au cola</span>` : ''}${sh.granit ? `<span>${icon('ship-granit')} Granit marin</span>` : ''}${sh.plongee ? `<span>${icon('ship-plongee')} Plongée</span>` : ''}${sh.voyage && sh.voyage.status !== 'vote' ? `<span>🌊 En mer vers ${esc(sh.voyage.toName)} (${sh.voyage.done}/${sh.voyage.needed})</span>` : ''}${sh.position ? `<span>⚓ #${esc(sh.position.name || sh.position.channelId)}</span>` : ''}${sh.channel ? `<span>💬 ${esc(sh.channel.name)}</span>` : ''}</div>
       ${sh.desc ? `<p>${esc(sh.desc)}</p>` : ''}
       ${S && G.isShipFamily(S, sh, CREW) ? holdPeekHTML(sh) : ''}
       ${S && !VIEW && !sh.voyage && G.canManageShip(S, sh, CREW) ? `<div class="mj-row"><button class="btn sm ghost" data-dock="${esc(sh.id)}">⚓ Amarrer ailleurs dans le port</button></div>` : ''}
@@ -3657,7 +3657,7 @@ function renderShipEdit() {
         <div class="isl-flags"><label class="chk"><input type="checkbox" id="sh-engine" ${d.engine ? 'checked' : ''}> Moteur au cola</label><label class="chk"><input type="checkbox" id="sh-granit" ${d.granit ? 'checked' : ''}> Granit marin</label><label class="chk"><input type="checkbox" id="sh-plongee" ${d.plongee ? 'checked' : ''}> Plongée</label></div>
         <div><label for="sh-cap">Cale (kg)</label><input id="sh-cap" type="number" min="0" value="${d.capacity}"></div>
         <div><label for="sh-berths">Places (personnes)</label><input id="sh-berths" type="number" min="1" value="${d.berths ?? 4}"></div>
-        <div><label for="sh-sail">Vitesse (niveau de voile)</label><input id="sh-sail" type="number" min="1" value="${d.sail ?? 1}"></div>
+        <div><label for="sh-sail">Niveau de voile (0 à 3)</label><input id="sh-sail" type="number" min="0" max="3" value="${d.sail ?? 0}"></div>
         <div><label for="sh-space">Espace RP sur Discord</label><select id="sh-space">${Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (d.space || 'post') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`}
         <div><label for="sh-owner">Propriétaire</label><select id="sh-owner"><option value="">Personne</option>
           <optgroup label="Escouades de la Marine">${Object.entries(fleet.crews || {}).filter(([, c]) => c.kind === 'flotte').map(([id, c]) => `<option value="crew:${esc(id)}" ${ownerVal === `crew:${id}` ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>
@@ -3695,7 +3695,7 @@ function readShipEdit() {
     d.plongee = $('sh-plongee').checked;
     d.capacity = Math.max(0, Math.round(+$('sh-cap').value || 0));
     d.berths = Math.max(1, Math.round(+$('sh-berths').value || 1));
-    d.sail = Math.max(1, Math.round(+$('sh-sail').value || 1));
+    d.sail = Math.max(0, Math.min(3, Math.round(+$('sh-sail').value || 0)));
     d.space = $('sh-space').value;
   }
   d.positionId = $('sh-pos').value.trim();
@@ -4253,7 +4253,7 @@ function renderGames() {
     <div class="games-grid">
       <section class="crew-box"><h3>🔨 Atelier du charpentier</h3>
         <div class="mj-row"><label for="tg-work">Travail</label><select id="tg-work">${Object.entries(G.SHIP_WORKS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
-        <div class="mj-row"><label for="tg-level">Niveau de voile</label><input id="tg-level" type="number" min="1" max="10" value="5"></div>
+        <div class="mj-row"><label for="tg-level">Niveau de voile</label><input id="tg-level" type="number" min="1" max="3" value="2"></div>
         <div class="mj-row"><label for="tg-size">Calibre</label><select id="tg-size">${Object.entries(G.CANNONS).map(([k, c]) => `<option value="${k}">${esc(c.name)}</option>`).join('')}</select>
           <label for="tg-wood">Bois</label><select id="tg-wood">${Object.entries(G.WOODS).map(([k, w]) => `<option value="${k}">${esc(w.name)}</option>`).join('')}</select></div>
         <div class="mj-row"><label for="tg-wrank">Rang</label><select id="tg-wrank">${ranks()}</select></div>
@@ -5334,7 +5334,7 @@ function openItemEdit(id = null) {
   $('it-cannons').value = sh.cannons;
   $('it-cap').value = sh.capacity;
   $('it-berths').value = sh.berths ?? 4;
-  $('it-sail').value = sh.sail ?? 1;
+  $('it-sail').value = sh.sail ?? 0;
   $('it-speed').value = sh.speed ?? 10;
   $('it-robust').value = sh.robust ?? 10;
   $('it-space').innerHTML = Object.entries(G.SHIP_SPACES).map(([k, l]) => `<option value="${k}" ${k === (sh.space || 'post') ? 'selected' : ''}>${l}</option>`).join('');
@@ -5389,7 +5389,7 @@ $('it-noimg').addEventListener('click', () => {
 $('it-save').addEventListener('click', () => {
   const item = {
     name: $('it-name').value, kind: $('it-kind').value, rarity: $('it-rarity').value, heal: $('it-heal').value ? { level: +$('it-heal').value, type: $('it-heal-type').value || null } : null, value: +$('it-value').value || 0, weight: $('it-weight').value || 0, desc: $('it-desc').value, img: itemDraft.img,
-    ship: { speed: +$('it-speed').value || 10, robust: +$('it-robust').value || 10, space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: +$('it-sail').value || 1 },
+    ship: { speed: +$('it-speed').value || 10, robust: +$('it-robust').value || 10, space: $('it-space').value, cannons: +$('it-cannons').value || 0, capacity: +$('it-cap').value || 0, berths: +$('it-berths').value || 1, sail: Math.max(0, Math.min(3, Math.round(+$('it-sail').value || 0))) },
     upgrade: { type: $('it-utype').value, amount: +$('it-uamount').value || 1 },
   };
   if (!item.name.trim()) return void ($('it-err').textContent = 'Donne un nom à l’objet.');

@@ -206,6 +206,7 @@ export default handler(['POST'], async (req, body) => {
           }
         }
       }
+      res.name = row.data?.id?.name || null; // nom du personnage (annonce des scènes par le bot)
       // Navigation : une action RP d'un passager dans le salon du bateau fait avancer le voyage ;
       // à l'arrivée, le premier passager qui écrit sur l'île de destination met le bateau à quai.
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {

@@ -15,7 +15,7 @@ import { env } from './_lib/env.js';
 import { staffPerms } from './_lib/discord.js';
 import { shipEmbed } from './_lib/shipchan.js';
 import { read, readAll, write, remove, retry } from './_lib/db.js';
-import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep, dockShip } from '../shared/game.js';
+import { newPlayer, fullName, normalize, normalizeCrew, normalizeShip, rpMessage, canManageShipChannels, RP_DAILY, RP_MIN_CHARS, normalizeLoot, lootTableAt, rollLoot, islandOf, addItem, itemOf, rarityOf, voyageStep, dockShip, rankName } from '../shared/game.js';
 import { loadCatalog, loadMap } from './_lib/context.js';
 
 const RP_KEY = 'rp:channels';
@@ -82,6 +82,23 @@ export default handler(['POST'], async (req, body) => {
       await remove('players', body.userId);
       if (body.by) console.log(`[staff] ${body.by} a supprimé la fiche de ${body.userId} (${fullName(row.data)})`);
       return { name: fullName(row.data) };
+    }
+
+    case 'profile': {
+      // /fiche : la fiche d'un joueur et son équipage (nom, type, grade), pour dessiner l'image
+      need(body.userId, 400, 'Joueur manquant.');
+      const row = await read('players', String(body.userId));
+      need(row, 404, 'Ce joueur n’a pas de fiche.');
+      const p = normalize(row.data);
+      let crew = null;
+      if (p.crewId) {
+        const c = await read('crews', p.crewId);
+        if (c) {
+          const cr = normalizeCrew(c.data);
+          crew = { name: cr.name, kind: cr.kind, rank: rankName(cr, p.uid) };
+        }
+      }
+      return { player: p, crew };
     }
 
     case 'ship.embed': {

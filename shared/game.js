@@ -382,8 +382,11 @@ export function paySalary(p, now = Date.now()) {
     return { weeks: 0, amount: 0 };
   }
   if (!p.salaryAt) {
+    // Première solde versée tout de suite ; les suivantes, chaque semaine à partir de maintenant
+    const amount = gradeOf(p.id.grade).pay;
+    p.berry += amount;
     p.salaryAt = now;
-    return { weeks: 0, amount: 0 };
+    return { weeks: 1, amount };
   }
   const weeks = Math.floor((now - p.salaryAt) / WEEK);
   if (weeks <= 0) return { weeks: 0, amount: 0 };

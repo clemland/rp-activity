@@ -218,7 +218,7 @@ function affiliation() {
 /** Temps avant la prochaine solde de la Marine (versée à l'ouverture de l'app). */
 function nextPayText() {
   const next = G.nextPay(S);
-  if (!next) return 'Première solde dans 7 j';
+  if (!next) return 'Première solde à la prochaine ouverture';
   const left = next - Date.now();
   if (left <= 0) return 'Prochaine solde : disponible, rouvre l’app';
   return `Prochaine solde dans ${G.duree(left / 1000)}`;

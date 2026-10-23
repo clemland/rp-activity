@@ -54,7 +54,7 @@ export async function shipEmbed(ship) {
 export async function createShipChannel(ship, cfg) {
   const message = { embeds: [await shipEmbed(ship)], allowed_mentions: { parse: [] } };
   if (ship.space === 'forum' && cfg.categoryId) {
-    const f = await botPost(`/guilds/${env.guildId}/channels`, { name: ship.name.slice(0, 100), type: 15, parent_id: cfg.categoryId });
+    const f = await botPost(`/guilds/${env.guildId}/channels`, { name: ship.name.slice(0, 100), type: 15, parent_id: cfg.categoryId, default_forum_layout: 2, default_sort_order: 1 });
     // Grand bateau : la fiche va dans un post « Infos » (les autres lieux s'ajoutent avec /bateau post)
     const info = await botPost(`/channels/${f.id}/threads`, { name: '📜 Infos', message }).catch(() => null);
     if (info?.id) await botPatch(`/channels/${info.id}`, { flags: 2 }).catch(() => {}); // épinglé en haut du forum

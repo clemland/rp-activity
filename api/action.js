@@ -25,6 +25,14 @@ async function dockNewShips(ships, player) {
   if (!chans.has(String(player.position.channelId)) && !(player.position.parentId && chans.has(String(player.position.parentId)))) return;
   for (const s of ships) s.position = null;
 }
+/** Annonce du bot dans un salon RP (lecture de la mer, soins, dons, fabrications…). */
+async function announce(channelId, text) {
+  if (!channelId || !text) return;
+  try {
+    const { postMessage } = await import('./_lib/discord.js');
+    await postMessage(String(channelId), text.slice(0, 1900));
+  } catch {}
+}
 /** Endroits d'une île où un bateau peut s'amarrer : ses salons et les posts ouverts de ses forums (sauf salons de bateaux). */
 async function dockOptions(isl) {
   const shipChans = new Set(Object.values(await readAll('ships')).map((s) => s.channel?.id && String(s.channel.id)).filter(Boolean));
@@ -175,6 +183,8 @@ export default handler(['POST'], async (req, body) => {
         need(!why, 400, why);
         for (const [k, q] of Object.entries(r.needs)) removeItem(player, k, q);
         let toast = `Soin raté : « ${h.label} » n’est pas soigné. Le matériel est perdu.`;
+        // Annonce dans le salon : réussite ou échec du soin
+        await announce(player.position?.channelId, `🩺 **${fullName(player)}** ${action.success ? 'réussit' : 'rate'} ${h.level >= 2 ? 'l’opération' : 'les soins'} de ${self ? 'sa propre blessure' : `**${fullName(patient)}**`} : « ${h.label} » (${GM.HEALTH_LEVELS[h.level - 1].toLowerCase()})${action.success && r.seconds ? `, guérison dans ${GM.duree(r.seconds)}` : ''}.`);
         if (action.success) {
           const secs = r.seconds || 0;
           if (secs > 0) {
@@ -294,6 +304,7 @@ export default handler(['POST'], async (req, body) => {
         extra.ships[sid] = out.ship;
       }
       await dockNewShips(out.newShips || [], player); // construction : jamais amarré dans le salon d'un bateau
+      if (out.toast) await announce(player.position?.channelId, `🔨 **${fullName(player)}** · ${out.toast}`); // travaux du charpentier
       for (const s of out.newShips || []) {
         let id = slug(s.name), n = 2;
         while (await read('ships', id)) id = `${slug(s.name)}-${n++}`;
@@ -348,6 +359,14 @@ export default handler(['POST'], async (req, body) => {
       const out = playerAction(player, action, { ...ctx, ship, crew: cs.crew });
       await write('ships', action.shipId, out.ship, cs.shipVersions[action.shipId]);
       if (out.ship.channel && out.ship.name !== ship.name) await renameShipChannel(out.ship).catch(() => {}); // le salon suit le nom du bateau
+      // Annonces : lecture de la mer par le navigateur, accostage en mer
+      const v2 = out.ship.voyage;
+      if (v2 && action.nav && out.player?.job?.id === 'navigateur' && ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.read'].includes(action.type)) {
+        const cap = Math.round(Math.min(1, Math.max(0, Number(action.nav.score) || 0)) * 100), d = v2.danger || 3;
+        const sea = String(action.nav.sea || '').replace(/[*_`~|<>@]/g, '').slice(0, 30);
+        await announce(out.ship.channel?.id || out.ship.position?.channelId, `🧭 **${fullName(out.player)}** lit la mer pour **${out.ship.name}** : cap tenu ${cap} %, la roue des vents tombe sur ${sea ? `**${sea}**` : 'la mer'} (${GM.DANGERS[d - 1]} ${'☠'.repeat(d)}). Traversée : ${v2.needed} actions RP${v2.unknown ? '' : ` vers ${v2.toName}`}.`);
+      }
+      if (action.type === 'ship.meet' && action.choice === 'accoster' && v2?.encounter) await announce(out.ship.channel?.id, `⚓ **${out.ship.name}** accoste **${v2.encounter.withName}** : les deux navires sont bord à bord.`);
       return reply(out, { ships: { [action.shipId]: out.ship } });
     }
 
@@ -382,6 +401,9 @@ export default handler(['POST'], async (req, body) => {
       extra.ships = { [out.shipId]: out.ship };
     }
     await dockNewShips([...(out.newShips || []), ...(out.newShip ? [out.newShip] : [])], player); // jamais amarré dans le salon d'un bateau
+    // Annonces dans le salon RP du joueur : dons, objets utilisés, fabrications terminées ou ratées
+    const ANN = { 'item.give': '🎁', 'item.use': '💊', 'craft.collect': '🛠️', 'craft.start': '🛠️' };
+    if (ANN[action.type] && out.toast && (action.type !== 'craft.start' || out.failed)) await announce(player.position?.channelId, `${ANN[action.type]} **${fullName(player)}** · ${out.toast}`);
     // Bateaux fabriqués : ils apparaissent dans « Mes bateaux », à quai dans ce salon.
     for (const ship of out.newShips || []) {
       let id = slug(ship.name), n = 2;

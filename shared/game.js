@@ -1275,6 +1275,26 @@ export function canPilot(p, ship, crew) {
   return false;
 }
 /** Lecture de la mer par un navigateur (mini-jeu) : durée du voyage et danger. Sans navigateur : durée normale, danger inconnu. */
+/** Fonctionnalités que le staff peut désactiver pour tous les joueurs (écran « Fonctionnalités »). */
+export const FEATURES = {
+  voyage: { name: 'Voyages en mer', icon: '⛵', desc: 'Proposer un départ et voter. Les voyages déjà en cours continuent.', off: 'Les voyages en mer sont désactivés pour le moment.' },
+  boutique: { name: 'Boutiques', icon: '🛒', desc: 'Acheter et vendre dans les boutiques.', off: 'Les boutiques sont fermées pour le moment.' },
+  metiers: { name: 'Métiers', icon: '🛠️', desc: 'Lancer une fabrication, un travail, un soin ou une invention. Récupérer ou annuler ce qui est en cours reste possible.', off: 'Les métiers sont désactivés pour le moment.' },
+  dons: { name: 'Dons d’objets', icon: '🎁', desc: 'Donner un objet à un autre joueur.', off: 'Les dons d’objets sont désactivés pour le moment.' },
+};
+const FEATURE_TYPES = {
+  voyage: ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.vote'],
+  boutique: ['shop.buy', 'shop.sell'],
+  metiers: ['craft.start', 'ship.work', 'invention.save', 'job.choose'],
+  dons: ['item.give'],
+};
+/** La fonctionnalité dont dépend une action du joueur (ou null). */
+export function featureFor(type) {
+  if (typeof type !== 'string') return null;
+  if (type.startsWith('care.')) return 'metiers';
+  return Object.keys(FEATURE_TYPES).find((k) => FEATURE_TYPES[k].includes(type)) || null;
+}
+export const normalizeFeatures = (f) => Object.fromEntries(Object.keys(FEATURES).map((k) => [k, f?.[k] !== false]));
 /** Difficulté d'une route maritime (réglée par le staff) : 1 paisible à 5 infernale. */
 export const ROUTE_DIFFS = ['Paisible', 'Tranquille', 'Délicate', 'Périlleuse', 'Infernale'];
 export const linkDiff = (map, a, b) => map.diff?.[routeKey(a, b)] ?? 2;
@@ -1894,7 +1914,7 @@ export function normalizeMap(m = {}) {
   // Difficulté des routes : { "a|b": 1 à 5 } (2 par défaut)
   const diff = {};
   for (const [k, v] of Object.entries(m.diff || {})) if (links[k] !== undefined) diff[k] = int(v, 1, 5);
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, diff, pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, diff, features: normalizeFeatures(m.features), pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
 }
 /** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {

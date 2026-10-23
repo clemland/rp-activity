@@ -29,7 +29,7 @@ export const ICON_SLOTS = {
   'nav-map': ['Écrans', 'Carte', 231], 'nav-nav': ['Écrans', 'Navigation', 188],
   'nav-admin': ['Écrans', 'Joueurs (admin)', 125], 'nav-atech': ['Écrans', 'Techniques (admin)', 131], 'nav-ashop': ['Écrans', 'Boutiques (admin)', 265],
   'nav-amap': ['Écrans', 'Carte (admin)', 231], 'nav-marine': ['Écrans', 'Marine (admin)', 160], 'nav-fleet': ['Écrans', 'Équipages (admin)', 1],
-  'nav-ships': ['Écrans', 'Bateaux (admin)', 231], 'nav-gest': ['Écrans', 'Gestion (admin)', 270], 'nav-aicons': ['Écrans', 'Icônes (admin)', 237], 'nav-aloot': ['Écrans', 'Butins (admin)', 331], 'nav-aperms': ['Écrans', 'Permissions (admin)', 125], 'nav-agames': ['Écrans', 'Mini-jeux (admin)', 279], 'nav-ainv': ['Écrans', 'Inventions (admin)', 'potion'],
+  'nav-ships': ['Écrans', 'Bateaux (admin)', 231], 'nav-gest': ['Écrans', 'Gestion (admin)', 270], 'nav-aicons': ['Écrans', 'Icônes (admin)', 237], 'nav-aloot': ['Écrans', 'Butins (admin)', 331], 'nav-aperms': ['Écrans', 'Permissions (admin)', 125], 'nav-agames': ['Écrans', 'Mini-jeux (admin)', 279], 'nav-ainv': ['Écrans', 'Inventions (admin)', 'potion'], 'nav-afeat': ['Écrans', 'Fonctionnalités (admin)', 279],
   'tab-t-perso': ['Onglets de la fiche', 'Stats & compétences', 96], 'tab-t-tech': ['Onglets de la fiche', 'Techniques', 131],
   'tab-t-inv': ['Onglets de la fiche', 'Inventaire', 270], 'tab-t-job': ['Onglets de la fiche', 'Métier', 279], 'tab-t-mj': ['Onglets de la fiche', 'Édition MJ', 125],
   'faction-pirate': ['Factions', 'Pirate', 1], 'faction-marine': ['Factions', 'Marine', 160], 'faction-revolutionnaire': ['Factions', 'Révolutionnaire', 96],

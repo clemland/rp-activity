@@ -3057,7 +3057,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -4179,6 +4179,46 @@ $('v-atech').addEventListener('click', async (e) => {
     setBusy(-1);
   }
   loadPendingTechs();
+});
+
+/* ═══ Fonctionnalités activées ou non pour les joueurs (panneau admin) ═══ */
+let featDraft = null;
+async function loadFeatures() {
+  try {
+    featDraft = (await API.staff('features')).features;
+  } catch (err) {
+    featDraft = {};
+    toast(esc(err.message));
+  }
+  renderFeatures();
+}
+function renderFeatures() {
+  const el = $('v-afeat');
+  if (!featDraft) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  el.innerHTML = `
+    <div class="sec-head"><div><h2>Fonctionnalités</h2><p class="lede" style="margin:0">Désactive une fonctionnalité pour tous les joueurs, par exemple pendant un event ou une mise à jour. Le staff garde l’accès à tout depuis le panneau admin.</p></div></div>
+    <div class="feat-list">${Object.entries(G.FEATURES).map(([k, f]) => {
+      const on = featDraft[k] !== false;
+      return `<label class="feat ${on ? '' : 'off'}"><input type="checkbox" data-feat="${k}" ${on ? 'checked' : ''}>
+        <span><b>${f.icon} ${esc(f.name)}</b><small class="note">${esc(f.desc)}</small></span>
+        <span class="feat-st ${on ? 'ok' : 'no'}">${on ? 'Activée' : 'Désactivée'}</span></label>`;
+    }).join('')}</div>`;
+}
+$('v-afeat').addEventListener('change', async (e) => {
+  const k = e.target.dataset?.feat;
+  if (!k) return;
+  featDraft[k] = e.target.checked;
+  renderFeatures();
+  setBusy(1);
+  try {
+    const out = await API.staff('map.features', { features: { [k]: featDraft[k] } });
+    toast(esc(out?.toast || 'Fonctionnalités enregistrées'));
+  } catch (err) {
+    toast(esc(err.message));
+    loadFeatures();
+  } finally {
+    setBusy(-1);
+  }
 });
 
 /* ═══ Inventions à valider (panneau admin) ═══════════════════════════════ */
@@ -5582,6 +5622,7 @@ function showScreen(name) {
   if (name === 'aperms') loadPerms();
   if (name === 'agames') renderGames();
   if (name === 'ainv') loadPendingInventions();
+  if (name === 'afeat') loadFeatures();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

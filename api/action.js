@@ -60,6 +60,12 @@ export default handler(['POST'], async (req, body) => {
     if (typeof ph === 'string') action.photo = await ingest(ph, 'photos', me.uid);
     else if (ph?.url) action.photo = { ...ph, url: await ingest(ph.url, 'photos', me.uid) };
   }
+  // Fonctionnalité désactivée par le staff (écran « Fonctionnalités »)
+  const feat = GM.featureFor(action.type);
+  if (feat) {
+    const { map: fm } = await loadMap();
+    need(fm.features?.[feat] !== false, 403, GM.FEATURES[feat].off);
+  }
   if (action.type === 'tech.save' && action.media !== undefined) action.media = await ingest(action.media, 'techniques', me.uid);
   if (action.type === 'invention.save' && Array.isArray(action.images)) action.images = await Promise.all(action.images.slice(0, 5).map((u) => ingest(u, 'inventions', me.uid)));
   if (action.type === 'ship.edit' && action.photo) action.photo = await ingest(action.photo, 'bateaux', me.uid);

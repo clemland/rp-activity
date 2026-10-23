@@ -209,6 +209,11 @@ export default handler(['POST'], async (req, body) => {
         return { icons, toast: url ? 'Icône changée pour tout le monde' : 'Icône remise par défaut' };
       });
     }
+    case 'features': {
+      // Fonctionnalités activées ou non pour les joueurs
+      const { map } = await loadMap();
+      return { features: map.features || {} };
+    }
     case 'inventions': {
       // Toutes les inventions en attente de validation, avec le niveau de métier de leur auteur
       const list = [];
@@ -421,6 +426,7 @@ export default handler(['POST'], async (req, body) => {
     case 'map.unlink':
     case 'map.dir':
     case 'map.pace':
+    case 'map.features':
     case 'map.diff': {
       // Images d'abord (hors de la boucle de réessai)
       let bg, img;
@@ -453,6 +459,10 @@ export default handler(['POST'], async (req, body) => {
       return retry(async () => {
         const { map, version } = await loadMap();
         let toast = 'Carte mise à jour', id = body.id;
+        if (body.op === 'map.features') {
+          map.features = { ...(map.features || {}), ...Object.fromEntries(Object.entries(body.features || {}).map(([k, v]) => [k, !!v])) };
+          toast = 'Fonctionnalités enregistrées';
+        }
         if (body.op === 'map.diff') {
           const k = routeKey(body.a, body.b);
           need(map.links[k] !== undefined, 404, 'Cette route n’existe pas.');

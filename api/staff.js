@@ -148,6 +148,23 @@ export default handler(['POST'], async (req, body) => {
       return { perms: data, toast: 'Permissions enregistrées' };
     }
 
+    case 'loot.channels': {
+      // Salons RP (déclarés et salons des bateaux) et posts ouverts de leurs forums, pour attribuer les tables de butin
+      const list = (await read('meta', 'rp:channels'))?.data?.list || [];
+      const { activeThreads } = await import('./_lib/discord.js');
+      const threads = list.some((c) => c.kind === 'forum') ? await activeThreads() : [];
+      return {
+        channels: list
+          .map((c) => ({
+            id: String(c.id),
+            name: c.name || String(c.id),
+            kind: c.kind === 'forum' ? 'forum' : 'salon',
+            posts: c.kind === 'forum' ? threads.filter((t) => t.parent_id === String(c.id)).map((t) => ({ id: t.id, name: t.name })).sort((a, b) => a.name.localeCompare(b.name)) : [],
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    }
+
     case 'loot.get':
       return { loot: normalizeLoot((await read('meta', 'loot'))?.data || {}) };
 

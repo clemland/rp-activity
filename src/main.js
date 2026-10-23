@@ -5204,6 +5204,17 @@ async function loadLoot() {
     } catch {}
   }
   renderLoot();
+  loadLootChans();
+}
+/** Salons RP et posts de leurs forums (pour attribuer les tables). */
+async function loadLootChans() {
+  try {
+    lootChans = (await API.staff('loot.channels')).channels;
+  } catch (err) {
+    lootChans = [];
+    toast(esc(err.message));
+  }
+  renderLoot();
 }
 async function lootCall(op, payload) {
   setBusy(1);
@@ -5241,14 +5252,73 @@ function renderLoot() {
       const n = places.filter(([, p]) => p.table === id).length;
       return `<button class="gest-card" data-loot-edit="${esc(id)}"><span class="slot-ico">${t.entries[0] ? itemIco(t.entries[0].key) : icon('objet-mat')}</span><span><b>${esc(t.name)}</b><small>${t.entries.length} objet${t.entries.length > 1 ? 's' : ''} · ${total(t)} % de trouver quelque chose · ${n} lieu${n > 1 ? 'x' : ''}</small></span></button>`;
     }).join('')}</div>` : '<p class="note">Aucune table. Crée-en une, par exemple « Forêt ».</p>'}
-    <h3 class="ed-h">Lieux (${places.length})</h3>
-    ${places.length ? `<div class="member-list">${places.map(([k, p]) => `<div class="member-row"><span class="m-name"><span class="rank-badge">${PLACE_KIND[p.kind]}</span> <b>${esc(placeName(k, p))}</b></span><span class="note">${esc(lootData.tables[p.table]?.name || '?')}</span><span class="m-acts"><button class="btn sm ghost danger-txt" data-loot-unplace="${esc(k)}">Retirer</button></span></div>`).join('')}</div>` : '<p class="note">Aucun lieu : une table ne sert à rien tant qu’elle n’est attribuée à aucun endroit.</p>'}
-    ${tables.length ? `<div class="crew-box" style="margin-top:12px"><h3>Attribuer une table</h3>
-      <div class="mj-row"><label for="lp-table">Table</label><select id="lp-table">${tables.map(([id, t]) => `<option value="${esc(id)}">${esc(t.name)}</option>`).join('')}</select></div>
-      <div class="mj-row"><label for="lp-ch">Post, salon ou forum</label><input id="lp-ch" inputmode="numeric" placeholder="ID (clic droit > Copier l’identifiant)"><button class="btn sm" id="lp-add-ch">Attribuer</button></div>
-      ${islands.length ? `<div class="mj-row"><label for="lp-isl">ou une île</label><select id="lp-isl">${islands.map(([id, i]) => `<option value="${esc(id)}">${esc(i.name)}</option>`).join('')}</select><button class="btn sm" id="lp-add-isl">Attribuer</button></div>` : ''}
-      <p class="note" style="margin:0">Un post de forum peut avoir sa propre table (forêt, ville…), différente de celle de son forum.</p></div>` : ''}`;
+    ${lootPlacesHTML(places, islands, placeName)}`;
 }
+/* Attribution des tables : liste des salons RP (forums dépliables), des îles, et des autres lieux attribués */
+let lootChans = null, lootQ = '';
+const lootOpen = new Set();
+const islandOfChan = (id) => Object.entries(amap?.islands || {}).find(([, i]) => (i.channels || []).some((c) => String(c.id) === String(id)))?.[0];
+function lootPlacesHTML(places, islands, placeName) {
+  const tables = Object.entries(lootData.tables);
+  if (!tables.length) return '<h3 class="ed-h">Salons RP</h3><p class="note">Crée d’abord une table pour pouvoir l’attribuer aux salons.</p>';
+  const P = lootData.places;
+  const tname = (id) => lootData.tables[id]?.name || '?';
+  const sel = (key, own, inherit, label, extra) => `<select data-lp-key="${esc(key)}" ${extra} aria-label="Table de ${esc(label)}"><option value="">${inherit ? `Hérite : ${esc(inherit)}` : 'Aucune table'}</option>${tables.map(([id, t]) => `<option value="${esc(id)}" ${own === id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`;
+  const q = normTxt(lootQ.trim());
+  const match = (s) => !q || normTxt(s).includes(q);
+  const rows = (lootChans || []).map((c) => {
+    const isl = islandOfChan(c.id);
+    const islInh = isl && P[`isl:${isl}`] ? `${tname(P[`isl:${isl}`].table)} (île ${amap.islands[isl].name})` : '';
+    const own = P[`ch:${c.id}`]?.table || '';
+    const postInh = own ? `${tname(own)} (du forum)` : islInh;
+    const posts = c.posts.filter((p) => match(p.name) || match(c.name));
+    if (!match(c.name) && !posts.length) return '';
+    const open = lootOpen.has(c.id) || (q && posts.length && !match(c.name));
+    const forum = c.kind === 'forum';
+    return `<div class="lp-ch">
+      <div class="lp-row">${forum ? `<button type="button" class="lp-tog" data-lp-tog="${esc(c.id)}" aria-expanded="${!!open}" aria-label="${open ? 'Replier' : 'Déplier'} ${esc(c.name)}">${open ? '▾' : '▸'}</button>` : '<span class="lp-tog"></span>'}<span class="lp-name">${forum ? '🗂️' : '#'} ${esc(c.name)}${forum ? ` <small class="note">${c.posts.length} post${c.posts.length > 1 ? 's' : ''}</small>` : ''}</span>${sel(`ch:${c.id}`, own, islInh, c.name, `data-lp-name="${esc(c.name)}"`)}</div>
+      ${forum && open ? `<div class="lp-posts">${posts.map((p) => `<div class="lp-row"><span class="lp-tog"></span><span class="lp-name">↳ ${esc(p.name)}</span>${sel(`ch:${p.id}`, P[`ch:${p.id}`]?.table || '', postInh, p.name, `data-lp-name="${esc(p.name)}"`)}</div>`).join('') || '<p class="note" style="margin:4px 0 4px 36px">Aucun post ouvert.</p>'}</div>` : ''}
+    </div>`;
+  }).join('');
+  const islRows = islands.map(([id, i]) => `<div class="lp-row lp-ch"><span class="lp-tog"></span><span class="lp-name">🏝️ ${esc(i.name)}</span>${sel(`isl:${id}`, P[`isl:${id}`]?.table || '', '', i.name, `data-lp-name="${esc(i.name)}"`)}</div>`).join('');
+  const shown = new Set((lootChans || []).flatMap((c) => [`ch:${c.id}`, ...c.posts.map((p) => `ch:${p.id}`)]));
+  const others = lootChans ? places.filter(([k]) => k.startsWith('ch:') && !shown.has(k)) : [];
+  return `
+    <h3 class="ed-h">Salons RP</h3>
+    <p class="note" style="margin:0 0 6px">Choisis la table de chaque salon. Déroule un forum (▸) pour régler ses posts un par un. Sans table à lui, un post utilise celle de son forum, puis celle de l’île.</p>
+    <div class="mj-row"><input type="search" id="lp-q" placeholder="Rechercher un salon ou un post…" value="${esc(lootQ)}" aria-label="Rechercher un salon ou un post"></div>
+    ${lootChans == null ? '<p class="note">Chargement des salons…</p>' : rows ? `<div class="lp-list">${rows}</div>` : '<p class="note">Aucun salon RP ne correspond.</p>'}
+    <h3 class="ed-h">Îles</h3>
+    ${islRows ? `<div class="lp-list">${islRows}</div>` : '<p class="note">Aucune île sur la carte.</p>'}
+    ${others.length ? `<h3 class="ed-h">Autres lieux attribués</h3><p class="note" style="margin:0 0 6px">Posts archivés, ou salons qui ne sont plus RP.</p>
+      <div class="member-list">${others.map(([k, p]) => `<div class="member-row"><span class="m-name"><span class="rank-badge">${PLACE_KIND[p.kind]}</span> <b>${esc(placeName(k, p))}</b></span><span class="note">${esc(tname(p.table))}</span><span class="m-acts"><button class="btn sm ghost danger-txt" data-loot-unplace="${esc(k)}">Retirer</button></span></div>`).join('')}</div>` : ''}`;
+}
+$('v-aloot').addEventListener('change', (e) => {
+  const key = e.target.dataset?.lpKey;
+  if (!key) return;
+  readLootEdit();
+  const v = e.target.value;
+  if (!v) return void lootCall('loot.place.remove', { key });
+  if (key.startsWith('isl:')) return void lootCall('loot.place.set', { table: v, islandId: key.slice(4), name: e.target.dataset.lpName || '' });
+  lootCall('loot.place.set', { table: v, channelId: key.slice(3) });
+});
+$('v-aloot').addEventListener('input', (e) => {
+  if (e.target.id !== 'lp-q') return;
+  readLootEdit();
+  lootQ = e.target.value;
+  renderLoot();
+  const q = $('lp-q');
+  q?.focus();
+  q?.setSelectionRange(q.value.length, q.value.length);
+});
+$('v-aloot').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-lp-tog]')?.dataset.lpTog;
+  if (!id) return;
+  readLootEdit();
+  if (lootOpen.has(id)) lootOpen.delete(id);
+  else lootOpen.add(id);
+  renderLoot();
+});
 function lootEditorHTML() {
   const t = lootEdit;
   const opts = (sel) => Object.entries(G.ITEMS).filter(([, it]) => it.kind !== 'bateau').sort((a, b) => a[1].name.localeCompare(b[1].name))

@@ -420,7 +420,8 @@ export default handler(['POST'], async (req, body) => {
         case 'map.link':
     case 'map.unlink':
     case 'map.dir':
-    case 'map.pace': {
+    case 'map.pace':
+    case 'map.diff': {
       // Images d'abord (hors de la boucle de réessai)
       let bg, img;
       if (body.op === 'map.bg') bg = body.bg ? await ingest(body.bg, 'carte', 'fond') : null;
@@ -452,6 +453,13 @@ export default handler(['POST'], async (req, body) => {
       return retry(async () => {
         const { map, version } = await loadMap();
         let toast = 'Carte mise à jour', id = body.id;
+        if (body.op === 'map.diff') {
+          const k = routeKey(body.a, body.b);
+          need(map.links[k] !== undefined, 404, 'Cette route n’existe pas.');
+          map.diff ??= {};
+          map.diff[k] = Math.max(1, Math.min(5, Math.round(Number(body.diff) || 2)));
+          toast = null;
+        }
         if (body.op === 'map.pace') {
           map.pace = Number(body.pace) > 0 ? Math.min(10, Number(body.pace)) : 0.5;
           toast = `Rythme des voyages : ${map.pace}`;

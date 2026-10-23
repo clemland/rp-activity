@@ -1226,9 +1226,19 @@ export function canPilot(p, ship, crew) {
   return false;
 }
 /** Lecture de la mer par un navigateur (mini-jeu) : durée du voyage et danger. Sans navigateur : durée normale, danger inconnu. */
+/** Difficulté d'une route maritime (réglée par le staff) : 1 paisible à 5 infernale. */
+export const ROUTE_DIFFS = ['Paisible', 'Tranquille', 'Délicate', 'Périlleuse', 'Infernale'];
+export const linkDiff = (map, a, b) => map.diff?.[routeKey(a, b)] ?? 2;
+/** Difficulté d'un trajet : celle de sa route la plus difficile. */
+export function pathDifficulty(map, path) {
+  if (!path || path.length < 2) return 2;
+  let d = 1;
+  for (let i = 1; i < path.length; i++) d = Math.max(d, linkDiff(map, path[i - 1], path[i]));
+  return d;
+}
 export const DANGERS = ['Mer d’huile', 'Mer calme', 'Mer agitée', 'Mer dangereuse', 'Mer mortelle'];
-export function navRoll(p, a) {
-  if (p.job?.id !== 'navigateur' || !a?.nav) return { factor: 1, danger: null };
+export function navRoll(p, a, diff = null) {
+  if (p.job?.id !== 'navigateur' || !a?.nav) return { factor: 1, danger: diff }; // sans navigateur : le danger de la route
   const score = Math.min(1, Math.max(0, Number(a.nav.score) || 0)); // part du temps passée au cap
   return { factor: 1.25 - 0.45 * score, danger: int(a.nav.danger ?? 3, 1, 5) };
 }
@@ -1305,7 +1315,7 @@ export function shipAction(player, ship0, action, ctx = {}) {
       if (!to || to.kind !== 'island' || (!to.visible && !(p.discovered || []).includes(a.to)) || !to.accessible || a.to === from) fail('Destination impossible.');
       const t = travelTime(map, from, a.to);
       if (!t) fail('Aucune route connue vers cette île.');
-      const nr = navRoll(p, a);
+      const nr = navRoll(p, a, pathDifficulty(map, t.path));
       const needed = Math.max(2, Math.ceil(voyageActions(t.value, st.speed, map.pace) * nr.factor));
       ship.voyage = { status: 'vote', from, to: a.to, fromName: map.islands[from].name, toName: to.name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: ctx.now || Date.now(), danger: nr.danger };
       out.toast = `Départ proposé vers ${to.name} (${needed} actions) : les passagers doivent accepter.`;
@@ -1333,7 +1343,7 @@ export function shipAction(player, ship0, action, ctx = {}) {
       const target = isl.choose ? isl.next[int(a.choice ?? 0, 0, 99)] : ship.logPose.target;
       if (!target || !map.islands[target]) fail('Le Log Pose ne pointe vers aucune île : le staff doit définir l’île suivante.');
       const t = travelTime(map, from, target);
-      const nrl = navRoll(p, a);
+      const nrl = navRoll(p, a, t ? pathDifficulty(map, t.path) : 3);
       const needed = Math.max(2, Math.ceil(voyageActions(t ? t.value : Math.max(1, Math.round(islandDistance(map, from, target))), st.speed, map.pace) * nrl.factor));
       ship.voyage = { status: 'vote', from, to: target, fromName: isl.name, toName: map.islands[target].name, needed, done: 0, by: p.uid, votes: { [p.uid]: true }, port: ship.position, at: now, unknown: true, danger: nrl.danger };
       out.toast = `Le Log Pose pointe vers une île inconnue (${needed} actions) : les passagers doivent accepter.`;
@@ -1832,7 +1842,10 @@ export function normalizeMap(m = {}) {
     const kk = routeKey(a, b);
     if (links[kk] !== undefined && (from === a || from === b)) oneway[kk] = from;
   }
-  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
+  // Difficulté des routes : { "a|b": 1 à 5 } (2 par défaut)
+  const diff = {};
+  for (const [k, v] of Object.entries(m.diff || {})) if (links[k] !== undefined) diff[k] = int(v, 1, 5);
+  return { bg: m.bg || null, ratio: Number(m.ratio) > 0 ? +m.ratio : 0.5625, islands, links, oneway, diff, pace: Number(m.pace) > 0 ? Math.min(10, +m.pace) : 0.5 }; // ratio = hauteur / largeur du fond ; pace = rythme des voyages
 }
 /** Distance entre deux points, en unités de carte (largeur = 100, hauteur = 100 × ratio). */
 export function islandDistance(map, a, b) {
@@ -1925,13 +1938,21 @@ export function mapFor(map0, player, { staff = false, aboard = null } = {}) {
   if (staff) return { ...map, here };
   const ids = Object.keys(map.islands).filter((id) => map.islands[id].kind === 'island' && (map.islands[id].visible || id === here || (player?.discovered || []).includes(id)));
   // Côté joueur : on ne dit pas où mènent les chemins du Log Pose, seulement combien il y en a
-  const islands = Object.fromEntries(ids.map((id) => [id, { ...map.islands[id], next: map.islands[id].next.length }]));
+  // nextDiff : difficulté de chaque chemin du Log Pose (sans dire où il mène)
+  const islands = Object.fromEntries(ids.map((id) => [id, {
+    ...map.islands[id],
+    next: map.islands[id].next.length,
+    nextDiff: map.islands[id].next.map((n) => {
+      const t = travelTime(map, id, n);
+      return t ? pathDifficulty(map, t.path) : 3;
+    }),
+  }]));
   const travel = {};
   if (here) {
     for (const id of ids) {
       if (id === here) continue;
       const t = travelTime(map, here, id);
-      travel[id] = t ? { value: t.value, via: t.path.slice(1, -1).filter((s) => islands[s]).map((s) => islands[s].name) } : null;
+      travel[id] = t ? { value: t.value, via: t.path.slice(1, -1).filter((s) => islands[s]).map((s) => islands[s].name), diff: pathDifficulty(map, t.path) } : null;
     }
   }
   // En mer : le bateau du joueur avance sur la carte (seulement sa position, pas le tracé de la route)

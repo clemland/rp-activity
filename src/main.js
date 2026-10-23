@@ -1705,11 +1705,14 @@ $('v-job').addEventListener('click', async (e) => {
 /* ═══ Navigateur : lire la mer (tenir le cap, puis la roue des vents) ════ */
 const wheelSVG = () => `<circle r="40" fill="none" stroke="#7a4a1e" stroke-width="8"/><circle r="11" fill="#a8690c" stroke="#5a3a1e" stroke-width="3"/>${Array.from({ length: 8 }, (_, i) => `<g transform="rotate(${i * 45})"><line x1="0" y1="-11" x2="0" y2="-52" stroke="#7a4a1e" stroke-width="6" stroke-linecap="round"/><circle cy="-54" r="5" fill="#a8690c"/></g>`).join('')}`;
 /** Tenir le cap : le vent pousse l'aiguille, la barre la ramène. Score = part du temps passée dans la zone verte. */
-const helmStep = (rank, res) => (api) => {
-  const dur = 12, sector = 16 + rank * 5, drift0 = 16 + Math.random() * 6 - rank * 2;
+const helmStep = (rank, res, diff = 2) => (api) => {
+  // Route difficile : vent plus fort, zone plus étroite, bon cap qui bouge plus vite et plus loin
+  const dur = 12, sector = Math.max(10, 26 - diff * 3 + rank * 4), drift0 = 8 + diff * 3.5 + Math.random() * 4 - rank * 2;
+  const tAmp = 12 + diff * 9, tw = [[mgRnd(0.25, 0.45) * (0.7 + diff * 0.15), mgRnd(0, 6.28)], [mgRnd(0.6, 1.1) * (0.7 + diff * 0.15), mgRnd(0, 6.28)]];
+  let tgt = 0;
   const w = [[mgRnd(0.3, 0.6), mgRnd(0, 6.28)], [mgRnd(0.9, 1.6), mgRnd(0, 6.28)]];
   let t = 0, inside = 0, h = mgRnd(-30, 30), rot = 0, drag = null, hold = 0;
-  api.area.innerHTML = `<p class="op-step">☸ <b>Tenir le cap</b> : tourne la barre (glisse dessus, ou ◀ ▶, ou les flèches du clavier) pour garder l’aiguille dans la zone verte malgré le vent.</p>
+  api.area.innerHTML = `<p class="op-step">☸ <b>Tenir le cap</b> : tourne la barre (glisse dessus, ou ◀ ▶, ou les flèches du clavier) pour garder l’aiguille dans la zone verte : le bon cap change sans cesse, et le vent pousse.</p>
     <div class="helm-wrap">
       <svg class="compass" viewBox="-110 -110 220 120" aria-hidden="true">
         <path d="M -100 0 A 100 100 0 0 1 100 0" fill="#fffaea" stroke="#17255e" stroke-width="4"/>
@@ -1763,7 +1766,9 @@ const helmStep = (rank, res) => (api) => {
     if (drag == null && !hold) rot *= 1 - Math.min(1, 0.8 * dt); // la barre revient doucement si on la lâche
     const wind = drift0 * (Math.sin(t * w[0][0] * 2 + w[0][1]) + 0.6 * Math.sin(t * w[1][0] * 2 + w[1][1]));
     h = Math.max(-90, Math.min(90, h + (wind + rot * 0.35) * dt));
-    if (Math.abs(h) <= sector / 2) inside += dt;
+    tgt = Math.max(-70, Math.min(70, tAmp * (0.7 * Math.sin(t * tw[0][0] * 2 + tw[0][1]) + 0.3 * Math.sin(t * tw[1][0] * 2 + tw[1][1]))));
+    $('hz').setAttribute('transform', `rotate(${tgt})`); // le bon cap bouge
+    if (Math.abs(h - tgt) <= sector / 2) inside += dt;
     $('hn').setAttribute('transform', `rotate(${h})`);
     wheel.style.transform = `rotate(${rot * 2}deg)`;
     $('htime').style.width = `${Math.max(0, 100 - (t / dur) * 100)}%`;
@@ -1783,9 +1788,13 @@ const WIND_SEGS = [
   { l: 'Mer d’huile', d: 1, c: '#bfe6fa' }, { l: 'Vent favorable', d: 1, c: '#9fd3ef' }, { l: 'Brise', d: 2, c: '#7fc28a' }, { l: 'Houle', d: 3, c: '#e8d38a' },
   { l: 'Brume', d: 3, c: '#d6d6d6' }, { l: 'Courants', d: 4, c: '#e6a223' }, { l: 'Tempête', d: 5, c: '#e0574d' }, { l: 'Rois des mers', d: 5, c: '#a46fd6' },
 ];
-const windStep = (rank, res) => (api) => {
-  // Un navigateur expérimenté agrandit les cases calmes et réduit les dangereuses
-  const segs = WIND_SEGS.map((s) => ({ ...s, w: Math.max(0.35, 1 + (s.d <= 2 ? 0.45 : s.d >= 4 ? -0.25 : 0) * (rank - 1)) }));
+const windStep = (rank, res, diff = 2) => (api) => {
+  // Un navigateur expérimenté agrandit les cases calmes ; une route difficile agrandit les cases dangereuses
+  const segs = WIND_SEGS.map((s) => {
+    const calm = s.d <= 2, rough = s.d >= 4;
+    const w = 1 + (calm ? 0.45 : rough ? -0.25 : 0) * (rank - 1) + (calm ? -0.22 : rough ? 0.35 : 0.05) * (diff - 2);
+    return { ...s, w: Math.max(0.2, w) };
+  });
   const total = segs.reduce((a, s) => a + s.w, 0);
   let a0 = 0;
   for (const s of segs) {
@@ -1826,9 +1835,9 @@ const windStep = (rank, res) => (api) => {
   });
 };
 /** Mini-jeu du navigateur au départ : renvoie { score, danger, sea }, ou null s'il abandonne. */
-async function navGame(rank, title) {
+async function navGame(rank, title, diff = 2) {
   const res = { score: 0.5, danger: 3, sea: 'Houle' };
-  const ok = await miniGame({ title, help: 'Tiens le cap, puis lance la roue des vents : ta lecture de la mer décide de la durée et des dangers du voyage.', steps: [helmStep(rank, res), windStep(rank, res)], doneText: 'La mer est lue !' });
+  const ok = await miniGame({ title, help: `Route ${G.ROUTE_DIFFS[diff - 1].toLowerCase()}. Tiens le cap, puis lance la roue des vents : ta lecture de la mer décide de la durée et des dangers du voyage.`, steps: [helmStep(rank, res, diff), windStep(rank, res, diff)], doneText: 'La mer est lue !' });
   return ok ? res : null;
 }
 /** État de la mer prévu pour un voyage (lu par le navigateur au départ). */
@@ -2114,7 +2123,7 @@ function logPoseHTML(sh) {
   const ready = left <= 0;
   return `<div class="crew-box voyage-box"><h3>🧭 Log Pose</h3>
     <p class="note" style="margin:0">${ready ? (isl.choose && isl.next > 1 ? `Rechargé : ${isl.next} chemins s’offrent à vous, chacun vers une île inconnue.` : 'Rechargé : il pointe vers l’île suivante de Grand Line, encore inconnue.') : `En charge : encore ${G.duree(left / 1000)} sur ${esc(isl.name)}.`}</p>
-    ${ready ? (S.job.id === 'navigateur' ? `<div class="mj-row">${isl.choose && isl.next > 1 ? `<label for="voy-path">Chemin</label><select id="voy-path">${Array.from({ length: isl.next }, (_, i) => `<option value="${i}">Chemin ${i + 1}</option>`).join('')}</select>` : ''}<button class="btn sm" data-voy-logpose="${esc(sh.id)}">${isl.choose && isl.next > 1 ? 'Prendre ce chemin' : 'Suivre le Log Pose'}</button></div>${isl.choose && isl.next > 1 ? '<p class="note" style="margin:0">Une fois engagé, pas de retour en arrière.</p>' : ''}` : '<p class="note" style="margin:0">Il faut qu’un navigateur à bord le suive.</p>') : ''}</div>`;
+    ${ready ? (S.job.id === 'navigateur' ? `<div class="mj-row">${isl.choose && isl.next > 1 ? `<label for="voy-path">Chemin</label><select id="voy-path">${Array.from({ length: isl.next }, (_, i) => `<option value="${i}">Chemin ${i + 1} · ${G.ROUTE_DIFFS[(isl.nextDiff?.[i] ?? 3) - 1].toLowerCase()}</option>`).join('')}</select>` : ''}<button class="btn sm" data-voy-logpose="${esc(sh.id)}">${isl.choose && isl.next > 1 ? 'Prendre ce chemin' : 'Suivre le Log Pose'}</button></div>${isl.choose && isl.next > 1 ? '<p class="note" style="margin:0">Une fois engagé, pas de retour en arrière.</p>' : ''}` : '<p class="note" style="margin:0">Il faut qu’un navigateur à bord le suive.</p>') : ''}</div>`;
 }
 /** Encadré du voyage du bateau où l'on est à bord : départ, vote, traversée, arrivée. */
 function voyageHTML(sh) {
@@ -2128,7 +2137,7 @@ function voyageHTML(sh) {
     const dests = Object.entries(MAP?.travel || {}).filter(([id, t]) => t && MAP.islands[id]?.accessible);
     if (!MAP?.here || !dests.length) return '<p class="note">Aucune destination connue depuis ce port.</p>';
     return `<div class="crew-box voyage-box"><h3>⛵ Prendre la mer</h3>
-      <div class="mj-row"><label for="voy-to">Destination</label><select id="voy-to">${dests.map(([id, t]) => `<option value="${esc(id)}">${esc(MAP.islands[id].name)} · ${G.voyageActions(t.value, st.speed, MAP.pace || 0.5)} actions${t.via?.length ? ` (via ${t.via.map(esc).join(', ')})` : ''}</option>`).join('')}</select>
+      <div class="mj-row"><label for="voy-to">Destination</label><select id="voy-to">${dests.map(([id, t]) => `<option value="${esc(id)}">${esc(MAP.islands[id].name)} · ${G.voyageActions(t.value, st.speed, MAP.pace || 0.5)} actions${t.via?.length ? ` (via ${t.via.map(esc).join(', ')})` : ''} · route ${G.ROUTE_DIFFS[(t.diff ?? 2) - 1].toLowerCase()}</option>`).join('')}</select>
       <button class="btn sm" data-voy-propose="${esc(sh.id)}">Proposer le départ</button></div>
       <p class="note" style="margin:0">Tous les passagers à bord devront accepter.</p></div>`;
   }
@@ -2216,7 +2225,9 @@ $('v-nav').addEventListener('click', async (e) => {
   const vl = e.target.closest('[data-voy-logpose]')?.dataset.voyLogpose;
   if (vl) {
     const choice = +($('voy-path')?.value ?? 0);
-    const nav = S.job.id === 'navigateur' ? await navGame(S.job.lvl, 'Lire la mer') : undefined;
+    const isl = MAP?.islands?.[MAP?.here], nd = isl?.nextDiff || [];
+    const diff = isl?.choose ? nd[choice] ?? 3 : nd.length ? Math.max(...nd) : 3;
+    const nav = S.job.id === 'navigateur' ? await navGame(S.job.lvl, 'Lire la mer', diff) : undefined;
     if (nav === null) return; // abandonné
     return void run({ type: 'ship.voyage.logpose', shipId: vl, choice, nav });
   }
@@ -2224,7 +2235,7 @@ $('v-nav').addEventListener('click', async (e) => {
   if (vp) {
     const to = $('voy-to').value;
     // Un navigateur lit la mer avant de proposer le départ : durée et dangers du voyage
-    const nav = S.job.id === 'navigateur' ? await navGame(S.job.lvl, 'Lire la mer') : undefined;
+    const nav = S.job.id === 'navigateur' ? await navGame(S.job.lvl, 'Lire la mer', MAP?.travel?.[to]?.diff ?? 2) : undefined;
     if (nav === null) return; // abandonné
     return void run({ type: 'ship.voyage.propose', shipId: vp, to, nav });
   }
@@ -4145,6 +4156,7 @@ function renderGames() {
       </section>
       <section class="crew-box"><h3>🧭 Navigateur : lire la mer</h3>
         <div class="mj-row"><label for="tg-nrank">Rang</label><select id="tg-nrank">${ranks()}</select></div>
+        <div class="mj-row"><label for="tg-ndiff">Route</label><select id="tg-ndiff">${G.ROUTE_DIFFS.map((l, i) => `<option value="${i + 1}" ${i === 1 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div><button class="btn" id="tg-nav-go">Tester la navigation</button></div>
       </section>
       <section class="crew-box"><h3>🔪 Opération</h3>
@@ -4191,10 +4203,11 @@ $('v-agames').addEventListener('click', (e) => {
   if (e.target.closest('#tg-nav-go')) {
     const rank = +$('tg-nrank').value;
     return void (async () => {
-      const r = await navGame(rank, 'Test : lire la mer');
+      const diff = +$('tg-ndiff').value;
+      const r = await navGame(rank, 'Test : lire la mer', diff);
       gameLog.unshift({
         ok: !!r,
-        label: r ? `Navigation (${JOB_LEVELS[rank - 1]}) : cap ${Math.round(r.score * 100)} %, traversée ×${(1.25 - 0.45 * r.score).toFixed(2)}, ${r.sea} (${r.danger}/5)` : `Navigation (${JOB_LEVELS[rank - 1]}) : abandonnée`,
+        label: r ? `Navigation (${JOB_LEVELS[rank - 1]}, route ${G.ROUTE_DIFFS[diff - 1].toLowerCase()}) : cap ${Math.round(r.score * 100)} %, traversée ×${(1.25 - 0.45 * r.score).toFixed(2)}, ${r.sea} (${r.danger}/5)` : `Navigation (${JOB_LEVELS[rank - 1]}) : abandonnée`,
         at: new Date().toLocaleTimeString('fr-FR'),
       });
       gameLog.length = Math.min(gameLog.length, 15);
@@ -4544,7 +4557,7 @@ function mapViewer(root, map, { boat = null, editable = false, placing = false, 
         ${links.length ? `<svg class="map-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${links.map((k) => {
           const [a, b] = k.split('|'), A = nodes[a], B = nodes[b];
           const xy = `x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"`;
-          return `<g class="lkg"><line class="lk-hit" data-link="${esc(k)}" ${xy}/><line class="lk ${map.oneway?.[k] ? 'oneway' : ''}" ${xy}/></g>`;
+          return `<g class="lkg"><line class="lk-hit" data-link="${esc(k)}" ${xy}/><line class="lk ${map.oneway?.[k] ? 'oneway' : ''} d${map.diff?.[k] ?? 2}" ${xy}/></g>`;
         }).join('')}</svg>` : ''}
         ${Object.entries(nodes).map(islandBtn).join('')}
         ${arrowsHtml}
@@ -4934,7 +4947,7 @@ function renderIslandEdit() {
     <p class="note" style="margin:4px 0 0">Un forum entier peut appartenir à l’île : chacun de ses posts compte alors comme étant sur l’île. Le nom des salons est retrouvé à l’enregistrement.</p>`}
     ${islandDraftId ? `
       <h3 class="ed-h">Routes maritimes</h3>
-      <div class="routes">${nb.map((n) => `<div class="route-row route-dir"><span>${nodeLabel(n.id)}</span><select data-dir="${esc(n.id)}" aria-label="Sens de la route"><option value="both" ${n.dir === 'both' ? 'selected' : ''}>↔ Les deux sens</option><option value="out" ${n.dir === 'out' ? 'selected' : ''}>→ Vers ${esc(amap.islands[n.id].name)} seulement</option><option value="in" ${n.dir === 'in' ? 'selected' : ''}>← Depuis ${esc(amap.islands[n.id].name)} seulement</option></select><input type="number" min="0" data-seg="${esc(n.id)}" value="${n.auto ? '' : n.value}" placeholder="auto : ${n.value}" aria-label="Temps du tronçon vers ${esc(amap.islands[n.id].name)}"><button type="button" class="linklike" data-unseg="${esc(n.id)}" aria-label="Supprimer cette route">✕</button></div>`).join('') || '<p class="note" style="margin:0">Aucune route : ce point est isolé, on ne peut pas y aller.</p>'}</div>
+      <div class="routes">${nb.map((n) => `<div class="route-row route-dir"><span>${nodeLabel(n.id)}</span><select data-dir="${esc(n.id)}" aria-label="Sens de la route"><option value="both" ${n.dir === 'both' ? 'selected' : ''}>↔ Les deux sens</option><option value="out" ${n.dir === 'out' ? 'selected' : ''}>→ Vers ${esc(amap.islands[n.id].name)} seulement</option><option value="in" ${n.dir === 'in' ? 'selected' : ''}>← Depuis ${esc(amap.islands[n.id].name)} seulement</option></select><select data-rdiff="${esc(n.id)}" aria-label="Difficulté de la route">${G.ROUTE_DIFFS.map((l, i) => `<option value="${i + 1}" ${G.linkDiff(amap, islandDraftId, n.id) === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select><input type="number" min="0" data-seg="${esc(n.id)}" value="${n.auto ? '' : n.value}" placeholder="auto : ${n.value}" aria-label="Temps du tronçon vers ${esc(amap.islands[n.id].name)}"><button type="button" class="linklike" data-unseg="${esc(n.id)}" aria-label="Supprimer cette route">✕</button></div>`).join('') || '<p class="note" style="margin:0">Aucune route : ce point est isolé, on ne peut pas y aller.</p>'}</div>
       ${free.length ? `<div class="mj-row" style="margin-top:6px"><select id="isl-seg-to" aria-label="Relier à">${free.map((o) => `<option value="${esc(o)}">${nodeLabel(o)}</option>`).join('')}</select><button type="button" class="btn sm" id="isl-seg-add">Relier</button></div>` : ''}
       <p class="note">Temps d’un tronçon : vide = selon sa longueur sur la carte. Tu peux aussi tracer les routes directement sur la carte (« Tracer des routes »).</p>
       ${!wp && dests.length ? `<h3 class="ed-h">Temps de trajet depuis cette île</h3>
@@ -4979,6 +4992,8 @@ $('d-island').addEventListener('input', (e) => {
     if (e.target.id === 'isl-rot') $('isl-rot-v').textContent = e.target.value;
 });
 $('d-island').addEventListener('change', async (e) => {
+  const rd = e.target.dataset?.rdiff;
+  if (rd) return segCall('map.diff', { a: islandDraftId, b: rd, diff: +e.target.value });
   if (e.target.id === 'isl-gl') {
     readIslandEdit();
     return renderIslandEdit();

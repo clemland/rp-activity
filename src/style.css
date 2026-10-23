@@ -1427,6 +1427,13 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .windwheel svg{display:block;width:100%;filter:drop-shadow(0 3px 4px rgba(0,0,0,.3))}
 .ww-ptr{position:absolute;top:-6px;left:50%;transform:translateX(-50%);font-size:26px;color:var(--ink);z-index:2;line-height:1}
 .sea-read b{letter-spacing:2px}
+/* Couleur des routes selon leur difficulté */
+.map-links .lk.d1{stroke:#8fe39e}
+.map-links .lk.d2{stroke:#fff3cf}
+.map-links .lk.d3{stroke:#ffd27a}
+.map-links .lk.d4{stroke:#ff9a6b}
+.map-links .lk.d5{stroke:#ff5252}
+.route-dir{grid-template-columns:1fr auto auto 90px 26px}
 .sea-read .d1,.sea-read .d2{color:#1d7a3a}
 .sea-read .d3{color:#a8690c}
 .sea-read .d4,.sea-read .d5{color:var(--red)}

@@ -215,13 +215,21 @@ function affiliation() {
   if (group) return `<b>${esc(G.rankName(group, S.uid))}</b> de ${esc(group.name)}`;
   return [crewRole && `<b>${esc(crewRole)}</b>`, crew && esc(crew)].filter(Boolean).join(', ');
 }
+/** Temps avant la prochaine solde de la Marine (versée à l'ouverture de l'app). */
+function nextPayText() {
+  const next = G.nextPay(S);
+  if (!next) return 'Première solde dans 7 j';
+  const left = next - Date.now();
+  if (left <= 0) return 'Prochaine solde : disponible, rouvre l’app';
+  return `Prochaine solde dans ${G.duree(left / 1000)}`;
+}
 function badgeHTML() {
   const { faction, grade, bounty } = S.id;
   if (faction === 'Marine') {
     const i = G.GRADES.indexOf(grade), g = G.gradeOf(grade);
     // Officiers généraux : étoiles ; en dessous : galons
     const marks = i >= 5 ? '<i class="star"></i>'.repeat(i - 4) : '<i></i>'.repeat(Math.min(i + 1, 4));
-    return `<div class="plaque blue"><span class="pl-label">${g.medal} Grade</span><div class="chev">${marks}</div><span class="pl-value">${esc(grade)}</span><span class="pl-foot">Solde : ${berry(g.pay)} / semaine</span></div>`;
+    return `<div class="plaque blue"><span class="pl-label">${g.medal} Grade</span><div class="chev">${marks}</div><span class="pl-value">${esc(grade)}</span><span class="pl-foot">Solde : ${berry(g.pay)} / semaine</span><span class="pl-foot pay-next">${nextPayText()}</span></div>`;
   }
   if (bounty > 0) return `<div class="plaque"><span class="pl-label">Prime</span><span class="pl-value" id="h-bounty">${berry(bounty)}</span><span class="pl-foot">Dead or alive</span></div>`;
   return '';

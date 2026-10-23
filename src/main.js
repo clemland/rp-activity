@@ -948,7 +948,7 @@ function renderJob() {
       const why = G.craftBlock(S, r, NAVD?.aboard);
       return `<article class="recipe ${why ? 'locked' : ''}">
         <h3 class="rc-title">${Object.keys(r.gives).slice(0, 1).map((k) => itemIco(k)).join('')}${esc(G.recipeLabel(r))}</h3>
-        <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}</p>
+        <p class="note">${r.job ? `${JOBS[r.job].name} · ${JOB_LEVELS[r.lvl - 1]}` : 'Tous métiers'} · ${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}${r.game?.list?.length ? ' · 🎮 mini-jeu' : ''}</p>
         ${r.desc ? `<p>${esc(r.desc)}</p>` : ''}
         <b>Il faut</b>
         <div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>
@@ -967,7 +967,16 @@ $('v-job').addEventListener('click', async (e) => {
     return renderJob();
   }
   const id = e.target.closest('[data-craft]')?.dataset.craft;
-  if (id) return void run({ type: 'craft.start', id });
+  if (id) {
+    const r = G.RECIPES[id];
+    if (r?.game?.list?.length) {
+      // Recette avec mini-jeu : les ingrédients sont perdus en cas d'échec
+      if (!(await askConfirm('Les ingrédients seront pris tout de suite. Si tu rates le mini-jeu, ils sont perdus.', { title: `${G.recipeLabel(r)} ?`, ok: 'Commencer' }))) return;
+      const success = await customGame(r, S.job.lvl, G.recipeLabel(r));
+      return void run({ type: 'craft.start', id, success });
+    }
+    return void run({ type: 'craft.start', id });
+  }
   if (e.target.id === 'craft-collect' && (await run({ type: 'craft.collect' }))) replay(document.querySelector('#v-job .badge'), 'bought');
   if (e.target.id === 'craft-cancel' && (await askConfirm('Les ingrédients te seront rendus.', { title: 'Annuler la fabrication ?', ok: 'Annuler la fabrication', danger: true }))) run({ type: 'craft.cancel' });
   if (e.target.id === 'craft-finish') staffAct({ type: 'craft.finish' });
@@ -1033,7 +1042,7 @@ async function startWork(id) {
   if (!r?.work) return;
   const label = G.workLabel(r.work);
   if (!(await askConfirm('Les matériaux seront pris tout de suite. Si tu rates le mini-jeu, ils sont perdus.', { title: `${label} ?`, ok: 'Commencer' }))) return;
-  const success = await workGame(r, S.job.lvl, label);
+  const success = r.game ? await customGame(r, S.job.lvl, label) : await workGame(r, S.job.lvl, label);
   await run({ type: 'ship.work', id, shipId: r.work.type === 'construire' ? null : atelierShip, success });
 }
 /** Mini-jeu du marteau : planter les clous quand le curseur passe dans la zone dorée. Renvoie true si réussi. */
@@ -1618,13 +1627,59 @@ function opSteps(level) {
  * Opération : anesthésie, puis 2 étapes au hasard (3 pour une blessure critique), pendant que les constantes baissent.
  * only : une seule étape (test dans le panneau admin).
  */
-function opGame2(level, title, rank = S?.job?.lvl || 1, only = null) {
+function opGame2(level, title, rank = S?.job?.lvl || 1, only = null, opts = {}) {
   const drain = Math.max(1, 1.5 + level * 1.2 - (rank - G.careRank(level)) * 0.8);
-  const s = opSteps(level);
+  const s = opSteps(opts.diff || level); // difficulté choisie par le staff, sinon la gravité
+  const pool = opts.list?.length ? opts.list : ['incision', 'suture', 'hemorragie'];
   const steps = only && s[only]
     ? [s[only]()]
-    : [s.anesthesie(), ...['incision', 'suture', 'hemorragie'].sort(() => Math.random() - 0.5).slice(0, level >= 4 ? 3 : 2).map((k) => s[k]())];
+    : [s.anesthesie(), ...[...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, level >= 4 ? 3 : 2)).map((k) => s[k]())];
   return miniGame({ title, help: 'Garde le patient en vie : ses constantes baissent pendant toute l’opération.', drain, steps });
+}
+
+/* ═══ Mini-jeux choisis recette par recette ══════════════════════════════ */
+const SIMPLE_GAMES = {
+  marteau: ['🔨 Marteau', (d, rank) => timingStep({ label: '🔨 <b>Marteau</b> : frappe quand le curseur passe dans la zone dorée.', verb: '🔨 Frapper', icon: '🔩', speed: 0.6 + d * 0.28, zone: Math.max(6, 24 - d * 3.5 + (rank - 1) * 4), hits: 3 + Math.ceil(d / 2), misses: 1 + rank, good: 'Bien planté !' })],
+  scie: ['🪚 Sciage', (d, rank) => traceStep({ label: '🪚 <b>Sciage</b> : suis le trait de coupe du point vert au point rouge, sans lâcher.', path: randomPath(d, true), tolerance: Math.max(5, 14 - d * 1.6 + rank * 1.5), tries: 1 + rank, cls: 'wood-cv', ink: '#5a3a1e', bad: 'Coupe de travers : recommence.', good: 'Coupe nette !' })],
+  trace: ['✏️ Tracé libre', (d, rank) => traceStep({ label: '✏️ <b>Tracé</b> : suis le chemin du point vert au point rouge, sans lâcher (il peut boucler : suis les flèches).', path: randomPath(d), tolerance: Math.max(6, 15 - d * 1.5 + rank * 1.5), tries: 1 + rank })],
+  assemblage: ['🧩 Assemblage', (d, rank) => simonStep({ label: '🧩 <b>Assemblage</b> : retiens l’ordre des pièces, puis refais-le.', len: 2 + d, misses: rank - 1, icons: ['🪵', '🔩', '⚙️', '🪢'] })],
+  calfatage: ['💧 Calfatage', (d, rank) => whackStep({ label: '💧 <b>Calfatage</b> : bouche les fuites avant que l’eau n’entre !', icon: '💧', total: 4 + d, life: Math.max(0.8, 2.4 - d * 0.3 + rank * 0.2), every: Math.max(0.4, 1 - d * 0.1), misses: rank, cls: 'hull-wh' })],
+  bandage: ['🩹 Bandage', (d, rank) => timingStep({ label: '🩹 <b>Bandage</b> : serre quand le curseur est dans la zone.', verb: '🩹 Serrer', icon: '🩹', speed: 0.6 + d * 0.2, zone: Math.max(8, 30 - d * 4 + (rank - 1) * 3), hits: 2 + Math.ceil(d / 2), misses: 1 + rank })],
+  desinfecter: ['🦠 Désinfecter', (d, rank) => whackStep({ label: '🦠 <b>Désinfecter</b> : nettoie les microbes avant qu’ils ne s’incrustent.', icon: '🦠', total: 4 + d, life: Math.max(0.9, 2.4 - d * 0.25 + rank * 0.2), every: 0.8, misses: rank, cls: 'skin-wh' })],
+  points: ['🔢 Points dans l’ordre', (d, rank) => orderStep({ label: '🔢 <b>Dans l’ordre</b> : clique les points dans l’ordre (1, 2, 3…).', n: 3 + d * 2, misses: rank })],
+};
+const OP_KEYS = ['incision', 'suture', 'hemorragie'];
+const DIFF_NAMES = ['Automatique', 'Très facile', 'Facile', 'Normale', 'Difficile', 'Extrême'];
+/** Mini-jeu d'une recette, selon ce que le staff a choisi (jeux et difficulté). careLevel ≥ 2 : opération. */
+function customGame(recipe, rank, title, careLevel = 0) {
+  const g = recipe.game || { list: [], diff: 0 };
+  if (careLevel >= 2) {
+    const steps = g.list.filter((k) => OP_KEYS.includes(k));
+    return opGame2(careLevel, `Opération : ${title}`, rank, null, { list: steps.length ? steps : OP_KEYS, diff: g.diff || 0 });
+  }
+  let pool = g.list.filter((k) => SIMPLE_GAMES[k]);
+  if (!pool.length) pool = recipe.work ? ['marteau', 'scie', 'assemblage', 'calfatage'] : recipe.care ? ['bandage', 'desinfecter', 'points'] : ['marteau', 'assemblage', 'points', 'trace'];
+  const auto = recipe.work ? 1 + Math.round(((G.workDifficulty(recipe, { job: { lvl: rank } }).speed - 0.6) / 1.4) * 4) : 2;
+  return miniGame({ title, steps: [SIMPLE_GAMES[mgPick(pool)][1](g.diff || auto, rank)] });
+}
+/** Section « Mini-jeu » de l'éditeur de recette. */
+function gameFieldsHTML(r) {
+  const g = r.game || { list: [], diff: 0 };
+  const box = (k, label) => `<label><input type="checkbox" data-game="${k}" ${g.list.includes(k) ? 'checked' : ''}> ${label}</label>`;
+  const isOp = r.care && r.care.level >= 2;
+  return `<div class="wide work-box"><b>🎮 Mini-jeu</b>
+    <div class="mj-row"><label for="rc-gdiff">Difficulté</label><select id="rc-gdiff">${DIFF_NAMES.map((l, i) => `<option value="${i}" ${(g.diff || 0) === i ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <b style="font-size:14px">${r.care ? 'Blessure légère : un de ces mini-jeux, au hasard' : 'Un de ces mini-jeux, au hasard'}</b>
+    <div class="perms">${Object.entries(SIMPLE_GAMES).map(([k, [l]]) => box(k, l)).join('')}</div>
+    ${isOp ? `<b style="font-size:14px">Opération (blessures sérieuses et plus) : étapes possibles, après l’anesthésie</b><div class="perms">${OP_KEYS.map((k) => box(k, OP_STEPS[k])).join('')}</div>` : ''}
+    <p class="note" style="margin:0">${r.work || r.care ? 'Rien de coché : les mini-jeux habituels.' : 'Rien de coché : pas de mini-jeu (fabrication directe). Avec un mini-jeu, les ingrédients sont perdus en cas d’échec.'} Difficulté « Automatique » : selon le travail, la gravité et le rang.</p>
+  </div>`;
+}
+function readGameFields(r) {
+  if (!$('rc-gdiff')) return;
+  const list = [...document.querySelectorAll('#rc-body [data-game]')].filter((c) => c.checked).map((c) => c.dataset.game);
+  const diff = +$('rc-gdiff').value || 0;
+  r.game = list.length || diff ? { list, diff } : null;
 }
 
 /* ═══ Inventions des scientifiques ═══════════════════════════════════════ */
@@ -1934,7 +1989,7 @@ $('v-job').addEventListener('click', async (e) => {
     const q = S.careOut.find((x) => x.id === go);
     if (!q) return;
     if (!(await askConfirm('Le matériel est pris tout de suite. Si tu rates, il est perdu (tu pourras réessayer).', { title: `Soigner « ${q.label} » ?`, ok: 'Commencer' }))) return;
-    const success = await careGame(q.level, q.label);
+    const success = await careGame(q.level, q.label, S.job.lvl, null, G.RECIPES[q.recipe]);
     await run({ type: 'care.do', id: go, success });
     cabinet.patients = null;
   }
@@ -1943,12 +1998,13 @@ async function careSelf(healthId, recipe) {
   const h = S.health.find((x) => x.id === healthId);
   if (!h) return;
   if (!(await askConfirm('Le matériel est pris tout de suite. Si tu rates, il est perdu.', { title: `Soigner « ${h.label} » ?`, ok: 'Commencer' }))) return;
-  const success = await careGame(h.level, h.label);
+  const success = await careGame(h.level, h.label, S.job.lvl, null, G.RECIPES[recipe]);
   await run({ type: 'care.do', self: true, healthId, recipe, success });
   cabinet.patients = null;
 }
 /** Bandage pour une blessure légère, opération au-delà. */
-function careGame(level, label, rank = S?.job?.lvl || 1, kind = null) {
+function careGame(level, label, rank = S?.job?.lvl || 1, kind = null, recipe = null) {
+  if (recipe?.game) return customGame(recipe, rank, level <= 1 ? `Soin léger : ${label}` : label, level); // mini-jeux choisis par le staff
   if (level <= 1) return bandageGame(label, rank, kind);
   return opGame2(level, `Opération : ${label}`, rank);
 }
@@ -5325,6 +5381,7 @@ function renderRecipeEdit() {
       <div class="wide"><label for="rc-desc">Description (facultative)</label><input id="rc-desc" value="${esc(r.desc)}" maxlength="400"></div>
       ${workFieldsHTML(r)}
       ${careFieldsHTML(r)}
+      ${gameFieldsHTML(r)}
     </div>
     <h3 class="ed-h">Résultat</h3>
     <div class="se-items">${rows(r.gives, 'gives')}</div>
@@ -5341,6 +5398,7 @@ function readRecipeEdit() {
   r.desc = $('rc-desc').value;
   readWorkFields(r);
   readCareFields(r);
+  readGameFields(r);
   for (const kind of ['needs', 'gives']) {
     const next = {};
     document.querySelectorAll(`#rc-body .rc-row[data-kind="${kind}"]`).forEach((row) => {

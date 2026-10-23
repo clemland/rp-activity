@@ -459,6 +459,14 @@ export function normalizeItem(x) {
     img: x.img ? str(x.img, 3_000_000) : null, // data URL avant envoi, puis chemin /media/...
   };
 }
+/** Mini-jeux d'une recette choisis par le staff, et difficulté (1 à 5 ; 0 = automatique). */
+export const GAME_KEYS = ['marteau', 'scie', 'trace', 'assemblage', 'calfatage', 'bandage', 'desinfecter', 'points', 'incision', 'suture', 'hemorragie'];
+export function normalizeGame(g) {
+  if (!g) return null;
+  const list = [...new Set((Array.isArray(g.list) ? g.list : []).filter((k) => GAME_KEYS.includes(k)))];
+  const diff = int(g.diff ?? 0, 0, 5);
+  return list.length || diff ? { list, diff } : null;
+}
 /** Une recette se désigne par ce qu'elle produit : « 2 × Planche, 1 × Clou ». */
 export const recipeLabel = (r) => r?.care ? `Soin : ${r.care.type ? injuryName(r.care.type).toLowerCase() : 'blessure'} ${HEALTH_LEVELS[r.care.level - 1].toLowerCase()} au plus` : r?.work ? workLabel(r.work) : Object.entries(r?.gives || {}).map(([k, q]) => `${q} × ${itemOf(k).name}`).join(', ') || 'Recette';
 export function normalizeRecipe(x) {
@@ -480,6 +488,7 @@ export function normalizeRecipe(x) {
     gives,
     work,
     care,
+    game: normalizeGame(x.game),
     desc: str(x.desc, 400),
   };
 }
@@ -614,6 +623,12 @@ export function playerAction(player, action, ctx = {}) {
       const fromChest = takeItems(p, store, r.needs); // inventaire d'abord, puis la cale du bateau où l'on est à bord
       const used = Object.keys(fromChest).length > 0;
       if (used) out.store = store;
+      // Recette avec mini-jeu : raté, les ingrédients sont perdus
+      if (r.game?.list?.length && a.success === false) {
+        out.failed = true;
+        out.toast = `Raté : ${recipeLabel(r)}. Les ingrédients sont perdus.`;
+        break;
+      }
       p.craft = { recipe: a.id, name: recipeLabel(r), gives: r.gives, start: now, end: now + r.seconds * 1000, fromChest, fromShip: used ? ctx.storeId || null : null };
       out.toast = r.seconds ? `Fabrication lancée : ${recipeLabel(r)} (${duree(r.seconds)})` : `Fabrication lancée : ${recipeLabel(r)}`;
       break;

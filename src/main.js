@@ -1633,7 +1633,7 @@ function opGame2(level, title, rank = S?.job?.lvl || 1, only = null, opts = {}) 
   const pool = opts.list?.length ? opts.list : ['incision', 'suture', 'hemorragie'];
   const steps = only && s[only]
     ? [s[only]()]
-    : [s.anesthesie(), ...[...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, level >= 4 ? 3 : 2)).map((k) => (s[k] ? s[k]() : SIMPLE_GAMES[k][1](opts.diff || level, rank)))];
+    : [s.anesthesie(), ...(opts.all ? pool : [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, level >= 4 ? 3 : 2))).map((k) => (s[k] ? s[k]() : SIMPLE_GAMES[k][1](opts.diff || level, rank)))];
   return miniGame({ title, help: 'Garde le patient en vie : ses constantes baissent pendant toute l’opération.', drain, steps });
 }
 
@@ -1656,14 +1656,15 @@ function customGame(recipe, rank, title, careLevel = 0) {
   const chosen = g.list.filter((k) => OP_KEYS.includes(k) || SIMPLE_GAMES[k]);
   if (careLevel >= 2) {
     // Opération : anesthésie, puis des étapes tirées parmi TOUT ce qui est coché
-    return opGame2(careLevel, `Opération : ${title}`, rank, null, { list: chosen.length ? chosen : OP_KEYS, diff: g.diff || 0 });
+    return opGame2(careLevel, `Opération : ${title}`, rank, null, { list: chosen.length ? chosen : OP_KEYS, diff: g.diff || 0, all: chosen.length > 0 });
   }
   // Jeu simple : les gestes médicaux deviennent leur version simple
   const SIMPLE_OF = { incision: 'trace', suture: 'points', hemorragie: 'desinfecter' };
   let pool = [...new Set(chosen.map((k) => SIMPLE_OF[k] || k))];
   if (!pool.length) pool = recipe.work ? ['marteau', 'scie', 'assemblage', 'calfatage'] : recipe.care ? ['bandage', 'desinfecter', 'points'] : ['marteau', 'assemblage', 'points', 'trace'];
   const auto = recipe.work ? 1 + Math.round(((G.workDifficulty(recipe, { job: { lvl: rank } }).speed - 0.6) / 1.4) * 4) : 2;
-  return miniGame({ title, steps: [SIMPLE_GAMES[mgPick(pool)][1](g.diff || auto, rank)] });
+  const keys = chosen.length ? pool : [mgPick(pool)]; // cochés : tous, l'un après l'autre ; sinon un jeu habituel
+  return miniGame({ title, steps: keys.map((k) => SIMPLE_GAMES[k][1](g.diff || auto, rank)) });
 }
 let rcTest = { rank: 1, lvl: 1 }; // rang et gravité choisis pour tester le mini-jeu d'une recette
 /** Section « Mini-jeu » de l'éditeur de recette. */
@@ -1676,7 +1677,7 @@ function gameFieldsHTML(r) {
     <div class="mj-row"><label for="rc-trank">Tester en</label><select id="rc-trank">${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${rcTest.rank === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select>
       ${r.care ? `<select id="rc-tlvl" aria-label="Gravité de la blessure">${G.HEALTH_LEVELS.slice(0, r.care.level).map((l, i) => `<option value="${i + 1}" ${rcTest.lvl === i + 1 ? 'selected' : ''}>Blessure ${l.toLowerCase()}</option>`).join('')}</select>` : ''}
       <button type="button" class="btn sm" id="rc-test">▶ Tester</button></div>
-    <b style="font-size:14px">Mini-jeux possibles : un au hasard${r.care ? ' (pour une opération : l’anesthésie, puis 2 ou 3 d’entre eux)' : ''}</b>
+    <b style="font-size:14px">Mini-jeux à enchaîner : tous ceux cochés, l’un après l’autre, dans cet ordre${r.care ? ' (pour une opération, l’anesthésie vient d’abord)' : ''}</b>
     <div class="perms">${Object.entries(SIMPLE_GAMES).map(([k, [l]]) => box(k, l)).join('')}</div>
     ${r.care ? `<b style="font-size:14px">Gestes médicaux</b><div class="perms">${OP_KEYS.map((k) => box(k, OP_STEPS[k])).join('')}</div>` : ''}
     <p class="note" style="margin:0">${r.work || r.care ? 'Rien de coché : les mini-jeux habituels.' : 'Rien de coché : pas de mini-jeu (fabrication directe). Avec un mini-jeu, les ingrédients sont perdus en cas d’échec.'} Difficulté « Automatique » : selon le travail, la gravité et le rang.</p>

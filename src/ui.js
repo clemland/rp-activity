@@ -38,7 +38,7 @@ export const ICON_SLOTS = {
   'race-humain': ['Races', 'Humain', 121], 'race-mink': ['Races', 'Mink', 121], 'race-geant': ['Races', 'Géant', 121],
   'race-shandia': ['Races', 'Shandia', 121], 'race-homme-poisson': ['Races', 'Homme-poisson', 121], 'race-buccaneer': ['Races', 'Buccaneer', 121],
   'metier-navigateur': ['Métiers', 'Navigateur', 'compass'], 'metier-archeologue': ['Métiers', 'Archéologue', 'tmap'], 'metier-charpentier': ['Métiers', 'Charpentier', 'hammer'],
-  'metier-scientifique': ['Métiers', 'Scientifique', 'potion'], 'metier-medecin': ['Métiers', 'Médecin', 'stetho'], 'metier-cuisinier': ['Métiers', 'Cuisinier', 'potion'], 'metier-aucun': ['Métiers', 'Aucun métier', 121],
+  'metier-scientifique': ['Métiers', 'Scientifique', 'potion'], 'metier-medecin': ['Métiers', 'Médecin', 'stetho'], 'metier-aucun': ['Métiers', 'Aucun métier', 121],
   'stat-force': ['Statistiques', 'Force', 'st_swords'], 'stat-rapidite': ['Statistiques', 'Rapidité', 'st_leg'], 'stat-resistance': ['Statistiques', 'Résistance', 'st_shield'],
   'stat-sdc': ['Statistiques', 'Technique', 'st_sparkle'], volonte: ['Statistiques', 'Volonté', 'st_angry'],
   fruit: ['Fruit du démon et Haki', 'Fruit du démon', 'fruit'], 'haki-observation': ['Fruit du démon et Haki', 'Haki de l’observation', 12],

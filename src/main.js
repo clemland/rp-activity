@@ -942,6 +942,11 @@ function toolsHTML(r, store = NAVD?.aboard) {
   }).join('')}</div>`;
 }
 function renderJob() {
+  renameJobTab();
+  if (beta() && !VIEW && jobView === 'cuisine') {
+    $('v-job').innerHTML = jobSwitchHTML() + cookHTML();
+    return;
+  }
   if ($('v-job')?.offsetParent) refreshFeatures(); // onglet visible : on vérifie si les métiers sont ouverts
   if (FEAT.metiers === false && !VIEW && !beta()) {
     $('v-job').innerHTML = '<div class="feat-off"><span aria-hidden="true">🛠️</span><h2>Fonctionnalité désactivée pour le moment</h2><p class="note">Les métiers reviendront bientôt.</p></div>';
@@ -997,7 +1002,8 @@ function renderJob() {
           <button class="btn sm" data-craft="${esc(id)}" ${why || c ? 'disabled' : ''}>${c ? 'Atelier occupé' : 'Fabriquer'}</button>
         </div>
       </article>`;
-    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}${inventionsHTML()}${cookHTML()}`;
+    }).join('')}</div>` : `<p class="note">${recs.length ? 'Aucune recette réalisable pour l’instant : il te manque des objets. Affiche « Toutes » pour voir ce qu’il faut.' : 'Aucune recette pour ton métier pour l’instant.'}</p>`}${atelierHTML()}${cabinetHTML()}${inventionsHTML()}`;
+  if (beta() && !VIEW) $('v-job').insertAdjacentHTML('afterbegin', jobSwitchHTML()); // sous-onglets Métier / Cuisine
 }
 $('v-job').addEventListener('click', async (e) => {
   const cf = e.target.closest('[data-cf]')?.dataset.cf;
@@ -1747,6 +1753,22 @@ function readGameFields(r) {
   r.game = list.length || diff ? { list, diff } : null;
 }
 
+/** Onglet « Savoir-faire » : sous-onglets Métier et Cuisine (testeurs seulement pour l'instant). */
+let jobView = 'metier';
+const jobSwitchHTML = () => `<div class="job-switch" role="tablist">${[['metier', '🛠️ Métier'], ['cuisine', '🍳 Cuisine']].map(([k, l]) => `<button type="button" role="tab" class="${jobView === k ? 'on' : ''}" aria-selected="${jobView === k}" data-jobview="${k}">${l}</button>`).join('')}</div>`;
+function renameJobTab() {
+  const tab = document.querySelector('[aria-controls="t-job"], [data-tab="t-job"], [href="#t-job"]');
+  if (!tab) return;
+  const want = beta() && !VIEW ? 'Savoir-faire' : 'Métier';
+  const walker = document.createTreeWalker(tab, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (/Métier|Savoir-faire/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Métier|Savoir-faire/, want);
+}
+$('v-job').addEventListener('click', (e) => {
+  const v = e.target.closest('[data-jobview]')?.dataset.jobview;
+  if (!v || v === jobView) return;
+  jobView = v;
+  renderJob();
+});
 /** Nouveautés en test (cuisine, commerce) : visibles seulement par les testeurs. */
 function beta() {
   return G.isBeta(ME?.uid);
@@ -1939,11 +1961,11 @@ const cookGame = (r) => miniGame({ title: `Cuisine : ${r.name}`, steps: r.steps.
 
 /* ═══ Cuisine : recettes du cuisinier (onglet Métier) ═══════════════════ */
 function cookHTML() {
-  if (S.job.id !== 'cuisinier' || !beta()) return '';
+  if (!beta()) return '';
   const list = S.cook || [];
   const status = (r) => (r.ok ? '<span class="status ok">Validée</span>' : r.refused ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>');
   return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🍳 Mes recettes</h2>${VIEW ? '' : '<button class="btn sm" id="ck-new">+ Nouvelle recette</button>'}</div>
-    <p class="note">Crée tes recettes : ingrédients, étapes dans l’ordre et plat final. Une fois validée par le staff, tu peux la cuisiner.</p>
+    <p class="note">Tout le monde peut cuisiner ! Crée tes recettes : ingrédients, étapes dans l’ordre et plat final. Une fois validée par le staff, tu peux la cuisiner.</p>
     ${list.length ? `<div class="recipes">${list.map((r) => `<article class="recipe">
       ${r.photo ? `<img class="ck-thumb" src="${imgSrc(r.photo)}" alt="">` : ''}
       <h3 class="rc-title">${esc(r.name)} ${status(r)}</h3>
@@ -4906,7 +4928,7 @@ function renderCooks() {
   const shown = cookList.filter((x) => cookFilter === 'all' || st(x.recipe) === cookFilter);
   el.innerHTML = `
     <div class="sec-head">
-      <div><h2>Recettes de cuisine</h2><p class="lede" style="margin:0">Toutes les recettes des cuisiniers. Valider ajoute le plat au catalogue (catégorie Plat), modifiable ensuite dans Gestion. Un refus demande un motif.</p></div>
+      <div><h2>Recettes de cuisine</h2><p class="lede" style="margin:0">Toutes les recettes de cuisine des joueurs. Valider ajoute le plat au catalogue (catégorie Plat), modifiable ensuite dans Gestion. Un refus demande un motif.</p></div>
       <div class="mj-row"><select id="acook-f" aria-label="Filtre">${[['wait', 'À valider'], ['ok', 'Validées'], ['refused', 'Refusées'], ['all', 'Toutes']].map(([v, l]) => `<option value="${v}" ${v === cookFilter ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn ghost" id="acook-reload">Actualiser</button></div>
     </div>
     ${shown.length ? `<div class="val-list">${shown.map(({ uid, player, recipe: r }) => `

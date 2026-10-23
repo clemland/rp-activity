@@ -1486,6 +1486,9 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ck-steps li span{display:inline-block;min-width:170px}
 .recipe .status{font-size:13px;margin-left:6px}
 .status.ok{color:#1d7a3a}
+.job-switch{display:flex;gap:6px;margin:0 0 14px;border-bottom:3px solid var(--ink)}
+.job-switch button{font:inherit;font-weight:800;font-size:16px;background:#efe3c4;color:var(--brown);border:3px solid var(--ink);border-bottom:none;border-radius:10px 10px 0 0;padding:6px 16px;cursor:pointer;margin-bottom:-3px}
+.job-switch button.on{background:var(--paper,#f3e3bb);color:var(--ink)}
 #trade-fab{position:fixed;left:14px;bottom:14px;z-index:40;font:inherit;font-weight:800;background:var(--gold);color:var(--ink);border:3px solid var(--ink);border-radius:999px;padding:8px 14px;box-shadow:0 4px 0 rgba(0,0,0,.3);cursor:pointer}
 #trade-fab b{background:var(--red);color:#fff;border-radius:999px;padding:0 7px;margin-left:4px}
 #trade-fab[hidden]{display:none}

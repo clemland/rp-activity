@@ -152,7 +152,7 @@ export const JOBS = {
   charpentier: { name: 'Charpentier', pic: 'hammer' },
   scientifique: { name: 'Scientifique', pic: 'potion' },
   medecin: { name: 'Médecin', pic: 'stetho' },
-  cuisinier: { name: 'Cuisinier', pic: 'potion', noLevel: true }, // sans niveau : il crée ses recettes, validées par le staff
+
 };
 
 /** Testeurs des nouveautés pas encore ouvertes à tous (cuisine, commerce). */
@@ -265,6 +265,7 @@ export function normalize(p) {
   const freshReq = (l) => (Array.isArray(l) ? l : []).filter((x) => x?.id && Date.now() - (x.at || 0) < 3_600_000).slice(-10);
   p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
   p.careOut = freshReq(p.careOut); // demandes de soin envoyées
+  if (p.job?.id && !JOBS[p.job.id]) p.job = { ...p.job, id: null }; // métier supprimé (ex. cuisinier)
   // Recettes de cuisine du joueur : validées par le staff (le plat devient alors un objet du catalogue)
   p.cook = (Array.isArray(p.cook) ? p.cook : []).filter((x) => x && str(x.name, 60)).slice(0, 40).map((x) => ({
     id: Number(x.id) || Date.now(),
@@ -784,7 +785,7 @@ export function playerAction(player, action, ctx = {}) {
       break;
     }
     case 'cook.save': {
-      if (p.job?.id !== 'cuisinier') fail('Seuls les cuisiniers créent des recettes.');
+
       const name = str(a.name, 60);
       if (!name) fail('Donne un nom au plat.');
       const desc = str(a.desc, 1000);
@@ -816,7 +817,7 @@ export function playerAction(player, action, ctx = {}) {
     }
     case 'cook.make': {
       // Cuisiner une de SES recettes validées : ingrédients pris, plat obtenu si toutes les étapes sont réussies
-      if (p.job?.id !== 'cuisinier') fail('Seuls les cuisiniers cuisinent.');
+
       const r = p.cook.find((x) => x.id === a.id);
       if (!r) fail('Recette introuvable.');
       if (!r.ok || !r.item || !ITEMS[r.item]) fail('Cette recette n’est pas encore validée par le staff.');
@@ -1363,12 +1364,14 @@ export const FEATURES = {
   voyage: { name: 'Voyages en mer', icon: '⛵', desc: 'Proposer un départ et voter. Les voyages déjà en cours continuent.', off: 'Les voyages en mer sont désactivés pour le moment.' },
   boutique: { name: 'Boutiques', icon: '🛒', desc: 'Acheter et vendre dans les boutiques.', off: 'Les boutiques sont fermées pour le moment.' },
   metiers: { name: 'Métiers', icon: '🛠️', desc: 'Lancer une fabrication, un travail, un soin ou une invention. Récupérer ou annuler ce qui est en cours reste possible.', off: 'Les métiers sont désactivés pour le moment.' },
+  cuisine: { name: 'Cuisine', icon: '🍳', desc: 'Créer et cuisiner des recettes.', off: 'La cuisine est désactivée pour le moment.' },
   dons: { name: 'Dons et ventes', icon: '🎁', desc: 'Donner ou vendre un objet à un autre joueur.', off: 'Les dons et les ventes d’objets sont désactivés pour le moment.' },
 };
 const FEATURE_TYPES = {
   voyage: ['ship.voyage.propose', 'ship.voyage.logpose', 'ship.voyage.vote', 'ship.voyage.read'],
   boutique: ['shop.buy', 'shop.sell'],
-  metiers: ['craft.start', 'ship.work', 'invention.save', 'job.choose', 'cook.save', 'cook.make'],
+  metiers: ['craft.start', 'ship.work', 'invention.save', 'job.choose'],
+  cuisine: ['cook.save', 'cook.make'],
   dons: ['item.give', 'trade.offer', 'trade.answer'],
 };
 /** La fonctionnalité dont dépend une action du joueur (ou null). */

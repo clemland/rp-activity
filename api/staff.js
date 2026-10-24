@@ -148,6 +148,22 @@ export default handler(['POST'], async (req, body) => {
       return { perms: data, toast: 'Permissions enregistrées' };
     }
 
+    case 'loot.export': {
+      // Export des butins : envoyé en message privé par le bot, sous forme de fichier
+      const name = String(body.name || 'export.json').replace(/[^\w.-]/g, '').slice(0, 60) || 'export.json';
+      const content = String(body.content || '');
+      need(content.length < 3_000_000, 413, 'Export trop gros.');
+      const H = { Authorization: `Bot ${env.botToken}` };
+      const dm = await (await fetch('https://discord.com/api/v10/users/@me/channels', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient_id: me.uid }) })).json().catch(() => null);
+      need(dm?.id, 502, 'Impossible d’ouvrir un message privé avec le bot.');
+      const form = new FormData();
+      form.append('payload_json', JSON.stringify({ content: '📦 Voici ton export des butins.' }));
+      form.append('files[0]', new Blob([content], { type: 'application/json' }), name);
+      const r = await fetch(`https://discord.com/api/v10/channels/${dm.id}/messages`, { method: 'POST', headers: H, body: form });
+      need(r.ok, 502, 'Envoi du fichier impossible : vérifie que tu acceptes les messages privés des membres du serveur.');
+      return { toast: 'Export envoyé : regarde tes messages privés avec le bot.' };
+    }
+
     case 'loot.channels': {
       // Salons RP (déclarés et salons des bateaux) et posts ouverts de leurs forums, pour attribuer les tables de butin
       const list = (await read('meta', 'rp:channels'))?.data?.list || [];

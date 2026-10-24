@@ -5687,7 +5687,7 @@ function lootPlacesHTML(places, islands, placeName) {
   const shown = new Set((lootChans || []).flatMap((c) => [`ch:${c.id}`, ...c.posts.map((p) => `ch:${p.id}`)]));
   const others = lootChans ? places.filter(([k]) => k.startsWith('ch:') && !shown.has(k)) : [];
   return `
-    <h3 class="ed-h">Salons RP</h3>
+    <div class="sec-head" style="margin-top:14px"><h3 class="ed-h" style="margin:0">Salons RP</h3><button type="button" class="btn sm ghost" id="loot-export">📤 Exporter (fichier en MP)</button></div>
     <p class="note" style="margin:0 0 6px">Choisis la table de chaque salon. Déroule un forum (▸) pour régler ses posts un par un. Sans table à lui, un post utilise celle de son forum, puis celle de l’île.</p>
     <div class="mj-row"><input type="search" id="lp-q" placeholder="Rechercher un salon ou un post…" value="${esc(lootQ)}" aria-label="Rechercher un salon ou un post"></div>
     ${lootChans == null ? '<p class="note">Chargement des salons…</p>' : rows ? `<div class="lp-list">${rows}</div>` : '<p class="note">Aucun salon RP ne correspond.</p>'}
@@ -5714,7 +5714,28 @@ $('v-aloot').addEventListener('input', (e) => {
   q?.focus();
   q?.setSelectionRange(q.value.length, q.value.length);
 });
-$('v-aloot').addEventListener('click', (e) => {
+$('v-aloot').addEventListener('click', async (e) => {
+  if (e.target.closest('#loot-export')) {
+    // Tout ce qu'il faut pour revoir les butins : tables, attributions, salons, îles, objets
+    const data = {
+      exportedAt: new Date().toISOString(),
+      tables: lootData?.tables || {},
+      places: lootData?.places || {},
+      channels: lootChans || [],
+      islands: Object.fromEntries(Object.entries(amap?.islands || {}).map(([id, i]) => [id, { name: i.name, channels: (i.channels || []).map((c) => ({ id: c.id, name: c.name, kind: c.kind })) }])),
+      items: Object.fromEntries(Object.entries(G.ITEMS).map(([k, it]) => [k, { name: it.name, kind: it.kind, rarity: it.rarity, value: it.value }])),
+    };
+    setBusy(1);
+    try {
+      const out = await API.staff('loot.export', { name: 'butins.json', content: JSON.stringify(data, null, 2) });
+      toast(esc(out.toast));
+    } catch (err) {
+      toast(esc(err.message));
+    } finally {
+      setBusy(-1);
+    }
+    return;
+  }
   const id = e.target.closest('[data-lp-tog]')?.dataset.lpTog;
   if (!id) return;
   readLootEdit();

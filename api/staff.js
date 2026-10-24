@@ -148,6 +148,41 @@ export default handler(['POST'], async (req, body) => {
       return { perms: data, toast: 'Permissions enregistrées' };
     }
 
+    case 'loot.preset': {
+      // Répartition des butins du 24/10/2026 : 9 tables par type de lieu, butins seulement dans les lieux qu'on explore
+      const e = (key, chance, min = 1, max = min) => ({ key, chance, min, max });
+      const tables = {
+        ville: { name: '🏙️ Ville', entries: [e('agrumes', 5, 1, 3), e('rhum', 4), e('sucre', 4, 1, 2), e('tissu', 3), e('cuir', 3), e('clous', 3, 1, 3), e('oeufs', 3, 1, 4), e('cola', 3), e('pieces-oxydees', 3, 1, 2), e('piece-d-or-ancienne', 1), e('lanterne', 1)] },
+        campagne: { name: '🌾 Campagne', entries: [e('legumes-varies', 8, 1, 2), e('pommes-de-terre', 6, 1, 3), e('riz', 5, 1, 2), e('farine', 5, 1, 2), e('oeufs', 5, 1, 4), e('produit-laitier', 4), e('tomates', 4, 1, 2), e('chanvre', 4, 1, 3), e('viande-crue', 3)] },
+        foret: { name: '🌲 Forêt', entries: [e('bout-de-bois', 8, 1, 3), e('champignons', 8, 1, 2), e('herbes-medicinales', 7, 1, 2), e('chanvre', 6, 1, 3), e('bois-robuste', 3), e('viande-crue', 3), e('relique-abimee', 1), e('bois-de-deul', 1)] },
+        port: { name: '⚓ Port', entries: [e('poisson-cru', 10, 1, 2), e('crustaces', 6, 1, 2), e('sel-marin', 6, 1, 3), e('corde', 5), e('chanvre', 4, 1, 3), e('bout-de-bois', 4, 1, 2), e('tissu', 2), e('pieces-oxydees', 2, 1, 3), e('rhum', 2), e('perle', 1)] },
+        'eau-douce': { name: '💧 Eau douce', entries: [e('poisson-cru', 10, 1, 2), e('crustaces', 4), e('herbes-medicinales', 3, 1, 2), e('pieces-oxydees', 2, 1, 2), e('perle', 1)] },
+        montagne: { name: '⛰️ Montagne', entries: [e('bout-de-bois', 5, 1, 2), e('herbes-medicinales', 5, 1, 2), e('bois-robuste', 4), e('fer', 4), e('champignons', 3), e('viande-crue', 3), e('relique-abimee', 1)] },
+        ruines: { name: '🏚️ Ruines', entries: [e('pieces-oxydees', 8, 1, 3), e('relique-abimee', 4), e('piece-d-or-ancienne', 3, 1, 2), e('herbes-medicinales', 3), e('fer', 2), e('lanterne', 1), e('perle', 1), e('lingot-d-or', 1)] },
+        'bas-fonds': { name: '🐀 Bas-fonds', entries: [e('pieces-oxydees', 5, 1, 3), e('clous', 4, 1, 3), e('fer', 3), e('corde', 3), e('rhum', 3), e('lance-pierre', 2), e('poudre-a-canon', 2), e('piece-d-or-ancienne', 2), e('cuir', 2), e('bombe', 1)] },
+        mer: { name: '🌊 Pleine mer', entries: [e('poisson-cru', 8, 1, 3), e('crustaces', 4, 1, 2), e('corde', 2), e('bout-de-bois', 2), e('pieces-oxydees', 2, 1, 2), e('perle', 1)] },
+      };
+      const A = {
+        ville: ['1555279229904748706', '1555279491473870879', '1555280366477115534', '1555281500973309962', '1555024138559557654', '1555024756510826586', '1555024561777545368', '1556314800844447774', '1562494833912975513', '1562497747976855595', '1562497093434740827', '1555011540132954153', '1555012130246361168', '1555012326321688632', '1555015275777101965'],
+        port: ['1555278709148356638', '1555025639235518506', '1555025977820848300', '1563221260505452654', '1562533958195875912', '1555011827858145360', '1556369483189194782'],
+        'eau-douce': ['1555284384926535690', '1556314359221854259', '1556325782652059658', '1562495601659093083', '1562556477581824040', '1555011187610230794', '1555010626668208158', '1555016032148791408', '1556370921164382360', '1556368427885793343'],
+        montagne: ['1556366436081860660', '1562496269035774073', '1555017248312397994', '1555017458753212566', '1556370279201247273', '1556368635100921896', '1556369188967161956', '1556400290654326784'],
+        foret: ['1556366236101644288', '1562495864407068724', '1555010133241757818', '1555009931059527760', '1555016589110284359', '1556369768863506592', '1556368958331027496', '1556371819118731314', '1556370024174715031'],
+        campagne: ['1555026735068880947', '1555026549739102368', '1556329419998494721', '1562495428501569578', '1562496510019764294', '1555009108866760814', '1555013848413769882', '1556371197208559816'],
+        ruines: ['1555027085905494026', '1555027205246156910', '1556330488640180476', '1556330711412383815', '1562501951269109820', '1562502348729745580', '1562501606967349318', '1562502587599560825', '1562503513823641700', '1562502146631409724', '1562503680534650960', '1555014592411729970', '1555010361252647054', '1555015812853538876', '1555017046599667782', '1555009430620217354', '1556370496944218234', '1556399855641960518', '1556371555364118549'],
+        'bas-fonds': ['1555024974341865553', '1556335574460272650', '1556334825042870372', '1556336755743924235', '1556336510696034404', '1556335161434570892', '1556320399153828032', '1556315229669949461', '1556320099575537745', '1556315010752577676', '1555012784666972191'],
+        mer: ['1563192192527376475', '1563194834351558666', '1563192754136289451', '1563191971856646254', '1555018759608205352', '1555018612618690681', '1555018503822512139'],
+      };
+      const places = {};
+      for (const [table, ids] of Object.entries(A)) for (const id of ids) places[`ch:${id}`] = { table, name: '', kind: 'post' };
+      const loot = normalizeLoot({ tables, places });
+      await retry(async () => {
+        const row = await read('meta', 'loot');
+        await write('meta', 'loot', loot, row?.version ?? null);
+      });
+      return { loot, toast: `Butins remplacés : ${Object.keys(loot.tables).length} tables, ${Object.keys(loot.places).length} lieux.` };
+    }
+
     case 'loot.export': {
       // Export des butins : envoyé en message privé par le bot, sous forme de fichier
       const name = String(body.name || 'export.json').replace(/[^\w.-]/g, '').slice(0, 60) || 'export.json';

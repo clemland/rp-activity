@@ -5687,7 +5687,7 @@ function lootPlacesHTML(places, islands, placeName) {
   const shown = new Set((lootChans || []).flatMap((c) => [`ch:${c.id}`, ...c.posts.map((p) => `ch:${p.id}`)]));
   const others = lootChans ? places.filter(([k]) => k.startsWith('ch:') && !shown.has(k)) : [];
   return `
-    <div class="sec-head" style="margin-top:14px"><h3 class="ed-h" style="margin:0">Salons RP</h3><button type="button" class="btn sm ghost" id="loot-export">📤 Exporter (fichier en MP)</button></div>
+    <div class="sec-head" style="margin-top:14px"><h3 class="ed-h" style="margin:0">Salons RP</h3><span class="se-row"><button type="button" class="btn sm" id="loot-preset">📥 Appliquer la répartition</button><button type="button" class="btn sm ghost" id="loot-export">📤 Exporter (fichier en MP)</button></span></div>
     <p class="note" style="margin:0 0 6px">Choisis la table de chaque salon. Déroule un forum (▸) pour régler ses posts un par un. Sans table à lui, un post utilise celle de son forum, puis celle de l’île.</p>
     <div class="mj-row"><input type="search" id="lp-q" placeholder="Rechercher un salon ou un post…" value="${esc(lootQ)}" aria-label="Rechercher un salon ou un post"></div>
     ${lootChans == null ? '<p class="note">Chargement des salons…</p>' : rows ? `<div class="lp-list">${rows}</div>` : '<p class="note">Aucun salon RP ne correspond.</p>'}
@@ -5715,6 +5715,10 @@ $('v-aloot').addEventListener('input', (e) => {
   q?.setSelectionRange(q.value.length, q.value.length);
 });
 $('v-aloot').addEventListener('click', async (e) => {
+  if (e.target.closest('#loot-preset')) {
+    if (!(await askConfirm('Les tables de butin et toutes les attributions actuelles seront remplacées par les 9 nouvelles tables et la répartition du 24/10 (intérieurs sans butin).', { title: 'Appliquer la nouvelle répartition ?', ok: 'Remplacer' }))) return;
+    return void lootCall('loot.preset', {});
+  }
   if (e.target.closest('#loot-export')) {
     // Tout ce qu'il faut pour revoir les butins : tables, attributions, salons, îles, objets
     const data = {

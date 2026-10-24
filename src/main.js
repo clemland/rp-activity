@@ -2307,6 +2307,9 @@ function pollResultsHTML(last, anim) {
   }).join('');
   return `<p class="note">Semaine terminée le ${jrDate(last.week)} · ${last.voters} votant${last.voters > 1 ? 's' : ''}</p>${html}`;
 }
+/* Reveal animé : la vue suit ce qui apparaît (sauf si le joueur fait défiler lui-même) */
+let pollFollow = [], pollUserScrolled = false;
+for (const ev of ['wheel', 'touchmove']) $('pl-body').addEventListener(ev, () => (pollUserScrolled = true), { passive: true });
 function renderPoll() {
   const el = $('pl-body');
   if (!POLL) return void (el.innerHTML = '<p class="note">Chargement…</p>');
@@ -2321,6 +2324,17 @@ function renderPoll() {
       ? `<div class="form-actions" style="justify-content:flex-start;margin-top:0">${POLL.last ? '<button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button>' : ''}${beta() ? '<button class="btn sm ghost" id="pl-preview">👁️ Aperçu du reveal (données fictives)</button>' : ''}</div>
         ${pollPreview ? '<p class="note pl-preview-note">👁️ Aperçu avec des points inventés : rien n’est enregistré.</p>' : ''}${pollResultsHTML(pollPreview || POLL.last, pollAnim)}`
       : pollGalleryHTML()}`;
+  pollFollow.forEach(clearTimeout);
+  pollFollow = [];
+  if (pollAnim) {
+    pollUserScrolled = false;
+    el.querySelectorAll('.pl-pop').forEach((n) => {
+      const d = parseFloat(n.style.animationDelay) || 0;
+      pollFollow.push(setTimeout(() => {
+        if (!pollUserScrolled && n.isConnected) n.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, d * 1000 + 50));
+    });
+  }
   pollAnim = false;
 }
 async function loadPoll() {

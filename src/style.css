@@ -1593,13 +1593,14 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
   #journal-fab{bottom:60px}
   #poll-fab{bottom:110px}
   .fab-t{display:none}
-  #poll-fab,#journal-fab,#trade-fab{display:flex;align-items:center;justify-content:center;line-height:1;text-align:center}
-  .pl-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;overflow:visible}
-  .pl-tabs button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 2px;font-size:11px;text-align:center;min-width:0}
-  .pl-tab-ico{font-size:22px}
-  .pl-tab-l{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Les trois boutons ronds : mêmes réglages pour tous (plus forts que les règles générales placées plus loin) */
+  body #poll-fab,body #journal-fab,body #trade-fab{left:10px;width:44px;height:44px;padding:0;display:flex;align-items:center;justify-content:center;line-height:1;font-size:20px;border-radius:50%}
+  body #poll-fab[hidden],body #journal-fab[hidden],body #trade-fab[hidden]{display:none}
+  body #trade-fab{bottom:10px}
+  body #journal-fab{bottom:60px}
+  body #poll-fab{bottom:110px}
   #trade-fab b{position:absolute;top:-6px;right:-6px;font-size:12px;margin:0}
-  .job-switch{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+  .job-switch{overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;scrollbar-width:none;overscroll-behavior-x:contain}
   .job-switch button{flex:0 0 auto;font-size:14px;padding:5px 10px}
   .pl-modes{grid-template-columns:1fr}
   .pl-mode{font-size:15px;padding:6px 10px}

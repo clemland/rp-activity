@@ -1582,7 +1582,9 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 @keyframes pl-pop{from{opacity:0;transform:translateY(16px) scale(.8)}to{opacity:1;transform:none}}
 @keyframes pl-burst{0%{opacity:0;transform:translateY(10px) scale(.6)}30%{opacity:1}100%{opacity:0;transform:translateY(-30px) scale(1.3)}}
 /* Sondage : compte à rebours et onglets fixés en haut de la fenêtre */
-.pl-sticky{position:sticky;top:0;z-index:6;background:var(--paper,#f3e3bb);padding-top:6px;margin-top:-6px}
+.pl-sticky{position:sticky;top:-20px;z-index:6;background:var(--paper,#f3e3bb);padding:20px 0 0;margin:-20px 0 10px;border-bottom:3px solid var(--ink);box-shadow:0 7px 8px -6px rgba(0,0,0,.45)}
+.pl-sticky .job-switch{margin-bottom:0;border-bottom:none}
+.pl-sticky .job-switch button{margin-bottom:0}
 .pl-tabs button{display:inline-flex;align-items:center;gap:6px}
 .pl-tab-ico{line-height:1}
 /* ═══ Petits écrans : boutons flottants en ronds, sondage et carnet resserrés ═══ */

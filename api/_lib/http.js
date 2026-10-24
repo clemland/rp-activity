@@ -1,5 +1,6 @@
 /** Petites aides pour les fonctions Vercel (réponses JSON, erreurs). */
 import { GameError } from '../../shared/game.js';
+import { logRequest } from './logs.js';
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -16,6 +17,9 @@ export function handler(methods, fn) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
       const out = await fn(req, body);
+      // Journal des actions réussies (salon de logs)
+      if (!req.logKind && String(req.url || '').includes('/api/bot')) req.logKind = 'bot';
+      if (req.logKind) await logRequest(req, body, out).catch(() => {});
       return res.status(200).json(out ?? {});
     } catch (err) {
       if (err instanceof GameError) return res.status(400).json({ error: err.message });

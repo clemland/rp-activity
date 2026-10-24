@@ -36,6 +36,8 @@ function freeId(base, taken) {
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
+  req.me = me;
+  req.logKind = 'staff'; // journal
   const perms = await staffPerms(me.uid);
   need(perms.length, 403, 'Réservé au staff.');
   // Permission nécessaire selon l'opération (les listes en lecture seule sont ouvertes à tout le staff)

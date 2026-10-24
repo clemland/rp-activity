@@ -58,6 +58,8 @@ async function aboardShip(uid) {
 
 export default handler(['POST'], async (req, body) => {
   const me = await userFromRequest(req);
+  req.me = me;
+  req.logKind = 'action'; // journal
   const action = body.action || {};
   let channelId = null; // position du joueur, connue une fois sa fiche chargée
   need(typeof action.type === 'string', 400, 'Action manquante.');

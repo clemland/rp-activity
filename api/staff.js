@@ -624,12 +624,17 @@ export default handler(['POST'], async (req, body) => {
       shop.channel = `#${ch.name}`;
       shop.img = shop.img ? await ingest(shop.img, 'vendeurs', channelId) : null;
       const from = body.from && body.from !== channelId ? String(body.from) : null;
-      if (from) need(!(await read('shops', channelId)), 409, `Il y a déjà une boutique dans #${ch.name}.`);
+      if (from) void 0; // plusieurs boutiques par salon : plus de blocage
+      // Plusieurs boutiques par salon : clés « salon », « salon~2 », « salon~3 »…
+      const prev = body.from ? String(body.from) : null;
+      const same = prev && prev.split('~')[0] === channelId;
       return retry(async () => {
-        const row = await read('shops', channelId);
-        await write('shops', channelId, shop, row?.version ?? null);
-        if (from) await remove('shops', from);
-        return { channelId, shop, toast: from ? `Boutique déplacée vers #${ch.name}` : `Boutique de #${ch.name} enregistrée` };
+        let key = same ? prev : channelId;
+        if (!same) for (let n = 2; await read('shops', key); n++) key = `${channelId}~${n}`;
+        const row = await read('shops', key);
+        await write('shops', key, shop, row?.version ?? null);
+        if (prev && !same) await remove('shops', prev);
+        return { channelId: key, shop, toast: prev && !same ? `Boutique déplacée vers #${ch.name}` : `Boutique de #${ch.name} enregistrée` };
       });
     }
 

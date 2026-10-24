@@ -3023,7 +3023,7 @@ $('v-ashop').addEventListener('click', async (e) => {
   if (ed) return openShopEdit(adminShops[ed], ed);
   // Dupliquer : mêmes objets, prix et vendeur ; il reste à choisir un autre salon
   const dup = e.target.closest('[data-ashop-dup]')?.dataset.ashopDup;
-  if (dup) return openShopEdit({ ...structuredClone(adminShops[dup]), name: `${adminShops[dup].name} (copie)`.slice(0, 40) }, null);
+  if (dup) return openShopEdit({ ...structuredClone(adminShops[dup]), name: `${adminShops[dup].name} (copie)`.slice(0, 40) }, null, dup.split('~')[0]);
   const del = e.target.closest('[data-ashop-del]')?.dataset.ashopDel;
   if (del) {
     const sh = adminShops[del];
@@ -3032,6 +3032,7 @@ $('v-ashop').addEventListener('click', async (e) => {
     try {
       const out = await API.staff('shop.delete', { channelId: del });
       if (del === POSID) SHOP = null;
+      shopsFor = null;
       openShopRow = null;
       toast(esc(out.toast));
       await loadAdminShops();
@@ -3042,9 +3043,36 @@ $('v-ashop').addEventListener('click', async (e) => {
     }
   }
 });
+/* Plusieurs boutiques par salon : la liste du salon, et le marchand choisi */
+let SHOPS = null, shopsFor = null, shopPick = null;
+function syncShops() {
+  if (!POSID) return;
+  if (shopsFor !== POSID) {
+    shopsFor = POSID;
+    SHOPS = null;
+    shopPick = null;
+    run({ type: 'shop.list' }).then((out) => {
+      if (shopsFor !== POSID) return;
+      SHOPS = out?.shops || [];
+      renderShop();
+    });
+  }
+  if (SHOPS?.length) {
+    if (!SHOPS.some((s) => s.id === shopPick)) shopPick = SHOPS[0].id;
+    SHOP = SHOPS.find((s) => s.id === shopPick);
+  }
+}
+const shopTabsHTML = () => (SHOPS?.length > 1 ? `<div class="shop-tabs" role="tablist" aria-label="Marchands">${SHOPS.map((s) => `<button type="button" role="tab" class="shop-tab ${s.id === shopPick ? 'on' : ''}" aria-selected="${s.id === shopPick}" data-shop-pick="${esc(s.id)}"><span class="face mini-face">${s.img ? `<img src="${imgSrc(s.img)}" alt="">` : `<span aria-hidden="true">${esc(s.face || '🙂')}</span>`}</span><span class="st-txt"><b>${esc(s.name)}</b><small>${esc(s.seller)}</small></span></button>`).join('')}</div>` : '');
+/** Garde la liste à jour après un achat ou une vente chez le marchand choisi. */
+function keepShop(out) {
+  if (!out?.shop || !SHOPS || !shopPick) return;
+  const i = SHOPS.findIndex((s) => s.id === shopPick);
+  if (i >= 0) SHOPS[i] = { ...out.shop, id: shopPick };
+}
 function renderShop() {
   if (ADMIN) return;
   if (!S) return;
+  syncShops();
   const el = $('v-shop');
   if (!POSID) {
     el.innerHTML = `<div class="no-shop">${ico(265)}<h2>Tu n’es nulle part</h2><p class="note">La boutique est celle de l’endroit où tu te trouves : le dernier salon RP où tu as écrit un message RP (400 caractères ou plus).</p></div>`;
@@ -3072,7 +3100,7 @@ function renderShop() {
         </div>`;
       }).join('')
     : sellHTML();
-  el.innerHTML = `
+  el.innerHTML = `${shopTabsHTML()}
     <div class="counter">
       <div class="face" id="seller-face">${SHOP.img ? `<img src="${imgSrc(SHOP.img)}" alt="${esc(SHOP.seller)}">` : `<span aria-hidden="true">${esc(SHOP.face || '🙂')}</span>`}</div>
       <div><h2>${esc(SHOP.name)}</h2><p>${esc(SHOP.seller)}</p></div>
@@ -3114,6 +3142,12 @@ $('v-shop').addEventListener('input', (e) => {
 });
 $('v-shop').addEventListener('click', async (e) => {
   if (sJust) return;
+  const pk = e.target.closest('[data-shop-pick]')?.dataset.shopPick;
+  if (pk) {
+    shopPick = pk;
+    sellItem = null;
+    return renderShop();
+  }
   if (e.target.closest('#shop-create')) return;
   const sc = e.target.closest('.scell');
   if (sc && !VIEW) return putOnCounter(S.inv[+sc.dataset.sslot][0]);
@@ -3130,8 +3164,9 @@ $('v-shop').addEventListener('click', async (e) => {
   const bk = e.target.closest('[data-buy]')?.dataset.buy;
   if (bk) {
     const before = S.berry;
-    const out = await run({ type: 'shop.buy', key: bk });
+    const out = await run({ type: 'shop.buy', key: bk, shopId: shopPick || undefined });
     if (!out) return;
+    keepShop(out);
     walletFx(before, S.berry - before);
     const btn = document.querySelector(`[data-buy="${bk}"]`);
     if (btn && !btn.disabled) {
@@ -3150,7 +3185,7 @@ $('v-shop').addEventListener('click', async (e) => {
   const sk = e.target.closest('[data-sell]')?.dataset.sell;
   if (sk) {
     const before = S.berry;
-    const out = await run({ type: 'shop.sell', key: sk, pct: askBlock(sk).pct });
+    const out = await run({ type: 'shop.sell', key: sk, pct: askBlock(sk).pct, shopId: shopPick || undefined });
     if (!out) return;
     delete asks[sk];
     if (out.refused) return replay($('drop-counter'), 'shake');
@@ -3174,12 +3209,12 @@ async function loadShopChans() {
     renderShopEdit();
   }
 }
-function openShopEdit(base, channelId = null) {
+function openShopEdit(base, channelId = null, hint = null) {
   if (!tools() || !base) return;
   shopDraft = structuredClone(base);
   shopEditCh = channelId; // salon d'origine (null = nouvelle boutique)
   // Nouvelle boutique : on propose le salon où le panneau est ouvert, s'il n'a pas déjà de boutique.
-  shopDraftCh = channelId ?? (API.channelId && !adminShops?.[API.channelId] ? API.channelId : '');
+  shopDraftCh = channelId ? channelId.split('~')[0] : hint || API.channelId || ''; // plusieurs boutiques par salon
   seChanOther = false;
   renderShopEdit();
   $('se-err').textContent = '';
@@ -3191,8 +3226,11 @@ function renderShopEdit() {
   // Menu des salons RP (posts rangés sous leur forum), ou un ID collé à la main
   const inList = (id) => (shopChans || []).some((c) => c.id === id || c.posts.some((p) => p.id === id));
   const other = seChanOther || (shopDraftCh && shopChans && !inList(shopDraftCh)) || (shopChans && !shopChans.length);
-  const taken = (id) => adminShops?.[id] && id !== shopEditCh;
-  const opt = (id, label) => `<option value="${esc(id)}" ${id === shopDraftCh && !other ? 'selected' : ''} ${taken(id) ? 'disabled' : ''}>${esc(label)}${taken(id) ? ' (a déjà une boutique)' : ''}</option>`;
+  const nShops = (id) => Object.keys(adminShops || {}).filter((k) => k.split('~')[0] === id).length;
+  const opt = (id, label) => {
+    const n = nShops(id);
+    return `<option value="${esc(id)}" ${id === shopDraftCh && !other ? 'selected' : ''}>${esc(label)}${n ? ` (${n} boutique${n > 1 ? 's' : ''})` : ''}</option>`;
+  };
   const idInput = `<input id="se-chan" value="${esc(shopDraftCh)}" inputmode="numeric" placeholder="ID du salon (clic droit > Copier l’identifiant)" maxlength="22" style="margin-top:6px">`;
   const chanField = shopChans == null
     ? `<p class="note" style="margin:0">Chargement des salons…</p><input id="se-chan" type="hidden" value="${esc(shopDraftCh)}">`
@@ -3312,6 +3350,7 @@ $('se-save').addEventListener('click', async () => {
     const out = await API.staff('shop.save', { channelId: shopDraftCh, from: shopEditCh, shop: shopDraft });
     if (out.channelId === POSID) SHOP = out.shop;
     else if (shopEditCh === POSID) SHOP = null;
+    shopsFor = null; // la boutique du salon est rechargée
     openShopRow = out.channelId;
     closeDialog($('d-shopedit'));
     await loadAdminShops();

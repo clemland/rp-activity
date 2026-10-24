@@ -1486,6 +1486,13 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ck-steps li span{display:inline-block;min-width:170px}
 .recipe .status{font-size:13px;margin-left:6px}
 .status.ok{color:#1d7a3a}
+/* ═══ Plusieurs boutiques par salon ═══ */
+.shop-tabs{display:flex;gap:8px;overflow-x:auto;margin:0 0 12px;padding-bottom:4px}
+.shop-tab{display:flex;gap:8px;align-items:center;flex:0 0 auto;font:inherit;text-align:left;background:#efe3c4;color:var(--brown);border:3px solid var(--ink);border-radius:10px;padding:5px 12px 5px 6px;cursor:pointer}
+.shop-tab.on{background:var(--gold);box-shadow:0 3px 0 var(--ink)}
+.shop-tab .mini-face{width:38px;height:38px;flex:0 0 38px}
+.shop-tab .st-txt{display:grid;line-height:1.15}
+.shop-tab small{font-size:12px;color:var(--muted)}
 /* ═══ Butins : attribution par salon ═══ */
 .lp-list{display:grid;gap:5px;margin:6px 0 12px}
 .lp-ch{background:var(--card);border:2px solid var(--ink);border-radius:8px;padding:3px 8px}

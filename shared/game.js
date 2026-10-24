@@ -923,7 +923,7 @@ export function playerAction(player, action, ctx = {}) {
       if (!count(p, k)) fail('Tu n’as pas cet objet.');
       if (!it.value) fail(`${it.name} ne se vend pas.`);
       if (freeCount(p, k) < 1) fail('Retire-le d’abord de ton équipement.');
-      const ch = ctx.channelId || 'demo';
+      const ch = ctx.shopKey || ctx.channelId || 'demo'; // un refus ne bloque que ce marchand
       const locked = !!p.sellLock[ch]?.[k];
       const pct = locked ? 100 : int(a.pct ?? 100, 100, ASK_MAX);
       const ref = refPrice(shop, k), price = Math.round((ref * pct) / 100);

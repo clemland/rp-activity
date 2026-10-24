@@ -413,12 +413,25 @@ export default handler(['POST'], async (req, body) => {
       return reply(out, { ships: { [action.shipId]: out.ship } });
     }
 
-    let shopV = null;
+    let shopV = null, shopKey = null;
     if (action.type.startsWith('shop.')) {
       need(channelId, 400, 'Tu n’es nulle part : écris d’abord un message RP dans un salon RP.');
-      const s = await loadShop(channelId);
-      ctx.shop = s.shop;
-      shopV = s.version;
+      // Plusieurs boutiques par salon : clés « salon », « salon~2 »… (la boutique choisie par le joueur)
+      if (action.type === 'shop.list') {
+        const all = await readAll('shops');
+        return {
+          shops: Object.entries(all)
+            .filter(([k]) => k === channelId || k.startsWith(`${channelId}~`))
+            .map(([id, s]) => ({ id, ...GM.normalizeShop(s) }))
+            .sort((a, b) => (a.id === channelId ? -1 : b.id === channelId ? 1 : a.name.localeCompare(b.name))),
+        };
+      }
+      const sid = action.shopId && (String(action.shopId) === channelId || String(action.shopId).startsWith(`${channelId}~`)) ? String(action.shopId) : channelId;
+      const srow = await read('shops', sid);
+      ctx.shop = srow ? GM.normalizeShop(srow.data) : null;
+      ctx.shopKey = sid;
+      shopV = srow?.version ?? null;
+      shopKey = sid;
     }
     if (action.type === 'craft.collect' && channelId) ctx.channelName = player.position?.name || (await channelName(channelId));
     // Travail d'atelier terminé : il faut le bateau concerné (à lui ou à son équipage)
@@ -435,7 +448,7 @@ export default handler(['POST'], async (req, body) => {
       ctx.storeId = store.id;
     }
     const out = playerAction(player, action, ctx);
-    if (out.shop) await write('shops', channelId, out.shop, shopV);
+    if (out.shop) await write('shops', shopKey || channelId, out.shop, shopV);
     if (out.store && store) await write('ships', store.id, out.store, store.version);
     const extra = {};
     if (out.store) extra.nav = await loadHarbor(out.player, cs?.crew ?? null, channelId);

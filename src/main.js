@@ -2987,7 +2987,7 @@ function renderAdminShops() {
   el.innerHTML = `
     <div class="sec-head">
       <div><h2>Boutiques</h2><p class="lede" style="margin:0">Une boutique par salon RP : les joueurs la voient quand ils ouvrent <code>/profil</code> dans ce salon.</p></div>
-      <button class="btn" id="ashop-new">+ Nouvelle boutique</button>
+      <div class="se-row"><button class="btn ghost" id="ashop-eco">⚖️ Appliquer la grille économique</button><button class="btn" id="ashop-new">+ Nouvelle boutique</button></div>
     </div>
     ${list.length ? `<div class="ashop-list">${list.map(([ch, sh]) => {
       const items = sh.items.filter(([k]) => G.ITEMS[k]);
@@ -3013,6 +3013,21 @@ function renderAdminShops() {
   paintStatic(el);
 }
 $('v-ashop').addEventListener('click', async (e) => {
+  if (e.target.closest('#ashop-eco')) {
+    if (!(await askConfirm('Les valeurs et poids des objets, les recettes corrigées et les prix de toutes les boutiques (rachat 40 %, toutes les armes dans les armureries) vont être remplacés par la grille du 24/10.', { title: 'Appliquer la grille économique ?', ok: 'Appliquer' }))) return;
+    setBusy(1);
+    try {
+      const out = await API.staff('shop.economy');
+      toast(esc(out.toast));
+      shopsFor = null;
+      await loadAdminShops();
+    } catch (err) {
+      toast(esc(err.message));
+    } finally {
+      setBusy(-1);
+    }
+    return;
+  }
   if (e.target.closest('#ashop-new')) return openShopEdit(G.newShop(), null);
   const t = e.target.closest('[data-ashop-toggle]')?.dataset.ashopToggle;
   if (t) {

@@ -588,6 +588,68 @@ export default handler(['POST'], async (req, body) => {
       });
     }
 
+    case 'shop.economy': {
+      // Grille économique du 24/10/2026 : valeurs et poids des objets, recettes corrigées, prix des boutiques (rachat 40 %)
+      const V = {
+        arc: [15000, 1], revolver: [30000, 1], 'sabre-courbe': [35000, 1.5], katana: [45000, 1.2], 'epee-longue': [45000, 3], fusil: [50000, 4], massue: [60000, 8], 'tromblon-a-6-canons': [120000, 2.5],
+        'log-pose': [80000, 0.3], jumelles: [20000, 0.8], 'mortier-et-pilon': [12000, 2], 'trousse-de-medecine': [30000, 3], 'kit-d-archeologue': [30000, 4], 'kit-de-scientifique': [35000, 5], 'kit-de-charpentier': [18000, 6],
+        'bout-de-bois': [300, 2], 'bois-robuste': [2500, 2], 'bois-de-deul': [25000, 2], 'bois-d-adam': [150000, 2.5], chanvre: [150, 0.1], tissu: [800, 0.4],
+        bandage: [800, 0.1], antidote: [3000, 0.2], attelle: [3000, 0.5],
+        'sel-marin': [50, 0.5], riz: [80, 1], farine: [80, 1], 'pommes-de-terre': [80, 1], sucre: [100, 0.5], tomates: [100, 0.5], piment: [100, 0.1], 'legumes-varies': [120, 1], oeufs: [120, 0.6],
+        'produit-laitier': [150, 1], agrumes: [150, 0.5], champignons: [150, 0.3], 'poisson-cru': [300, 1], 'viande-crue': [400, 1], crustaces: [500, 0.8],
+        barque: [60000, 0], caravelle: [800000, 0], goelette: [1500000, 0], gallion: [5000000, 0], striker: [10000000, 0], cuirasse: [15000000, 0],
+      };
+      const R = {
+        '1-antidote': { needs: { champignons: 3, agrumes: 2, 'sel-marin': 1 }, tools: { 'mortier-et-pilon': 1 } },
+        'soin-plaie-critique-au-plus-2': { needs: { bandage: 8, antidote: 1 }, tools: { 'trousse-de-medecine': 1 } },
+        'soin-fracture-serieuse-au-plus': { gives: {} },
+        '1-barque': { needs: { tissu: 2, chanvre: 5 }, work: { woodQty: 15 }, seconds: 7200 },
+        'construire-caravelle-bois-stan': { needs: { tissu: 8, chanvre: 10 }, work: { woodQty: 30 }, seconds: 86400, lvl: 2 },
+        'reparer-la-coque-23': { needs: { 'bout-de-bois': 3 } },
+        'reparer-la-coque-20': { needs: { 'bout-de-bois': 5 } },
+        'reparer-la-coque-30': { needs: { 'bout-de-bois': 7 } },
+        '1-tissu': { job: null, lvl: 1, gives: { tissu: 1 }, needs: { chanvre: 4 }, tools: {}, seconds: 600 },
+        '1-attelle': { job: 'medecin', lvl: 1, gives: { attelle: 1 }, needs: { 'bout-de-bois': 1, tissu: 2 }, tools: { 'trousse-de-medecine': 1 }, seconds: 1800 },
+      };
+      const F = {
+        '1555026549739102368': 0.9, '1555280961833275422': 0.95,
+        '1555024561777545368': 1.05, '1555279229904748706': 1.05, '1562497093434740827~2': 1.05, '1562497584973611098': 1.05,
+        '1562533958195875912': 1.1, '1562497093434740827': 1.1, '1555012326321688632': 1.1, '1555011827858145360': 1.15,
+      };
+      const WEAPONS = ['arc', 'revolver', 'sabre-courbe', 'katana', 'epee-longue', 'fusil', 'massue', 'tromblon-a-6-canons'];
+      const nice = (n) => (n >= 10000 ? Math.round(n / 500) * 500 : n >= 1000 ? Math.round(n / 50) * 50 : Math.max(5, Math.round(n / 5) * 5));
+      // Objets (en parallèle, pour rester sous la limite de temps de Vercel)
+      const itemsDone = await Promise.all(Object.entries(V).map(async ([id, [value, weight]]) => {
+        const row = await read('items', id);
+        if (!row) return 0;
+        await write('items', id, { ...row.data, value, weight }, row.version);
+        return 1;
+      }));
+      // Recettes
+      const blank = { job: null, lvl: 1, care: null, desc: '', game: null, work: null, gives: {}, needs: {}, tools: {}, seconds: 0 };
+      const recDone = await Promise.all(Object.entries(R).map(async ([id, patch]) => {
+        const row = await read('recipes', id);
+        const base = row?.data || blank;
+        const next = { ...base, ...patch, work: patch.work ? { ...(base.work || {}), ...patch.work } : base.work };
+        await write('recipes', id, next, row?.version ?? null);
+        return 1;
+      }));
+      // Boutiques : prix = valeur × variation de la ville, rachat 40 %, toutes les armes dans les armureries
+      const shops = await readAll('shops');
+      await Promise.all(Object.entries(shops).map(async ([key, s]) => {
+        const f = F[key] ?? 1;
+        const items = [...(s.items || [])];
+        const has = (k) => items.some((x) => x[0] === k);
+        const add = (k) => { if (!has(k)) items.push([k, 0, -1]); };
+        if (items.some(([k]) => catalog.items[k]?.kind === 'arme')) WEAPONS.forEach(add);
+        if (has('log-pose') || has('barque')) { add('chanvre'); add('tissu'); }
+        const priced = items.filter(([k]) => catalog.items[k]).map(([k, , stock]) => [k, nice((V[k]?.[0] ?? catalog.items[k].value) * f), stock]);
+        const row = await read('shops', key);
+        await write('shops', key, { ...s, items: priced, buyRate: 0.4 }, row?.version ?? null);
+      }));
+      return { toast: `Grille appliquée : ${itemsDone.reduce((a, b) => a + b, 0)} objets, ${recDone.length} recettes, ${Object.keys(shops).length} boutiques. Rouvre l’app pour voir les nouveaux prix.` };
+    }
+
     case 'shop.channels': {
       // Salons RP (déclarés et salons des bateaux) et posts ouverts de leurs forums, pour placer une boutique
       const list = (await read('meta', 'rp:channels'))?.data?.list || [];

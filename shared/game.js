@@ -944,6 +944,12 @@ export function playerAction(player, action, ctx = {}) {
   return out;
 }
 
+// Soldes de la Marine : grille économique du 24/10/2026 (1 ฿ ≈ 1 yen)
+for (const [name, pay] of [['3ème Classe', 50_000], ['2ème Classe', 70_000], ['1ère Classe', 100_000], ['Lieutenant', 180_000], ['Capitaine', 300_000], ['Vice-Amiral', 700_000], ['Amiral', 1_500_000], ['Amiral en Chef', 2_500_000]]) {
+  const g = MARINE_GRADES.find((x) => x.name === name);
+  if (g) g.pay = pay;
+}
+
 /* ═══ Actions du staff ═══════════════════════════════════════════════════ */
 /** Modifications réservées aux MJ, sur la fiche d'un joueur. */
 export function staffAction(player, action) {

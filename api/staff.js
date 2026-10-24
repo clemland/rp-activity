@@ -50,6 +50,7 @@ export default handler(['POST'], async (req, body) => {
     : op === 'techniques' ? ['techniques']
     : op === 'inventions' ? ['inventions']
     : op === 'cooks' || op === 'cook.validate' ? ['cuisine']
+    : op.startsWith('secret.') ? ['joueurs']
     : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
     : op.startsWith('crew.') ? ['equipages', 'marine']
     : op.startsWith('ship.') ? ['equipages']
@@ -73,6 +74,11 @@ export default handler(['POST'], async (req, body) => {
       return retry(async () => {
         const row = await read('players', body.target);
         need(row, 404, 'Ce joueur n’a pas de fiche.');
+        // Carnet : annotations signées par le membre du staff (en test, réservé aux testeurs)
+        if (String(body.action?.type || '').startsWith('journal.')) {
+          need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+          body.action = { ...body.action, by: me.uid, byName: me.name || '' };
+        }
         const out = staffAction(normalize(row.data), body.action);
         await write('players', body.target, out.player, row.version);
         return out;
@@ -850,6 +856,26 @@ export default handler(['POST'], async (req, body) => {
       await remove('shops', body.channelId);
       return { shop: null, toast: 'Boutique fermée' };
 
+    case 'secret.get':
+    case 'secret.add':
+    case 'secret.delete': {
+      // Notes secrètes du staff sur un joueur : rangées à part de sa fiche, jamais envoyées à son app
+      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+      need(body.target, 400, 'Joueur manquant.');
+      const key = `notes:${String(body.target)}`;
+      if (body.op === 'secret.get') return { notes: (await read('meta', key))?.data?.list || [] };
+      return retry(async () => {
+        const row = await read('meta', key);
+        let list = row?.data?.list || [];
+        if (body.op === 'secret.add') {
+          const text = String(body.text || '').trim().slice(0, 1000);
+          need(text, 400, 'Note vide.');
+          list = [{ id: Date.now(), by: me.uid, byName: me.name || '', text, at: Date.now() }, ...list].slice(0, 200);
+        } else list = list.filter((n) => n.id !== Number(body.id));
+        await write('meta', key, { list }, row?.version ?? null);
+        return { notes: list, toast: body.op === 'secret.add' ? 'Note secrète ajoutée' : 'Note supprimée' };
+      });
+    }
     case 'cooks': {
       // Toutes les recettes de cuisine des joueurs
       const list = [];

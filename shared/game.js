@@ -277,6 +277,16 @@ export function normalize(p) {
   p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
   p.careOut = freshReq(p.careOut); // demandes de soin envoyées
   if (p.job?.id && !JOBS[p.job.id]) p.job = { ...p.job, id: null }; // métier supprimé (ex. cuisinier)
+  // Carnet de suivi : entrées du joueur (markdown, images), annotées par le staff
+  p.journal = (Array.isArray(p.journal) ? p.journal : []).slice(0, 200).map((e) => ({
+    id: Number(e?.id) || Date.now(),
+    title: str(e?.title, 80),
+    text: str(e?.text, 4000),
+    images: (Array.isArray(e?.images) ? e.images : []).filter((u) => typeof u === 'string' && u).map((u) => str(u, 3_000_000)).slice(0, 4),
+    at: Number(e?.at) || 0,
+    edited: Number(e?.edited) || 0,
+    notes: (Array.isArray(e?.notes) ? e.notes : []).slice(0, 30).map((n) => ({ id: Number(n?.id) || 0, by: str(n?.by, 30), byName: str(n?.byName, 60), text: str(n?.text, 500), emoji: str(n?.emoji, 16), at: Number(n?.at) || 0 })),
+  })).filter((e) => e.title || e.text || e.images.length);
   // Recettes au repos après un échec : { clé: fin du repos }
   p.cooldowns = Object.fromEntries(Object.entries(p.cooldowns || {}).filter(([, t]) => Number(t) > Date.now()).slice(0, 50).map(([k, t]) => [String(k).slice(0, 120), Number(t)]));
   // Recettes de cuisine du joueur : validées par le staff (le plat devient alors un objet du catalogue)
@@ -817,6 +827,30 @@ export function playerAction(player, action, ctx = {}) {
       out.toast = `${it.name} : « ${h.label} » est soigné !`;
       break;
     }
+    case 'journal.save': {
+      // Carnet de suivi : une entrée libre (markdown, images), lue et annotée par le staff
+      const title = str(a.title, 80), text = str(a.text, 4000);
+      const images = (Array.isArray(a.images) ? a.images : []).filter((u) => typeof u === 'string' && u).slice(0, 4);
+      if (!title && !text && !images.length) fail('Écris quelque chose dans ton carnet.');
+      if (a.id != null) {
+        const e = p.journal.find((x) => x.id === a.id);
+        if (!e) fail('Entrée introuvable.');
+        Object.assign(e, { title, text, images, edited: now });
+        out.toast = 'Entrée modifiée';
+      } else {
+        if (p.journal.length >= 200) fail('Ton carnet est plein (200 entrées).');
+        p.journal.unshift({ id: now + Math.floor(rng() * 1000), title, text, images, at: now, edited: 0, notes: [] });
+        out.toast = 'Entrée ajoutée à ton carnet';
+      }
+      break;
+    }
+    case 'journal.delete': {
+      const e = p.journal.find((x) => x.id === a.id);
+      if (!e) fail('Entrée introuvable.');
+      p.journal = p.journal.filter((x) => x !== e);
+      out.toast = 'Entrée supprimée';
+      break;
+    }
     case 'cook.save': {
 
       const name = str(a.name, 60);
@@ -1101,6 +1135,23 @@ export function staffAction(player, action) {
       if (!p.craft) fail('Aucune fabrication en cours.');
       p.craft.end = Date.now();
       out.toast = 'Fabrication terminée : le joueur peut la récupérer';
+      break;
+    }
+    case 'journal.note': {
+      // Annotation du staff sur une entrée du carnet (visible par le joueur) : un émoji, un texte, ou les deux
+      const e = p.journal.find((x) => x.id === a.id);
+      if (!e) fail('Entrée introuvable.');
+      const text = str(a.text, 500), emoji = str(a.emoji, 16);
+      if (!text && !emoji) fail('Annotation vide.');
+      e.notes.push({ id: Date.now(), by: str(a.by, 30), byName: str(a.byName, 60), text, emoji, at: Date.now() });
+      out.toast = 'Annotation ajoutée';
+      break;
+    }
+    case 'journal.note.delete': {
+      const e = p.journal.find((x) => x.id === a.id);
+      if (!e) fail('Entrée introuvable.');
+      e.notes = e.notes.filter((n) => n.id !== a.nid);
+      out.toast = 'Annotation retirée';
       break;
     }
     case 'invention.validate': {

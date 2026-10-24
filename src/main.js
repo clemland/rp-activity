@@ -2148,6 +2148,190 @@ $('v-job').addEventListener('click', async (e) => {
   }
 });
 
+/* ═══ Carnet de suivi (bouton flottant ; en test, réservé aux testeurs) ═══ */
+/** Markdown simple et sûr (le texte est échappé avant la mise en forme). */
+function md(src) {
+  let s = esc(String(src || ''));
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/__([^_\n]+)__/g, '<u>$1</u>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>').replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+  s = s.replace(/\|\|([^|\n]+)\|\|/g, '<span class="spoil" tabindex="0">$1</span>');
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, (m, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener" class="${/discord\.com\/channels\//.test(url) ? 'jr-link' : ''}">${/discord\.com\/channels\//.test(url) ? '🔗 Action RP' : url}</a>`);
+  s = s.split('\n').map((l) => {
+    if (/^### /.test(l)) return `<h5>${l.slice(4)}</h5>`;
+    if (/^## /.test(l)) return `<h4>${l.slice(3)}</h4>`;
+    if (/^# /.test(l)) return `<h3>${l.slice(2)}</h3>`;
+    if (/^&gt; /.test(l)) return `<blockquote>${l.slice(5)}</blockquote>`;
+    if (/^[-*] /.test(l)) return `<li>${l.slice(2)}</li>`;
+    return l ? `${l}<br>` : '<br>';
+  }).join('');
+  return s.replace(/(<li>[\s\S]*?<\/li>)+/g, (m) => `<ul>${m}</ul>`);
+}
+const jrDate = (t) => (t ? new Date(t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '');
+let jrEdit = null, jrSecrets = null;
+const journalFab = document.createElement('button');
+journalFab.type = 'button';
+journalFab.id = 'journal-fab';
+journalFab.hidden = true;
+journalFab.textContent = '📓 Carnet';
+document.body.append(journalFab);
+setInterval(() => {
+  journalFab.hidden = !S || !beta();
+}, 1500);
+function jrEntryHTML(e) {
+  return `<article class="jr-entry">
+    <header><span><b>${esc(e.title || 'Sans titre')}</b> <small class="note">${jrDate(e.at)}${e.edited ? ' · modifiée' : ''}</small></span>
+      ${!VIEW ? `<span class="jr-acts"><button class="btn sm ghost" data-jr-edit="${e.id}">Modifier</button><button class="btn sm ghost" data-jr-del="${e.id}">Supprimer</button></span>` : ''}</header>
+    ${e.text ? `<div class="jr-text">${md(e.text)}</div>` : ''}
+    ${e.images.length ? `<div class="inv-gallery">${e.images.map((u) => `<img src="${imgSrc(u)}" alt="">`).join('')}</div>` : ''}
+    ${e.notes.length ? `<div class="jr-notes">${e.notes.map((n) => `<div class="jr-note">${n.emoji ? `<span class="jr-emo">${esc(n.emoji)}</span>` : ''}<span><b>${esc(n.byName || 'Staff')}</b>${n.text ? ` ${esc(n.text)}` : ''}</span>${VIEW ? `<button class="close sm-close" data-jr-ndel="${e.id}:${n.id}" aria-label="Retirer l’annotation">×</button>` : ''}</div>`).join('')}</div>` : ''}
+    ${VIEW ? `<div class="jr-annot">${['👍', '🔥', '⭐', '😂', '❤️', '👀'].map((em) => `<button type="button" class="jr-q" data-jr-emo="${e.id}" data-emo="${em}" aria-label="Réagir ${em}">${em}</button>`).join('')}
+      <input class="jr-emoin" data-jr-emoin="${e.id}" maxlength="16" placeholder="😀" aria-label="Émoji de ton choix" title="N’importe quel émoji (Mac : Ctrl + Cmd + Espace ; Windows : Windows + point)">
+      <input data-jr-txt="${e.id}" maxlength="500" placeholder="Annoter (visible par le joueur)…"><button class="btn sm" data-jr-send="${e.id}">Annoter</button></div>` : ''}
+  </article>`;
+}
+function jrEditorHTML() {
+  const d = jrEdit;
+  return `<div class="crew-box jr-editor">
+    <input id="jr-t" maxlength="80" placeholder="Titre (facultatif)" value="${esc(d.title)}">
+    ${d.preview ? `<div class="jr-text jr-preview">${md(d.text) || '<span class="note">Rien à afficher.</span>'}</div>` : `<textarea id="jr-x" rows="8" maxlength="4000" placeholder="Écris ce que tu veux…">${esc(d.text)}</textarea>`}
+    <p class="note" style="margin:0">Markdown : **gras**, *italique*, __souligné__, ~~barré~~, ||spoiler||, \`code\`, # titre, &gt; citation, - liste, [texte](lien). Colle le lien d’un message Discord pour citer une action RP.</p>
+    ${d.images.length ? `<div class="inv-gallery edit">${d.images.map((u, i) => `<span class="inv-img"><img src="${imgSrc(u)}" alt=""><button type="button" class="close sm-close" data-jr-rmimg="${i}" aria-label="Retirer l’image">×</button></span>`).join('')}</div>` : ''}
+    <div class="se-row"><button type="button" class="btn sm ghost" id="jr-pick" ${d.images.length >= 4 ? 'disabled' : ''}>🖼️ Ajouter une image</button><input type="file" id="jr-file" accept="image/*" multiple hidden><button type="button" class="btn sm ghost" id="jr-prev">${d.preview ? '✏️ Écrire' : '👁️ Aperçu'}</button></div>
+    <div class="form-actions"><button type="button" class="btn ghost" id="jr-cancel">Annuler</button><button type="button" class="btn" id="jr-save">${d.id ? 'Enregistrer' : 'Ajouter au carnet'}</button></div>
+  </div>`;
+}
+function jrSecretsHTML() {
+  return `<details class="crew-box jr-secret" open><summary>🔒 Notes secrètes du staff <small class="note">(le joueur ne les voit jamais)</small></summary>
+    ${jrSecrets == null ? '<p class="note">Chargement…</p>' : jrSecrets.length ? jrSecrets.map((n) => `<div class="jr-note"><span><b>${esc(n.byName || 'Staff')}</b> <small class="note">${jrDate(n.at)}</small><br>${md(n.text)}</span><button class="close sm-close" data-jr-sdel="${n.id}" aria-label="Supprimer la note">×</button></div>`).join('') : '<p class="note">Aucune note.</p>'}
+    <div class="jr-annot"><input id="jr-secret" maxlength="1000" placeholder="Ex. lui donner une relique au prochain event"><button class="btn sm" id="jr-secret-add">Ajouter</button></div>
+  </details>`;
+}
+function readJr() {
+  if (!jrEdit) return;
+  if ($('jr-t')) jrEdit.title = $('jr-t').value;
+  if ($('jr-x')) jrEdit.text = $('jr-x').value;
+}
+function renderJournal() {
+  if (!S) return;
+  const list = S.journal || [];
+  $('jr-title').textContent = VIEW ? `📓 Carnet de ${S.id?.name || 'ce joueur'}` : '📓 Mon carnet';
+  $('jr-body').innerHTML = `
+    ${VIEW ? jrSecretsHTML() : jrEdit ? jrEditorHTML() : '<div class="form-actions" style="justify-content:flex-start;margin-top:0"><button class="btn" id="jr-new">+ Nouvelle entrée</button></div>'}
+    ${list.length ? list.map(jrEntryHTML).join('') : '<p class="note">Le carnet est vide.</p>'}`;
+}
+journalFab.addEventListener('click', async () => {
+  jrEdit = null;
+  jrSecrets = null;
+  renderJournal();
+  openDialog('d-journal');
+  if (VIEW) {
+    try {
+      jrSecrets = (await API.staff('secret.get', { target: S.uid })).notes;
+    } catch (err) {
+      jrSecrets = [];
+      toast(esc(err.message));
+    }
+    renderJournal();
+  }
+});
+/** Action du staff sur le carnet du joueur consulté (annotations). */
+async function jrStaff(action) {
+  setBusy(1);
+  try {
+    const out = await API.staff('act', { target: S.uid, action });
+    if (out.player) S.journal = out.player.journal;
+    toast(esc(out.toast || 'Enregistré'));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+  renderJournal();
+}
+$('d-journal').addEventListener('click', async (e) => {
+  const t = e.target;
+  const attr = (a) => t.closest(`[${a}]`)?.getAttribute(a);
+  if (t.closest('#jr-new')) {
+    jrEdit = { id: null, title: '', text: '', images: [], preview: false };
+    return renderJournal();
+  }
+  if (attr('data-jr-edit')) {
+    const x = S.journal.find((j) => j.id === Number(attr('data-jr-edit')));
+    jrEdit = { id: x.id, title: x.title, text: x.text, images: [...x.images], preview: false };
+    renderJournal();
+    return $('jr-body').scrollTo?.(0, 0);
+  }
+  if (attr('data-jr-del')) {
+    if (await askConfirm('L’entrée et ses annotations seront supprimées.', { title: 'Supprimer cette entrée ?', ok: 'Supprimer', danger: true })) {
+      await run({ type: 'journal.delete', id: Number(attr('data-jr-del')) });
+      renderJournal();
+    }
+    return;
+  }
+  if (t.closest('#jr-cancel')) {
+    jrEdit = null;
+    return renderJournal();
+  }
+  if (t.closest('#jr-prev')) {
+    readJr();
+    jrEdit.preview = !jrEdit.preview;
+    return renderJournal();
+  }
+  if (t.closest('#jr-pick')) return $('jr-file').click();
+  if (attr('data-jr-rmimg') != null) {
+    readJr();
+    jrEdit.images.splice(+attr('data-jr-rmimg'), 1);
+    return renderJournal();
+  }
+  if (t.closest('#jr-save')) {
+    readJr();
+    const d = jrEdit;
+    $('jr-save').disabled = true;
+    const out = await run({ type: 'journal.save', id: d.id ?? undefined, title: d.title.trim(), text: d.text.trim(), images: d.images });
+    if (out) jrEdit = null;
+    return renderJournal();
+  }
+  // Staff : réactions rapides, émoji au choix, annotations, notes secrètes
+  if (attr('data-jr-emo')) return jrStaff({ type: 'journal.note', id: Number(attr('data-jr-emo')), emoji: t.closest('[data-emo]').dataset.emo, text: '' });
+  if (attr('data-jr-send')) {
+    const id = Number(attr('data-jr-send'));
+    const text = document.querySelector(`[data-jr-txt="${id}"]`)?.value.trim() || '';
+    const emoji = document.querySelector(`[data-jr-emoin="${id}"]`)?.value.trim() || '';
+    if (!text && !emoji) return void toast('Mets un émoji, une annotation, ou les deux.');
+    return jrStaff({ type: 'journal.note', id, text, emoji });
+  }
+  if (attr('data-jr-ndel')) {
+    const [id, nid] = attr('data-jr-ndel').split(':').map(Number);
+    return jrStaff({ type: 'journal.note.delete', id, nid });
+  }
+  if (t.closest('#jr-secret-add') || attr('data-jr-sdel')) {
+    const add = !!t.closest('#jr-secret-add');
+    const text = $('jr-secret')?.value.trim();
+    if (add && !text) return void toast('Écris une note.');
+    setBusy(1);
+    try {
+      const out = await API.staff(add ? 'secret.add' : 'secret.delete', add ? { target: S.uid, text } : { target: S.uid, id: Number(attr('data-jr-sdel')) });
+      jrSecrets = out.notes;
+      toast(esc(out.toast));
+    } catch (err) {
+      toast(esc(err.message));
+    } finally {
+      setBusy(-1);
+    }
+    return renderJournal();
+  }
+});
+$('d-journal').addEventListener('change', async (e) => {
+  if (e.target.id !== 'jr-file' || !jrEdit) return;
+  readJr();
+  for (const f of [...e.target.files].filter((x) => x.type.startsWith('image/'))) {
+    if (jrEdit.images.length >= 4) break;
+    jrEdit.images.push(await readImage(f, { max: 1200, maxBytes: 700 * 1024 }));
+  }
+  renderJournal();
+});
+
 /* ═══ Commerce entre joueurs (bouton flottant) ═══════════════════════════ */
 const tradeFab = document.createElement('button');
 tradeFab.type = 'button';

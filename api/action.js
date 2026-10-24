@@ -120,6 +120,66 @@ export default handler(['POST'], async (req, body) => {
   if (action.type === 'journal.save' && Array.isArray(action.images)) action.images = await Promise.all(action.images.slice(0, 4).map((u) => ingest(u, 'carnets', me.uid)));
   // Nouveautés en test (cuisine, commerce) : réservées aux testeurs
   need(!GM.betaAction(action.type) || GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+  // Sondage : votes rapides (podium, médaille), sans recharger toute la galerie
+  if (action.type === 'poll.vote' || action.type === 'poll.medal') {
+    need(GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+    const first = await read('meta', 'poll:current');
+    if (!first?.data?.deadline || first.data.deadline <= Date.now()) await pollState(Date.now());
+    const today = GM.parisDay();
+    const look = async (cat, id) => {
+      if (cat === 'personnage') {
+        need(id !== me.uid, 400, 'Tu ne peux pas voter pour toi.');
+        const p = await read('players', id);
+        need(p, 404, 'Ce personnage n’existe plus.');
+        return fullName(p.data);
+      }
+      const c = await read('crews', id);
+      need(c, 404, 'Ce groupe n’existe plus.');
+      const cr = normalizeCrew(c.data);
+      need((cat === 'escouade') === (cr.kind === 'flotte'), 400, 'Ce groupe n’est pas dans cette catégorie.');
+      need(!cr.members.includes(me.uid), 400, 'Tu ne peux pas voter pour ton propre groupe.');
+      return cr.name;
+    };
+    let toast;
+    if (action.type === 'poll.vote') {
+      const cat = String(action.cat || '');
+      need(GM.POLL_CATS[cat], 400, 'Catégorie inconnue.');
+      const list = [...new Set((Array.isArray(action.list) ? action.list : []).map(String))].slice(0, 3);
+      const names = await Promise.all(list.map((id) => look(cat, id)));
+      await retry(async () => {
+        const row = await read('meta', 'poll:current');
+        const cur = row.data;
+        cur.votes = { ...(cur.votes || {}), [me.uid]: { ...(cur.votes?.[me.uid] || {}), [cat]: list } };
+        await write('meta', 'poll:current', cur, row.version);
+      });
+      toast = names.length ? `🏆 Ton podium : ${names.map((n, i) => `${['🥇', '🥈', '🥉'][i]} ${n}`).join(' · ')}` : '🏆 Ton podium est vide';
+    } else {
+      const id = action.id == null ? null : String(action.id);
+      const name = id ? await look('personnage', id) : null;
+      await retry(async () => {
+        const row = await read('meta', 'poll:current');
+        const cur = row.data;
+        const days = { ...(cur.medals?.[me.uid] || {}) };
+        if (id) days[today] = id;
+        else delete days[today];
+        cur.medals = { ...(cur.medals || {}), [me.uid]: days };
+        await write('meta', 'poll:current', cur, row.version);
+      });
+      toast = id ? `🏅 Médaille du jour : ${name} (+1 pt)` : '🏅 Médaille du jour retirée';
+    }
+    const cur = (await read('meta', 'poll:current')).data;
+    return {
+      toast,
+      poll: {
+        mine: Object.fromEntries(Object.keys(GM.POLL_CATS).map((k) => {
+          const v = cur.votes?.[me.uid]?.[k];
+          return [k, Array.isArray(v) ? v : v ? [v] : []];
+        })),
+        medal: cur.medals?.[me.uid]?.[today] || null,
+        voters: Object.keys(cur.votes || {}).length,
+      },
+    };
+  }
   // Sondage de popularité (en test, réservé aux testeurs)
   if (action.type === 'poll.get' || action.type === 'poll.vote' || action.type === 'poll.medal') {
     need(GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');

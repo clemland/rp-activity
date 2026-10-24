@@ -2168,7 +2168,76 @@ const pollLeft = () => {
 const pollImg = (c, cat) => (c.img ? `<img src="${imgSrc(c.img)}" alt="" loading="lazy">` : `<span class="pl-noimg">${cat === 'personnage' ? '👤' : cat === 'escouade' ? '⚓' : '🏴‍☠️'}</span>`);
 const POLL_MED = ['🥇', '🥈', '🥉'];
 const ptsLabel = (x) => `${x.votes} pt${x.votes > 1 ? 's' : ''}${x.medals ? ` · 🏅 ${x.medals}` : ''}`;
+/* Galerie du sondage : deux modes bien séparés pour les personnages (podium de la semaine / médaille du jour) */
+let pollMode = 'podium';
 function pollGalleryHTML() {
+  return pollGallery2();
+}
+function pollGallery2() {
+  const cat = pollTab, mine = POLL.mine[cat] || [], PTS = G.POLL_POINTS;
+  const cands = POLL.cands[cat] || [];
+  const q = normTxt(pollQ.trim());
+  const list = cands.filter((c) => !q || normTxt(`${c.name} ${c.sub}`).includes(q));
+  const own = (c) => (cat === 'personnage' ? c.id === S.uid : c.id === S.crewId);
+  const nameOf = (id) => cands.find((c) => c.id === id)?.name || '?';
+  const medalMode = cat === 'personnage' && pollMode === 'medal';
+  const modes = cat === 'personnage'
+    ? `<div class="pl-modes" role="tablist">
+        <button type="button" role="tab" class="pl-mode ${medalMode ? '' : 'on'}" data-pl-mode="podium" aria-selected="${!medalMode}">🏆 Podium de la semaine<small>🥇 7 · 🥈 4 · 🥉 2 pts · jusqu’à dimanche 20 h</small></button>
+        <button type="button" role="tab" class="pl-mode medal ${medalMode ? 'on' : ''}" data-pl-mode="medal" aria-selected="${medalMode}">🏅 Médaille du jour<small>1 pt · modifiable jusqu’à minuit</small></button>
+      </div>`
+    : '';
+  const banner = medalMode
+    ? `<div class="pl-banner medal">${POLL.medal ? `🏅 Ta médaille du jour : <b>${esc(nameOf(POLL.medal))}</b> <button type="button" class="btn sm ghost" data-pl-unmedal>Retirer</button>` : '🏅 Clique sur la carte du personnage qui t’a le plus marqué <b>aujourd’hui</b>.'}</div>`
+    : `<div class="pl-banner"><b>🏆 Ton podium de la semaine</b>
+        <div class="pl-mypod">${[0, 1, 2].map((i) => (mine[i]
+          ? `<span class="pl-slot">${POLL_MED[i]} <b>${esc(nameOf(mine[i]))}</b> <small>${PTS[i]} pts</small><button type="button" class="close sm-close" data-pl-unpick="${esc(mine[i])}" aria-label="Retirer">×</button></span>`
+          : `<span class="pl-slot empty">${POLL_MED[i]} <small>libre · ${PTS[i]} pts</small></span>`)).join('')}</div>
+        <small class="note">Clique sur une carte pour la mettre à la première place libre ; clique à nouveau pour la retirer.</small></div>`;
+  return `${modes}${banner}
+    <div class="mj-row"><input type="search" id="pl-q" placeholder="Rechercher…" value="${esc(pollQ)}" aria-label="Rechercher"></div>
+    ${list.length ? `<div class="pl-gallery">${list.map((c) => {
+      const i = mine.indexOf(c.id), med = cat === 'personnage' && POLL.medal === c.id;
+      const on = medalMode ? (med ? 'on medal' : '') : i >= 0 ? 'on' : '';
+      return `<button type="button" class="pl-card ${on}" data-pl-pick="${esc(c.id)}" ${own(c) ? 'disabled title="Tu ne peux pas voter pour toi ni pour ton groupe"' : ''}>
+        <span class="pl-pic">${pollImg(c, cat)}</span><b>${esc(c.name)}</b>${c.sub ? `<small>${esc(c.sub)}</small>` : ''}
+        ${i >= 0 ? `<span class="pl-mine">${POLL_MED[i]} ${PTS[i]} pts</span>` : ''}${med ? '<span class="pl-medal-tag" title="Ta médaille du jour">🏅</span>' : ''}</button>`;
+    }).join('')}</div>` : '<p class="note">Aucun choix.</p>'}`;
+}
+/** Vote affiché tout de suite, puis envoyé ; annulé si le serveur refuse. */
+async function pollSend(action, apply, undo) {
+  apply();
+  renderPoll();
+  const out = await run(action);
+  if (!out) {
+    undo();
+    return renderPoll();
+  }
+  if (out.poll) Object.assign(POLL, out.poll);
+  renderPoll();
+}
+$('d-poll').addEventListener('click', (e) => {
+  const mode = e.target.closest('[data-pl-mode]')?.dataset.plMode;
+  if (mode) {
+    pollMode = mode;
+    return renderPoll();
+  }
+  const pick = e.target.closest('[data-pl-pick]')?.dataset.plPick;
+  const unpick = e.target.closest('[data-pl-unpick]')?.dataset.plUnpick;
+  if (e.target.closest('[data-pl-unmedal]') || (pick && pollTab === 'personnage' && pollMode === 'medal')) {
+    const prev = POLL.medal, next = pick && prev !== pick ? pick : null;
+    return void pollSend({ type: 'poll.medal', id: next }, () => (POLL.medal = next), () => (POLL.medal = prev));
+  }
+  if (pick || unpick) {
+    const cat = pollTab, prev = [...(POLL.mine[cat] || [])], id = pick || unpick;
+    let next;
+    if (prev.includes(id)) next = prev.filter((x) => x !== id);
+    else if (prev.length >= 3) return void toast('Ton podium est complet : retire d’abord un choix (×).');
+    else next = [...prev, id];
+    pollSend({ type: 'poll.vote', cat, list: next }, () => (POLL.mine[cat] = next), () => (POLL.mine[cat] = prev));
+  }
+});
+function pollGalleryOld() {
   const cat = pollTab, mine = POLL.mine[cat] || [], PTS = G.POLL_POINTS;
   const cands = POLL.cands[cat] || [];
   const q = normTxt(pollQ.trim());

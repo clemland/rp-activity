@@ -2196,7 +2196,7 @@ function pollGallery2() {
         <small class="note">Clique sur une carte pour la mettre à la première place libre ; clique à nouveau pour la retirer.</small></div>`;
   return `${modes}${banner}
     <div class="mj-row"><input type="search" id="pl-q" placeholder="Rechercher…" value="${esc(pollQ)}" aria-label="Rechercher"></div>
-    ${list.length ? `<div class="pl-gallery">${list.map((c) => {
+    ${list.length ? `<div class="pl-gallery ${cat !== 'personnage' ? 'flags' : ''}">${list.map((c) => {
       const i = mine.indexOf(c.id), med = cat === 'personnage' && POLL.medal === c.id;
       const on = medalMode ? (med ? 'on medal' : '') : i >= 0 ? 'on' : '';
       return `<button type="button" class="pl-card ${on}" data-pl-pick="${esc(c.id)}" ${own(c) ? 'disabled title="Tu ne peux pas voter pour toi ni pour ton groupe"' : ''}>
@@ -2280,7 +2280,8 @@ function pollResultsHTML(last, anim) {
     };
     const p3 = step(2), p2 = step(1), p1 = step(0); // ordre d'apparition : 3e, 2e, puis 1er
     t += 1.5;
-    return `<h3 class="ed-h">${label}</h3><div class="pl-podium">${p2}${p1}${p3}</div>${rows.length ? `<div class="pl-rest">${rows.reverse().join('')}</div>` : ''}`;
+    const fl = cat !== 'personnage' ? ' pl-flags' : ''; // logos d'équipage et d'escouade : carrés, sans fond
+    return `<h3 class="ed-h">${label}</h3><div class="pl-podium${fl}">${p2}${p1}${p3}</div>${rows.length ? `<div class="pl-rest${fl}">${rows.reverse().join('')}</div>` : ''}`;
   }).join('');
   return `<p class="note">Semaine terminée le ${jrDate(last.week)} · ${last.voters} votant${last.voters > 1 ? 's' : ''}</p>${html}`;
 }

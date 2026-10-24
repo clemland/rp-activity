@@ -945,15 +945,21 @@ function toolsHTML(r, store = NAVD?.aboard) {
 let kitchenRecs = {};
 function renderJob() {
   kitchenRecs = {};
-  for (const [k, r] of Object.entries(G.RECIPES)) {
-    if (!r.kitchen) continue;
-    kitchenRecs[k] = r;
-    delete G.RECIPES[k];
+  try {
+    for (const [k, r] of Object.entries(G.RECIPES)) {
+      if (!r?.kitchen) continue;
+      kitchenRecs[k] = r;
+      delete G.RECIPES[k];
+    }
+  } catch {
+    // le catalogue ne se laisse pas modifier : les recettes de base restent aussi dans l'onglet Métier
   }
   try {
     return renderJobInner();
   } finally {
-    Object.assign(G.RECIPES, kitchenRecs);
+    try {
+      Object.assign(G.RECIPES, kitchenRecs);
+    } catch {}
   }
 }
 function kitchenHTML() {

@@ -6,6 +6,20 @@ import { DiscordSDK } from '@discord/embedded-app-sdk';
 
 export const inDiscord = () => new URLSearchParams(location.search).has('frame_id');
 
+// Erreur de l’app : affichée à l’écran (sinon le chargement tourne sans fin, sans rien dire)
+function showFatal(msg) {
+  let box = document.getElementById('fatal-err');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'fatal-err';
+    box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#fff3f0;color:#8e130d;border:3px solid #8e130d;border-radius:10px;padding:10px 14px;font:14px/1.4 monospace;white-space:pre-wrap;max-height:45vh;overflow:auto';
+    document.body.appendChild(box);
+  }
+  box.textContent = `⚠️ Erreur de l’app (envoie ce message) :\n${msg}`.slice(0, 2000);
+}
+window.addEventListener('error', (e) => showFatal(`${e.message}\n${e.filename?.split('/').pop() || ''}:${e.lineno || ''}\n${e.error?.stack || ''}`));
+window.addEventListener('unhandledrejection', (e) => showFatal(`${e.reason?.message || e.reason}\n${e.reason?.stack || ''}`));
+
 // Hors Discord : plus de démo, on invite simplement à ouvrir l'app depuis Discord
 if (!inDiscord()) {
   document.body.innerHTML = `<main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Georgia,'Times New Roman',serif;background:#17255e">

@@ -46,6 +46,52 @@ async function dockOptions(isl) {
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
+/* ═══ Sondage de popularité ═══════════════════════════════════════════════ */
+/** Tous les choix possibles : personnages, équipages et escouades. */
+async function pollCandidates() {
+  const [players, crews] = await Promise.all([readAll('players'), readAll('crews')]);
+  const pic = (ph) => (typeof ph === 'string' ? ph : ph?.url) || null;
+  const out = { personnage: [], equipage: [], escouade: [] };
+  for (const [id, c0] of Object.entries(crews)) {
+    const c = normalizeCrew(c0);
+    (c.kind === 'flotte' ? out.escouade : out.equipage).push({ id, name: c.name, img: c.flag || null, sub: `${c.members.length} membre${c.members.length > 1 ? 's' : ''}`, members: c.members });
+  }
+  for (const [uid, p] of Object.entries(players)) out.personnage.push({ id: uid, name: fullName(p), img: pic(p.photo), sub: [p.id?.faction, p.id?.crew].filter(Boolean).join(' · ') });
+  for (const k of Object.keys(out)) out[k].sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+/** Semaine en cours ; si le dimanche 20 h est passé, on calcule et archive les résultats puis on ouvre la semaine suivante. */
+async function pollState(now = Date.now()) {
+  return retry(async () => {
+    const row = await read('meta', 'poll:current');
+    let cur = row?.data;
+    if (cur?.deadline > now) return cur;
+    if (cur?.deadline) {
+      const hrow = await read('meta', 'poll:history');
+      const hist = hrow?.data?.list || [];
+      if (hist[0]?.week !== cur.deadline) {
+        const cands = await pollCandidates();
+        const results = {};
+        for (const cat of Object.keys(GM.POLL_CATS)) {
+          const tally = GM.pollTally(cur, cat);
+          results[cat] = Object.entries(tally)
+            .map(([id, t]) => {
+              const c = cands[cat].find((x) => x.id === id);
+              return c ? { id, name: c.name, img: c.img, sub: c.sub, votes: t.pts, medals: t.medals } : null;
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.votes - a.votes || a.name.localeCompare(b.name))
+            .slice(0, 10);
+        }
+        await write('meta', 'poll:history', { list: [{ week: cur.deadline, voters: Object.keys(cur.votes || {}).length, results }, ...hist].slice(0, 30) }, hrow?.version ?? null);
+      }
+    }
+    cur = { deadline: GM.nextReveal(now), votes: {}, medals: {} };
+    await write('meta', 'poll:current', cur, row?.version ?? null);
+    return cur;
+  });
+}
+
 /** Bateau où le joueur est à bord (sa cale sert aux fabrications) : { id, ship, version } ou null. */
 async function aboardShip(uid) {
   for (const [id, s] of Object.entries(await readAll('ships'))) {
@@ -74,6 +120,66 @@ export default handler(['POST'], async (req, body) => {
   if (action.type === 'journal.save' && Array.isArray(action.images)) action.images = await Promise.all(action.images.slice(0, 4).map((u) => ingest(u, 'carnets', me.uid)));
   // Nouveautés en test (cuisine, commerce) : réservées aux testeurs
   need(!GM.betaAction(action.type) || GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+  // Sondage de popularité (en test, réservé aux testeurs)
+  if (action.type === 'poll.get' || action.type === 'poll.vote' || action.type === 'poll.medal') {
+    need(GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+    await pollState(Date.now());
+    const cands = await pollCandidates();
+    const today = GM.parisDay();
+    let toast;
+    const check = (cat, id) => {
+      const c = cands[cat].find((x) => x.id === id);
+      need(c, 404, 'Ce choix n’existe plus.');
+      need(!(cat === 'personnage' && id === me.uid), 400, 'Tu ne peux pas voter pour toi.');
+      need(!(c.members || []).includes(me.uid), 400, 'Tu ne peux pas voter pour ton propre groupe.');
+    };
+    if (action.type === 'poll.vote') {
+      // Podium personnel : jusqu'à 3 choix dans l'ordre (🥇 7, 🥈 4, 🥉 2 points)
+      const cat = String(action.cat || '');
+      need(GM.POLL_CATS[cat], 400, 'Catégorie inconnue.');
+      const list = [...new Set((Array.isArray(action.list) ? action.list : []).map(String))].slice(0, 3);
+      list.forEach((id) => check(cat, id));
+      await retry(async () => {
+        const row = await read('meta', 'poll:current');
+        const cur = row.data;
+        cur.votes = { ...(cur.votes || {}), [me.uid]: { ...(cur.votes?.[me.uid] || {}), [cat]: list } };
+        await write('meta', 'poll:current', cur, row.version);
+      });
+      toast = 'Podium enregistré';
+    }
+    if (action.type === 'poll.medal') {
+      // Médaille du jour : 1 point à un personnage, modifiable jusqu'à minuit (heure de Paris) ; les jours passés restent acquis
+      const id = action.id == null ? null : String(action.id);
+      if (id) check('personnage', id);
+      await retry(async () => {
+        const row = await read('meta', 'poll:current');
+        const cur = row.data;
+        const days = { ...(cur.medals?.[me.uid] || {}) };
+        if (id) days[today] = id;
+        else delete days[today];
+        cur.medals = { ...(cur.medals || {}), [me.uid]: days };
+        await write('meta', 'poll:current', cur, row.version);
+      });
+      toast = id ? `🏅 Médaille du jour donnée à ${cands.personnage.find((x) => x.id === id)?.name || 'ce joueur'}` : 'Médaille du jour retirée';
+    }
+    const cur = (await read('meta', 'poll:current')).data;
+    const hist = (await read('meta', 'poll:history'))?.data?.list || [];
+    const strip = (l) => l.map(({ members, ...x }) => x);
+    return {
+      toast,
+      poll: {
+        deadline: cur.deadline,
+        mine: Object.fromEntries(Object.keys(GM.POLL_CATS).map((k) => {
+          const v = cur.votes?.[me.uid]?.[k];
+          return [k, Array.isArray(v) ? v : v ? [v] : []];
+        })),
+        medal: cur.medals?.[me.uid]?.[today] || null,
+        voters: Object.keys(cur.votes || {}).length,
+        cands: Object.fromEntries(Object.entries(cands).map(([k, l]) => [k, strip(l)])),
+        last: hist[0] || null,
+      },
+    };
+  }
   // État des fonctionnalités (l'app masque l'onglet Métier quand les métiers sont désactivés)
   if (action.type === 'features.get') {
     const { map: fm0 } = await loadMap();

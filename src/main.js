@@ -2148,6 +2148,150 @@ $('v-job').addEventListener('click', async (e) => {
   }
 });
 
+/* ═══ Sondage de popularité (bouton flottant ; en test, réservé aux testeurs) ═══ */
+let POLL = null, pollTab = 'personnage', pollQ = '', pollAnim = false;
+const pollFab = document.createElement('button');
+pollFab.type = 'button';
+pollFab.id = 'poll-fab';
+pollFab.hidden = true;
+pollFab.textContent = '⭐ Popularité';
+document.body.append(pollFab);
+setInterval(() => {
+  pollFab.hidden = !S || VIEW || !beta();
+  const l = $('pl-left');
+  if (l && POLL) l.textContent = pollLeft();
+}, 1500);
+const pollLeft = () => {
+  const left = (POLL?.deadline || 0) - Date.now();
+  return left > 0 ? `Reveal dans ${G.duree(left / 1000)}` : 'Reveal imminent';
+};
+const pollImg = (c, cat) => (c.img ? `<img src="${imgSrc(c.img)}" alt="" loading="lazy">` : `<span class="pl-noimg">${cat === 'personnage' ? '👤' : cat === 'escouade' ? '⚓' : '🏴‍☠️'}</span>`);
+const POLL_MED = ['🥇', '🥈', '🥉'];
+const ptsLabel = (x) => `${x.votes} pt${x.votes > 1 ? 's' : ''}${x.medals ? ` · 🏅 ${x.medals}` : ''}`;
+function pollGalleryHTML() {
+  const cat = pollTab, mine = POLL.mine[cat] || [], PTS = G.POLL_POINTS;
+  const cands = POLL.cands[cat] || [];
+  const q = normTxt(pollQ.trim());
+  const list = cands.filter((c) => !q || normTxt(`${c.name} ${c.sub}`).includes(q));
+  const own = (c) => (cat === 'personnage' ? c.id === S.uid : c.id === S.crewId);
+  const nameOf = (id) => cands.find((c) => c.id === id)?.name || '?';
+  const podium = `<div class="pl-mypod">${[0, 1, 2].map((i) => (mine[i]
+    ? `<span class="pl-slot">${POLL_MED[i]} <b>${esc(nameOf(mine[i]))}</b> <small>${PTS[i]} pts</small><button type="button" class="close sm-close" data-pl-rm="${esc(mine[i])}" aria-label="Retirer">×</button></span>`
+    : `<span class="pl-slot empty">${POLL_MED[i]} <small>${PTS[i]} pts · libre</small></span>`)).join('')}</div>`;
+  const medal = cat === 'personnage'
+    ? `<p class="note pl-medal-info">${POLL.medal ? `🏅 Médaille du jour donnée à <b>${esc(nameOf(POLL.medal))}</b>. Tu peux la déplacer jusqu’à minuit ; demain, une nouvelle médaille.` : '🏅 <b>Médaille du jour</b> : donne-la au joueur qui t’a le plus marqué aujourd’hui, avec le bouton 🏅 de sa carte. Elle vaut 1 point, et tu peux la changer jusqu’à minuit.'}</p>`
+    : '';
+  return `${podium}${medal}
+    <p class="note" style="margin:4px 0">Clique sur une carte pour l’ajouter à ton podium (🥇 7 pts, 🥈 4 pts, 🥉 2 pts), et à nouveau pour la retirer. Modifiable jusqu’au reveal.</p>
+    <div class="mj-row"><input type="search" id="pl-q" placeholder="Rechercher…" value="${esc(pollQ)}" aria-label="Rechercher"></div>
+    ${list.length ? `<div class="pl-gallery">${list.map((c) => {
+      const i = mine.indexOf(c.id);
+      return `<div class="pl-cardw"><button type="button" class="pl-card ${i >= 0 ? 'on' : ''}" data-pl-vote="${esc(c.id)}" ${own(c) ? 'disabled title="Tu ne peux pas voter pour toi ni pour ton groupe"' : ''}>
+        <span class="pl-pic">${pollImg(c, cat)}</span><b>${esc(c.name)}</b>${c.sub ? `<small>${esc(c.sub)}</small>` : ''}${i >= 0 ? `<span class="pl-mine">${POLL_MED[i]} ${PTS[i]} pts</span>` : ''}</button>
+        ${cat === 'personnage' && !own(c) ? `<button type="button" class="pl-medal-btn ${POLL.medal === c.id ? 'on' : ''}" data-pl-medal="${esc(c.id)}" title="${POLL.medal === c.id ? 'Retirer ma médaille du jour' : 'Donner ma médaille du jour'}" aria-label="${POLL.medal === c.id ? 'Retirer ma médaille du jour' : `Donner ma médaille du jour à ${esc(c.name)}`}" aria-pressed="${POLL.medal === c.id}">🏅</button>` : ''}</div>`;
+    }).join('')}</div>` : '<p class="note">Aucun choix.</p>'}`;
+}
+function pollResultsHTML(last, anim) {
+  if (!last) return '<p class="note">Pas encore de résultats : le premier reveal aura lieu dimanche à 20 h.</p>';
+  let t = 0; // délai d'apparition (reveal animé)
+  const pop = (d) => (anim ? `pl-pop" style="animation-delay:${d.toFixed(1)}s` : '');
+  const html = Object.entries(G.POLL_CATS).map(([cat, label]) => {
+    const r = last.results?.[cat] || [];
+    if (!r.length) return `<h3 class="ed-h">${label}</h3><p class="note">Aucun vote cette semaine.</p>`;
+    const rest = r.slice(3).map((x, i) => ({ x, rank: i + 4 })).reverse(); // de la 10e à la 4e
+    const rows = rest.map(({ x, rank }) => {
+      t += 0.6;
+      return `<div class="pl-row ${pop(t)}"><span class="pl-rank">${rank}</span><span class="pl-pic sm">${pollImg(x, cat)}</span><b>${esc(x.name)}</b><span class="note">${ptsLabel(x)}</span></div>`;
+    });
+    const step = (i) => {
+      const x = r[i];
+      if (!x) return '<div class="pl-pod empty"></div>';
+      t += i === 0 ? 1.8 : 1;
+      return `<div class="pl-pod p${i + 1} ${pop(t)}">${i === 0 ? `<span class="pl-crown">👑</span>${anim ? '<span class="pl-confetti" aria-hidden="true">🎉✨🎊✨🎉</span>' : ''}` : ''}<span class="pl-pic">${pollImg(x, cat)}</span><span class="pl-medal">${['🥇', '🥈', '🥉'][i]}</span><b>${esc(x.name)}</b><small>${ptsLabel(x)}</small></div>`;
+    };
+    const p3 = step(2), p2 = step(1), p1 = step(0); // ordre d'apparition : 3e, 2e, puis 1er
+    t += 1.5;
+    return `<h3 class="ed-h">${label}</h3><div class="pl-podium">${p2}${p1}${p3}</div>${rows.length ? `<div class="pl-rest">${rows.reverse().join('')}</div>` : ''}`;
+  }).join('');
+  return `<p class="note">Semaine terminée le ${jrDate(last.week)} · ${last.voters} votant${last.voters > 1 ? 's' : ''}</p>${html}`;
+}
+function renderPoll() {
+  const el = $('pl-body');
+  if (!POLL) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const tabs = [...Object.entries(G.POLL_CATS), ['results', '🏆 Résultats']];
+  el.innerHTML = `
+    <div class="pl-head"><b id="pl-left">${pollLeft()}</b><span class="note">dimanche 20 h · ${POLL.voters} votant${POLL.voters > 1 ? 's' : ''} cette semaine</span></div>
+    <div class="job-switch" role="tablist">${tabs.map(([k, l]) => `<button type="button" role="tab" class="${pollTab === k ? 'on' : ''}" aria-selected="${pollTab === k}" data-pl-tab="${k}">${l}</button>`).join('')}</div>
+    ${pollTab === 'results'
+      ? `${POLL.last ? '<div class="form-actions" style="justify-content:flex-start;margin-top:0"><button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button></div>' : ''}${pollResultsHTML(POLL.last, pollAnim)}`
+      : pollGalleryHTML()}`;
+  pollAnim = false;
+}
+async function loadPoll() {
+  const out = await run({ type: 'poll.get' });
+  if (!out?.poll) return;
+  POLL = out.poll;
+  // Nouveau reveal pas encore vu : on le joue une fois
+  let seen = 0;
+  try {
+    seen = +localStorage.getItem('pollSeen') || 0;
+  } catch {}
+  if (POLL.last && POLL.last.week > seen) {
+    pollTab = 'results';
+    pollAnim = true;
+    try {
+      localStorage.setItem('pollSeen', String(POLL.last.week));
+    } catch {}
+  }
+  renderPoll();
+}
+pollFab.addEventListener('click', () => {
+  POLL = null;
+  renderPoll();
+  openDialog('d-poll');
+  loadPoll();
+});
+$('d-poll').addEventListener('click', async (e) => {
+  const tab = e.target.closest('[data-pl-tab]')?.dataset.plTab;
+  if (tab) {
+    pollTab = tab;
+    pollQ = '';
+    return renderPoll();
+  }
+  if (e.target.closest('#pl-replay')) {
+    pollAnim = true;
+    return renderPoll();
+  }
+  // Podium personnel : un clic ajoute à la première place libre, un nouveau clic retire
+  const vote = e.target.closest('[data-pl-vote]')?.dataset.plVote, rm = e.target.closest('[data-pl-rm]')?.dataset.plRm;
+  if (vote || rm) {
+    const cur = [...(POLL.mine[pollTab] || [])];
+    const id = vote || rm;
+    let list;
+    if (cur.includes(id)) list = cur.filter((x) => x !== id);
+    else if (cur.length >= 3) return void toast('Ton podium est complet : retire d’abord un choix.');
+    else list = [...cur, id];
+    const out = await run({ type: 'poll.vote', cat: pollTab, list });
+    if (out?.poll) POLL = out.poll;
+    return renderPoll();
+  }
+  // Médaille du jour (1 point) : déplacée ou retirée librement jusqu'à minuit
+  const med = e.target.closest('[data-pl-medal]')?.dataset.plMedal;
+  if (med) {
+    const out = await run({ type: 'poll.medal', id: POLL.medal === med ? null : med });
+    if (out?.poll) POLL = out.poll;
+    renderPoll();
+  }
+});
+$('d-poll').addEventListener('input', (e) => {
+  if (e.target.id !== 'pl-q') return;
+  pollQ = e.target.value;
+  renderPoll();
+  const q = $('pl-q');
+  q?.focus();
+  q?.setSelectionRange(q.value.length, q.value.length);
+});
+
 /* ═══ Carnet de suivi (bouton flottant ; en test, réservé aux testeurs) ═══ */
 /** Markdown simple et sûr (le texte est échappé avant la mise en forme). */
 function md(src) {

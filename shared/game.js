@@ -165,6 +165,37 @@ function setCooldown(p, key, seconds, now) {
   if (!(seconds > 0)) return;
   p.cooldowns = { ...(p.cooldowns || {}), [key]: now + Math.round(seconds * 1000) };
 }
+/* ═══ Sondage de popularité : un vote par catégorie, reveal chaque dimanche à 20 h (heure de Paris) ═══ */
+export const POLL_CATS = { personnage: '🌟 Personnage', equipage: '🏴‍☠️ Équipage', escouade: '⚓ Escouade' };
+function parisOffset(t) {
+  const d = new Date(t);
+  return new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Paris' })) - new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+}
+/** Prochain dimanche 20 h, heure de Paris (horodatage). */
+export function nextReveal(now = Date.now()) {
+  const off = parisOffset(now);
+  const d = new Date(now + off);
+  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + ((7 - d.getUTCDay()) % 7), 20, 0, 0));
+  if (target.getTime() <= d.getTime()) target.setUTCDate(target.getUTCDate() + 7);
+  return target.getTime() - off;
+}
+/** Podium personnel : 🥇 7 points, 🥈 4, 🥉 2 ; médaille du jour : 1 point (personnages). */
+export const POLL_POINTS = [7, 4, 2];
+export const parisDay = (t = Date.now()) => new Date(t + parisOffset(t)).toISOString().slice(0, 10);
+export function pollTally(cur, cat) {
+  const t = {};
+  const add = (id, pts, medal = 0) => {
+    t[id] ??= { pts: 0, medals: 0 };
+    t[id].pts += pts;
+    t[id].medals += medal;
+  };
+  for (const v of Object.values(cur.votes || {})) {
+    const l = Array.isArray(v?.[cat]) ? v[cat] : v?.[cat] ? [v[cat]] : [];
+    l.slice(0, 3).forEach((id, i) => id && add(id, POLL_POINTS[i]));
+  }
+  if (cat === 'personnage') for (const days of Object.values(cur.medals || {})) for (const id of Object.values(days || {})) add(id, 1, 1);
+  return t;
+}
 /** Testeurs des nouveautés pas encore ouvertes à tous (cuisine, commerce). */
 export const BETA_USERS = ['464061688069488640'];
 export const isBeta = (uid) => BETA_USERS.includes(String(uid));

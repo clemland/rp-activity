@@ -1527,6 +1527,48 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .job-switch{display:flex;gap:6px;margin:0 0 14px;border-bottom:3px solid var(--ink)}
 .job-switch button{font:inherit;font-weight:800;font-size:16px;background:#efe3c4;color:var(--brown);border:3px solid var(--ink);border-bottom:none;border-radius:10px 10px 0 0;padding:6px 16px;cursor:pointer;margin-bottom:-3px}
 .job-switch button.on{background:var(--paper,#f3e3bb);color:var(--ink)}
+/* ═══ Sondage de popularité ═══ */
+#poll-fab{position:fixed;left:14px;bottom:114px;z-index:40;font:inherit;font-weight:800;background:#ffe08a;color:var(--ink);border:3px solid var(--ink);border-radius:999px;padding:8px 14px;box-shadow:0 4px 0 rgba(0,0,0,.3);cursor:pointer}
+#poll-fab[hidden]{display:none}
+.pl-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px}
+#pl-q{width:100%;max-width:360px;font:inherit;font-size:15px;padding:5px 10px;border:2px solid var(--ink);border-radius:6px;background:#fff}
+.pl-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:10px}
+.pl-card{position:relative;display:grid;gap:3px;justify-items:center;text-align:center;font:inherit;background:var(--card);color:var(--brown);border:3px solid var(--ink);border-radius:12px;padding:8px 6px 10px;cursor:pointer;transition:transform .12s,box-shadow .12s}
+.pl-card:hover:not(:disabled){transform:translateY(-3px);box-shadow:0 5px 0 rgba(0,0,0,.25)}
+.pl-card.on{border-color:var(--gold);background:#fff3cf;box-shadow:0 0 0 3px var(--gold),0 0 16px rgba(230,162,35,.7)}
+.pl-card:disabled{filter:grayscale(1);opacity:.55;cursor:not-allowed}
+.pl-card b{font-size:15px;line-height:1.15}
+.pl-card small{font-size:12px;color:var(--muted)}
+.pl-pic{display:grid;place-items:center;width:100%;aspect-ratio:4/5;border-radius:8px;overflow:hidden;background:#2a5fb8;border:2px solid var(--ink)}
+.pl-pic img{width:100%;height:100%;object-fit:cover}
+.pl-pic.sm{width:42px;flex:0 0 42px;aspect-ratio:1}
+.pl-noimg{font-size:40px}
+.pl-pic.sm .pl-noimg{font-size:20px}
+.pl-mine{position:absolute;top:6px;left:50%;transform:translateX(-50%);background:var(--gold);color:var(--ink);font-size:12px;font-weight:800;border-radius:999px;padding:1px 8px;border:2px solid var(--ink);white-space:nowrap}
+.pl-mypod{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.pl-slot{display:flex;gap:6px;align-items:center;background:#fff3cf;border:2px solid var(--gold);border-radius:999px;padding:3px 6px 3px 10px}
+.pl-slot.empty{background:transparent;border-style:dashed;border-color:rgba(23,37,94,.35);padding-right:10px}
+.pl-medal-info{background:#fffaea;border:2px dashed var(--gold);border-radius:8px;padding:6px 10px;margin:6px 0}
+.pl-cardw{position:relative;display:grid}
+.pl-medal-btn{position:absolute;top:6px;right:6px;z-index:2;font-size:18px;line-height:1;background:#fffaea;border:2px solid var(--ink);border-radius:999px;padding:3px 5px;cursor:pointer;box-shadow:0 2px 0 rgba(0,0,0,.25)}
+.pl-medal-btn:hover{transform:scale(1.12)}
+.pl-medal-btn.on{background:var(--gold);transform:scale(1.18);box-shadow:0 0 10px rgba(230,162,35,.8)}
+.pl-medal-on{position:absolute;top:4px;right:8px;z-index:2;font-size:24px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
+.pl-podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:end;margin:10px 0}
+.pl-pod{position:relative;display:grid;gap:3px;justify-items:center;text-align:center;background:var(--card);border:3px solid var(--ink);border-radius:12px;padding:8px}
+.pl-pod.p1{background:#fff3cf;border-color:var(--gold);box-shadow:0 0 18px rgba(230,162,35,.6);padding-top:18px}
+.pl-pod.p2 .pl-pic,.pl-pod.p3 .pl-pic{width:80%}
+.pl-pod.empty{visibility:hidden}
+.pl-medal{font-size:28px;line-height:1}
+.pl-crown{position:absolute;top:-22px;font-size:34px}
+.pl-confetti{position:absolute;top:-34px;font-size:22px;letter-spacing:4px;animation:pl-burst 1.6s ease-out both;animation-delay:inherit;pointer-events:none}
+.pl-rest{display:grid;gap:6px;margin-bottom:12px}
+.pl-row{display:flex;gap:10px;align-items:center;background:var(--card);border:2px solid var(--ink);border-radius:8px;padding:4px 10px}
+.pl-row b{flex:1}
+.pl-rank{font-weight:800;font-size:18px;width:26px;text-align:center}
+.pl-pop{animation:pl-pop .5s cubic-bezier(.2,1.4,.4,1) both}
+@keyframes pl-pop{from{opacity:0;transform:translateY(16px) scale(.8)}to{opacity:1;transform:none}}
+@keyframes pl-burst{0%{opacity:0;transform:translateY(10px) scale(.6)}30%{opacity:1}100%{opacity:0;transform:translateY(-30px) scale(1.3)}}
 /* ═══ Carnet de suivi ═══ */
 #journal-fab{position:fixed;left:14px;bottom:64px;z-index:40;font:inherit;font-weight:800;background:#fffaea;color:var(--ink);border:3px solid var(--ink);border-radius:999px;padding:8px 14px;box-shadow:0 4px 0 rgba(0,0,0,.3);cursor:pointer}
 #journal-fab[hidden]{display:none}

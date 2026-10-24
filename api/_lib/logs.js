@@ -4,7 +4,7 @@
  */
 import { env } from './env.js';
 
-const QUIET_ACTIONS = new Set(['features.get', 'players.here', 'shop.list', 'ship.dock.options', 'inv.move']);
+const QUIET_ACTIONS = new Set(['features.get', 'players.here', 'shop.list', 'ship.dock.options', 'inv.move', 'poll.get']);
 const BOT_OPS = ['register', 'delete', 'rp.channel.add', 'rp.channel.remove', 'ships.config.set', 'ship.channel.set', 'ship.channel.deleted'];
 const clean = (s) => String(s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 300);
 

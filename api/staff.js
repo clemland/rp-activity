@@ -599,6 +599,35 @@ export default handler(['POST'], async (req, body) => {
         'produit-laitier': [150, 1], agrumes: [150, 0.5], champignons: [150, 0.3], 'poisson-cru': [300, 1], 'viande-crue': [400, 1], crustaces: [500, 0.8],
         barque: [60000, 0], caravelle: [800000, 0], goelette: [1500000, 0], gallion: [5000000, 0], striker: [10000000, 0], cuirasse: [15000000, 0],
       };
+      // Descriptions : seulement pour les objets qui n'en ont pas (ou presque pas)
+      const D = {
+        arc: 'Arc en bois souple et corde tressée. Silencieux et léger, il demande un œil sûr : l’arme des chasseurs et des tireurs discrets.',
+        revolver: 'Revolver à barillet de six coups, compact et fiable. Il se dégaine en un éclair, idéal pour les duels rapprochés.',
+        massue: 'Énorme gourdin de bois cerclé de fer. Lent à manier, mais chaque coup peut briser des os et des boucliers.',
+        caravelle: 'Navire léger à deux mâts, maniable et rapide. Parfait pour un jeune équipage qui veut quitter East Blue.',
+        goelette: 'Voilier élancé, plus spacieux qu’une caravelle et rapide par vent de travers. Les contrebandiers l’adorent.',
+        gallion: 'Imposant navire de haute mer à plusieurs ponts. Lent mais robuste, sa cale immense peut transporter de véritables trésors.',
+        cuirasse: 'Bâtiment de guerre blindé, capable d’embarquer une trentaine de marins. Une forteresse flottante, lourde à manœuvrer.',
+        'bout-de-bois': 'Planche de bois ordinaire, taillée dans les forêts d’East Blue. La base de toute coque et de toute réparation.',
+        'bois-robuste': 'Planche de chêne dense et traitée. Elle encaisse les tempêtes et les boulets : deux fois plus solide que le bois ordinaire.',
+        'bois-de-deul': 'Bois rare et sombre, d’une résistance exceptionnelle. On dit qu’il ne pourrit jamais, même après des années en mer.',
+        'bois-d-adam': 'Bois légendaire de l’arbre d’Adam, presque indestructible. Seuls les plus grands charpentiers savent le travailler.',
+        'poisson-cru': 'Poisson frais pêché du matin. À cuisiner vite, avant que le soleil ne s’en charge.',
+        'viande-crue': 'Belle pièce de viande crue. De quoi rassasier même le plus affamé des capitaines.',
+        crustaces: 'Crabes, crevettes et homards fraîchement pêchés. Un délice, pour qui sait les cuisiner.',
+        agrumes: 'Oranges, citrons et mandarines. Indispensables en mer pour éloigner le scorbut.',
+        riz: 'Sac de riz blanc. Nourrissant et facile à conserver, la base de nombreux plats.',
+        farine: 'Sac de farine de blé, pour le pain, les pâtes et les pâtisseries.',
+        'pommes-de-terre': 'Sac de pommes de terre. Elles se conservent longtemps en cale et se cuisinent de mille façons.',
+        'legumes-varies': 'Panier de légumes de saison : carottes, choux, oignons…',
+        tomates: 'Tomates bien mûres, pour les sauces et les salades.',
+        champignons: 'Champignons des bois cueillis à la main. Savoureux, à condition de savoir lesquels ne sont pas toxiques.',
+        piment: 'Petits piments rouges. Une pincée réveille un plat, deux réveillent l’équipage.',
+        sucre: 'Sachet de sucre de canne, pour les desserts et les boissons.',
+        'sel-marin': 'Sel récolté dans les marais salants. Il assaisonne et conserve les aliments.',
+        oeufs: 'Une douzaine d’œufs frais, à transporter avec précaution.',
+        'produit-laitier': 'Lait frais, beurre ou fromage, selon l’arrivage. À consommer avant le prochain long voyage.',
+      };
       const R = {
         '1-antidote': { needs: { champignons: 3, agrumes: 2, 'sel-marin': 1 }, tools: { 'mortier-et-pilon': 1 } },
         'soin-plaie-critique-au-plus-2': { needs: { bandage: 8, antidote: 1 }, tools: { 'trousse-de-medecine': 1 } },
@@ -622,7 +651,8 @@ export default handler(['POST'], async (req, body) => {
       const itemsDone = await Promise.all(Object.entries(V).map(async ([id, [value, weight]]) => {
         const row = await read('items', id);
         if (!row) return 0;
-        await write('items', id, { ...row.data, value, weight }, row.version);
+        const desc = D[id] && String(row.data.desc || '').trim().length < 30 ? D[id] : row.data.desc; // on garde les descriptions déjà écrites
+        await write('items', id, { ...row.data, value, weight, desc }, row.version);
         return 1;
       }));
       // Recettes

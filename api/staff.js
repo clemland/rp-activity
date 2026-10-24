@@ -51,6 +51,7 @@ export default handler(['POST'], async (req, body) => {
     : op === 'inventions' ? ['inventions']
     : op === 'cooks' || op === 'cook.validate' ? ['cuisine']
     : op.startsWith('secret.') ? ['joueurs']
+    : op === 'journals' ? ['joueurs']
     : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
     : op.startsWith('crew.') ? ['equipages', 'marine']
     : op.startsWith('ship.') ? ['equipages']
@@ -856,6 +857,18 @@ export default handler(['POST'], async (req, body) => {
       await remove('shops', body.channelId);
       return { shop: null, toast: 'Boutique fermée' };
 
+    case 'journals': {
+      // Dernières entrées des carnets de tous les joueurs (en test, réservé aux testeurs)
+      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+      const list = [];
+      for (const [uid, p] of Object.entries(await readAll('players'))) {
+        for (const e of Array.isArray(p.journal) ? p.journal : []) {
+          list.push({ uid, player: fullName(p), entry: { id: e.id, title: e.title || '', text: String(e.text || '').slice(0, 600), image: (e.images || [])[0] || null, at: e.at || 0, edited: e.edited || 0, notes: (e.notes || []).map((n) => ({ emoji: n.emoji || '', byName: n.byName || '' })) } });
+        }
+      }
+      list.sort((a, b) => Math.max(b.entry.at, b.entry.edited) - Math.max(a.entry.at, a.entry.edited));
+      return { list: list.slice(0, 100) };
+    }
     case 'secret.get':
     case 'secret.add':
     case 'secret.delete': {

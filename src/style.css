@@ -1554,6 +1554,7 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .jr-preview{background:#fffaea;border:3px dashed var(--ink);border-radius:6px;padding:8px 10px;min-height:120px}
 .jr-secret{background:#f6e7e4;border-color:#8e130d}
 .jr-secret summary{cursor:pointer;font-weight:800;color:#8e130d}
+.jr-excerpt{max-height:9.5em;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,#000 75%,transparent)}
 #trade-fab{position:fixed;left:14px;bottom:14px;z-index:40;font:inherit;font-weight:800;background:var(--gold);color:var(--ink);border:3px solid var(--ink);border-radius:999px;padding:8px 14px;box-shadow:0 4px 0 rgba(0,0,0,.3);cursor:pointer}
 #trade-fab b{background:var(--red);color:#fff;border-radius:999px;padding:0 7px;margin-left:4px}
 #trade-fab[hidden]{display:none}

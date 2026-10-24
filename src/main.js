@@ -2195,7 +2195,7 @@ function jrEditorHTML() {
   return `<div class="crew-box jr-editor">
     <input id="jr-t" maxlength="80" placeholder="Titre (facultatif)" value="${esc(d.title)}">
     ${d.preview ? `<div class="jr-text jr-preview">${md(d.text) || '<span class="note">Rien à afficher.</span>'}</div>` : `<textarea id="jr-x" rows="8" maxlength="4000" placeholder="Écris ce que tu veux…">${esc(d.text)}</textarea>`}
-    <p class="note" style="margin:0">Markdown : **gras**, *italique*, __souligné__, ~~barré~~, ||spoiler||, \`code\`, # titre, &gt; citation, - liste, [texte](lien). Colle le lien d’un message Discord pour citer une action RP.</p>
+    <p class="note" style="margin:0">Le markdown est activé.</p>
     ${d.images.length ? `<div class="inv-gallery edit">${d.images.map((u, i) => `<span class="inv-img"><img src="${imgSrc(u)}" alt=""><button type="button" class="close sm-close" data-jr-rmimg="${i}" aria-label="Retirer l’image">×</button></span>`).join('')}</div>` : ''}
     <div class="se-row"><button type="button" class="btn sm ghost" id="jr-pick" ${d.images.length >= 4 ? 'disabled' : ''}>🖼️ Ajouter une image</button><input type="file" id="jr-file" accept="image/*" multiple hidden><button type="button" class="btn sm ghost" id="jr-prev">${d.preview ? '✏️ Écrire' : '👁️ Aperçu'}</button></div>
     <div class="form-actions"><button type="button" class="btn ghost" id="jr-cancel">Annuler</button><button type="button" class="btn" id="jr-save">${d.id ? 'Enregistrer' : 'Ajouter au carnet'}</button></div>
@@ -2204,7 +2204,7 @@ function jrEditorHTML() {
 function jrSecretsHTML() {
   return `<details class="crew-box jr-secret" open><summary>🔒 Notes secrètes du staff <small class="note">(le joueur ne les voit jamais)</small></summary>
     ${jrSecrets == null ? '<p class="note">Chargement…</p>' : jrSecrets.length ? jrSecrets.map((n) => `<div class="jr-note"><span><b>${esc(n.byName || 'Staff')}</b> <small class="note">${jrDate(n.at)}</small><br>${md(n.text)}</span><button class="close sm-close" data-jr-sdel="${n.id}" aria-label="Supprimer la note">×</button></div>`).join('') : '<p class="note">Aucune note.</p>'}
-    <div class="jr-annot"><input id="jr-secret" maxlength="1000" placeholder="Ex. lui donner une relique au prochain event"><button class="btn sm" id="jr-secret-add">Ajouter</button></div>
+    <div class="jr-annot"><input id="jr-secret" maxlength="1000" placeholder="Ex. lui donner un FDD"><button class="btn sm" id="jr-secret-add">Ajouter</button></div>
   </details>`;
 }
 function readJr() {
@@ -4193,7 +4193,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(), ajour: tools() && beta(),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -5494,6 +5494,58 @@ $('v-afeat').addEventListener('change', async (e) => {
   } finally {
     setBusy(-1);
   }
+});
+
+/* ═══ Carnets : dernières entrées de tous les joueurs (panneau admin) ════ */
+let journalList = null, journalUnread = false;
+async function loadJournals() {
+  try {
+    journalList = (await API.staff('journals')).list;
+  } catch (err) {
+    journalList = [];
+    toast(esc(err.message));
+  }
+  renderJournals();
+}
+function renderJournals() {
+  if (!tools()) return;
+  const waiting = (journalList || []).filter((x) => !x.entry.notes.length).length;
+  const label = document.querySelector('#scr-ajour span:last-child');
+  if (label) label.textContent = waiting ? `Carnets (${waiting})` : 'Carnets';
+  const el = $('v-ajour');
+  if (!journalList) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const shown = journalUnread ? journalList.filter((x) => !x.entry.notes.length) : journalList;
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Carnets</h2><p class="lede" style="margin:0">Les dernières entrées des carnets des joueurs. Ouvre un carnet pour annoter une entrée ou ajouter une note secrète.</p></div>
+      <div class="mj-row"><label><input type="checkbox" id="ajour-unread" ${journalUnread ? 'checked' : ''}> Sans annotation</label><button class="btn ghost" id="ajour-reload">Actualiser</button></div>
+    </div>
+    ${shown.length ? shown.map(({ uid, player, entry: e }) => `
+      <article class="jr-entry">
+        <header><span><b>${esc(player)}</b> · ${esc(e.title || 'Sans titre')} <small class="note">${jrDate(e.at)}${e.edited ? ` · modifiée ${jrDate(e.edited)}` : ''}</small></span>
+          <span class="jr-acts"><button class="btn sm" data-aj-open="${esc(uid)}">📓 Ouvrir le carnet</button><button class="btn sm ghost" data-aj-fiche="${esc(uid)}">Voir la fiche</button></span></header>
+        ${e.text ? `<div class="jr-text jr-excerpt">${md(e.text)}</div>` : ''}
+        ${e.image ? `<div class="inv-gallery"><img src="${imgSrc(e.image)}" alt=""></div>` : ''}
+        <p class="note" style="margin:6px 0 0">${e.notes.length ? `${e.notes.map((n) => esc(n.emoji)).filter(Boolean).join(' ')} ${e.notes.length} annotation${e.notes.length > 1 ? 's' : ''} du staff` : '<span class="req">Pas encore d’annotation</span>'}</p>
+      </article>`).join('') : `<p class="note">${journalUnread ? 'Toutes les entrées ont été annotées. 🎉' : 'Aucune entrée pour l’instant.'}</p>`}`;
+}
+/** Ouvre la fiche d'un joueur, puis son carnet. */
+async function openJournalOf(uid) {
+  await openPlayer(uid, { tab: 't-job' });
+  for (let i = 0; i < 50 && S?.uid !== uid; i++) await new Promise((r) => setTimeout(r, 100));
+  if (S?.uid === uid) journalFab.click();
+}
+$('v-ajour').addEventListener('change', (e) => {
+  if (e.target.id !== 'ajour-unread') return;
+  journalUnread = e.target.checked;
+  renderJournals();
+});
+$('v-ajour').addEventListener('click', (e) => {
+  if (e.target.closest('#ajour-reload')) return void loadJournals();
+  const op = e.target.closest('[data-aj-open]')?.dataset.ajOpen;
+  if (op) return void openJournalOf(op);
+  const fi = e.target.closest('[data-aj-fiche]')?.dataset.ajFiche;
+  if (fi) openPlayer(fi);
 });
 
 /* ═══ Recettes de cuisine (panneau admin) ════════════════════════════════ */
@@ -7070,6 +7122,7 @@ function showScreen(name) {
   if (name === 'acalc') loadCalc();
   if (name === 'asea') loadSeaEvents();
   if (name === 'acook') loadCooks();
+  if (name === 'ajour') loadJournals();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

@@ -2204,27 +2204,6 @@ function pollGallery2() {
         ${i >= 0 ? `<span class="pl-mine">${POLL_MED[i]} ${PTS[i]} pts</span>` : ''}${med ? '<span class="pl-medal-tag" title="Ta médaille du jour">🏅</span>' : ''}</button>`;
     }).join('')}</div>` : '<p class="note">Aucun choix.</p>'}`;
 }
-/** Aperçu du reveal : vrais personnages et groupes, classés avec des points inventés (rien n'est enregistré). */
-let pollPreview = null;
-function fakePoll() {
-  const results = {};
-  for (const cat of Object.keys(G.POLL_CATS)) {
-    const pool = [...(POLL.cands[cat] || [])].sort(() => Math.random() - 0.5).slice(0, 10);
-    let pts = 60 + Math.floor(Math.random() * 40);
-    results[cat] = pool.map((c) => {
-      pts = Math.max(1, pts - 2 - Math.floor(Math.random() * 8));
-      return { ...c, votes: pts, medals: cat === 'personnage' ? Math.floor(Math.random() * 8) : 0 };
-    });
-  }
-  return { week: Date.now(), voters: 42, results };
-}
-$('d-poll').addEventListener('click', (e) => {
-  if (!e.target.closest('#pl-preview')) return;
-  pollPreview = fakePoll();
-  pollAnim = true;
-  renderPoll();
-  $('pl-body').scrollTo?.(0, 0);
-});
 /** Vote affiché tout de suite, puis envoyé ; annulé si le serveur refuse. */
 async function pollSend(action, apply, undo) {
   apply();
@@ -2314,8 +2293,7 @@ function renderPoll() {
     <div class="pl-head"><b id="pl-left">${pollLeft()}</b><span class="note">dimanche 20 h · ${POLL.voters} votant${POLL.voters > 1 ? 's' : ''} cette semaine</span></div>
     <div class="job-switch" role="tablist">${tabs.map(([k, l]) => `<button type="button" role="tab" class="${pollTab === k ? 'on' : ''}" aria-selected="${pollTab === k}" data-pl-tab="${k}">${l}</button>`).join('')}</div>
     ${pollTab === 'results'
-      ? `<div class="form-actions" style="justify-content:flex-start;margin-top:0">${POLL.last ? '<button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button>' : ''}${beta() ? '<button class="btn sm ghost" id="pl-preview">👁️ Aperçu du reveal (données fictives)</button>' : ''}</div>
-        ${pollPreview ? '<p class="note pl-preview-note">👁️ Aperçu avec des points inventés : rien n’est enregistré.</p>' : ''}${pollResultsHTML(pollPreview || POLL.last, pollAnim)}`
+      ? `${POLL.last ? '<div class="form-actions" style="justify-content:flex-start;margin-top:0"><button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button></div>' : ''}${pollResultsHTML(POLL.last, pollAnim)}`
       : pollGalleryHTML()}`;
   pollAnim = false;
 }
@@ -2348,11 +2326,9 @@ $('d-poll').addEventListener('click', async (e) => {
   if (tab) {
     pollTab = tab;
     pollQ = '';
-    pollPreview = null;
     return renderPoll();
   }
   if (e.target.closest('#pl-replay')) {
-    pollPreview = null;
     pollAnim = true;
     return renderPoll();
   }

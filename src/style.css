@@ -1577,7 +1577,6 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .pl-row{display:flex;gap:10px;align-items:center;background:var(--card);border:2px solid var(--ink);border-radius:8px;padding:4px 10px}
 .pl-row b{flex:1}
 .pl-rank{font-weight:800;font-size:18px;width:26px;text-align:center}
-.pl-preview-note{background:#e8f1ff;border:2px dashed var(--sea);border-radius:8px;padding:4px 10px;margin:0 0 6px}
 .pl-pop{animation:pl-pop .5s cubic-bezier(.2,1.4,.4,1) both}
 @keyframes pl-pop{from{opacity:0;transform:translateY(16px) scale(.8)}to{opacity:1;transform:none}}
 @keyframes pl-burst{0%{opacity:0;transform:translateY(10px) scale(.6)}30%{opacity:1}100%{opacity:0;transform:translateY(-30px) scale(1.3)}}

@@ -2154,7 +2154,8 @@ const pollFab = document.createElement('button');
 pollFab.type = 'button';
 pollFab.id = 'poll-fab';
 pollFab.hidden = true;
-pollFab.textContent = '⭐ Popularité';
+pollFab.innerHTML = '⭐<span class="fab-t"> Popularité</span>';
+pollFab.setAttribute('aria-label', 'Sondage de popularité');
 document.body.append(pollFab);
 setInterval(() => {
   pollFab.hidden = !S || VIEW || !beta();
@@ -2411,7 +2412,8 @@ const journalFab = document.createElement('button');
 journalFab.type = 'button';
 journalFab.id = 'journal-fab';
 journalFab.hidden = true;
-journalFab.textContent = '📓 Carnet';
+journalFab.innerHTML = '📓<span class="fab-t"> Carnet</span>';
+journalFab.setAttribute('aria-label', 'Carnet');
 document.body.append(journalFab);
 setInterval(() => {
   journalFab.hidden = !S;
@@ -2590,7 +2592,8 @@ document.body.append(tradeFab);
 function updateTradeFab() {
   const n = S?.offers?.length || 0;
   tradeFab.hidden = !S || VIEW || !nouveautes();
-  const html = `🤝 Commerce${n ? ` <b>${n}</b>` : ''}`;
+  const html = `🤝<span class="fab-t"> Commerce</span>${n ? ` <b>${n}</b>` : ''}`;
+  tradeFab.setAttribute('aria-label', 'Commerce');
   if (tradeFab.innerHTML !== html) tradeFab.innerHTML = html;
 }
 setInterval(updateTradeFab, 1500);

@@ -492,7 +492,7 @@ export function normalizeItem(x) {
   };
 }
 /** Mini-jeux d'une recette choisis par le staff, et difficulté (1 à 5 ; 0 = automatique). */
-export const GAME_KEYS = ['marteau', 'scie', 'trace', 'assemblage', 'calfatage', 'bandage', 'desinfecter', 'points', 'incision', 'suture', 'hemorragie'];
+export const GAME_KEYS = ['marteau', 'scie', 'trace', 'assemblage', 'calfatage', 'bandage', 'desinfecter', 'points', 'incision', 'suture', 'hemorragie', 'extraction', 'reduction', 'massage', 'transfusion', 'fouiller', 'recoller', 'dechiffrer'];
 export function normalizeGame(g) {
   if (!g) return null;
   const list = [...new Set((Array.isArray(g.list) ? g.list : []).filter((k) => GAME_KEYS.includes(k)))];
@@ -523,6 +523,7 @@ export function normalizeRecipe(x) {
     work,
     care,
     game: normalizeGame(x.game),
+    kitchen: !!x.kitchen, // recette de base de la cuisine (onglet Cuisine, pour tout le monde)
     desc: str(x.desc, 400),
   };
 }

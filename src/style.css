@@ -1486,6 +1486,27 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .ck-steps li span{display:inline-block;min-width:170px}
 .recipe .status{font-size:13px;margin-left:6px}
 .status.ok{color:#1d7a3a}
+/* ═══ Mini-jeux : médecine et archéologie ═══ */
+.rot-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:8px 0}
+.rot-piece{width:76px;height:76px;border:3px solid var(--ink);border-radius:12px;background:#fffaea;cursor:pointer;font-size:34px;display:grid;place-items:center;padding:0}
+.rot-piece span{display:grid;place-items:center;line-height:1;transition:transform .15s}
+.rot-piece .rot-arrow{font-size:14px;color:var(--red);line-height:1;margin-bottom:2px}
+.rot-piece.ok{background:#d9f2df;border-color:#1d7a3a}
+.beat{display:grid;place-items:center;height:130px;font-size:72px}
+.beat span{display:inline-block;transition:transform .05s}
+.tank{position:relative;width:90px;height:200px;margin:6px auto;border:3px solid var(--ink);border-radius:12px;background:#fff;overflow:hidden}
+.tank-z{position:absolute;left:0;right:0;background:rgba(47,154,85,.3);border-top:2px solid #1d7a3a;border-bottom:2px solid #1d7a3a;z-index:1}
+.tank-f{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(0deg,#8e130d,#e0574d)}
+.dig{position:relative;display:grid;aspect-ratio:14/8;border:3px solid var(--ink);border-radius:8px;overflow:hidden;background:#e8d29f;touch-action:none;cursor:crosshair;user-select:none}
+.dig-relic{position:absolute;inset:0;display:grid;place-items:center;font-size:110px;pointer-events:none}
+.dig i{position:relative;z-index:1;background:#8a6a43;border:1px solid rgba(0,0,0,.08)}
+.dig i.off{background:transparent;border-color:transparent}
+.pairs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:6px 0}
+.pair{height:64px;border:3px solid var(--ink);border-radius:10px;background:#8a6a43;cursor:pointer;font-size:30px;color:#3d2614}
+.pair span{visibility:hidden}
+.pair.up{background:#f3e3bb}
+.pair.up span{visibility:visible}
+.pair.done{background:#d9f2df}
 /* ═══ Plusieurs boutiques par salon ═══ */
 .shop-tabs{display:flex;gap:8px;overflow-x:auto;margin:0 0 12px;padding-bottom:4px}
 .shop-tab{display:flex;gap:8px;align-items:center;flex:0 0 auto;font:inherit;text-align:left;background:#efe3c4;color:var(--brown);border:3px solid var(--ink);border-radius:10px;padding:5px 12px 5px 6px;cursor:pointer}

@@ -639,14 +639,73 @@ export default handler(['POST'], async (req, body) => {
         'reparer-la-coque-30': { needs: { 'bout-de-bois': 7 } },
         '1-tissu': { job: null, lvl: 1, gives: { tissu: 1 }, needs: { chanvre: 4 }, tools: {}, seconds: 600 },
         '1-attelle': { job: 'medecin', lvl: 1, gives: { attelle: 1 }, needs: { 'bout-de-bois': 1, tissu: 2 }, tools: { 'trousse-de-medecine': 1 }, seconds: 1800 },
+        // Nouvelles recettes
+        '1-corde': { job: null, lvl: 1, gives: { corde: 1 }, needs: { chanvre: 3 }, tools: {}, seconds: 300 },
+        '5-clous': { job: 'charpentier', lvl: 1, gives: { clous: 5 }, needs: { fer: 1 }, tools: { 'kit-de-charpentier': 1 }, seconds: 600 },
+        '1-poudre-a-canon': { job: 'scientifique', lvl: 1, gives: { 'poudre-a-canon': 1 }, needs: { 'sel-marin': 2, 'bout-de-bois': 1 }, tools: { 'kit-de-scientifique': 1 }, seconds: 900 },
+        '1-bombe': { job: 'scientifique', lvl: 2, gives: { bombe: 1 }, needs: { 'poudre-a-canon': 1, corde: 1, fer: 1 }, tools: { 'kit-de-scientifique': 1 }, seconds: 1800 },
+        '1-fumigene': { job: 'scientifique', lvl: 1, gives: { fumigene: 1 }, needs: { 'poudre-a-canon': 1, 'herbes-medicinales': 2 }, tools: { 'kit-de-scientifique': 1 }, seconds: 1200 },
+        '2-cola': { job: null, lvl: 1, kitchen: true, gives: { cola: 2 }, needs: { sucre: 2, agrumes: 1, 'sel-marin': 1 }, tools: {}, seconds: 300 },
+        '3-fils-de-suture': { job: 'medecin', lvl: 1, gives: { 'fil-de-suture': 3 }, needs: { chanvre: 1, 'alcool-medical': 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 600 },
+        '1-pommade': { job: 'medecin', lvl: 1, gives: { pommade: 1 }, needs: { 'herbes-medicinales': 3, 'produit-laitier': 1 }, tools: { 'mortier-et-pilon': 1 }, seconds: 900 },
+        '1-platre': { job: 'medecin', lvl: 1, gives: { platre: 1 }, needs: { tissu: 2, farine: 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 900 },
+        '1-morphine': { job: 'medecin', lvl: 2, gives: { morphine: 1 }, needs: { 'herbes-medicinales': 4, 'alcool-medical': 2 }, tools: { 'mortier-et-pilon': 1 }, seconds: 3600 },
+        'restaurer-relique': { job: 'archeologue', lvl: 1, gives: { 'relique-ancienne': 1 }, needs: { 'relique-abimee': 1 }, tools: { 'kit-d-archeologue': 1 }, seconds: 14400, game: { list: ['fouiller', 'recoller', 'dechiffrer'], diff: 0 } },
+        'nettoyer-pieces': { job: 'archeologue', lvl: 1, gives: { 'piece-d-or-ancienne': 5 }, needs: { 'pieces-oxydees': 5 }, tools: { 'kit-d-archeologue': 1 }, seconds: 3600, game: { list: ['fouiller'], diff: 0 } },
+        // Nouvelles opérations
+        'soin-brulure-legere': { job: 'medecin', lvl: 1, care: { type: 'brulure', level: 1 }, needs: { pommade: 1 }, tools: {}, seconds: 1800, game: { list: ['desinfecter'], diff: 0 } },
+        'greffe-de-peau': { job: 'medecin', lvl: 3, care: { type: 'brulure', level: 4 }, needs: { 'fil-de-suture': 2, 'alcool-medical': 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 172800, game: { list: ['incision', 'suture', 'desinfecter'], diff: 0, time: 150 } },
+        'lavage-d-estomac': { job: 'medecin', lvl: 2, care: { type: 'empoisonnement', level: 3 }, needs: { 'alcool-medical': 1, antidote: 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 43200, game: { list: ['hemorragie', 'desinfecter'], diff: 0 } },
+        'extraction-du-venin': { job: 'medecin', lvl: 3, care: { type: 'empoisonnement', level: 4 }, needs: { antidote: 2, 'fil-de-suture': 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 86400, game: { list: ['incision', 'extraction', 'suture'], diff: 0, time: 150 } },
+        'pose-d-un-platre': { job: 'medecin', lvl: 2, care: { type: 'fracture', level: 3 }, needs: { platre: 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 172800, game: { list: ['bandage', 'reduction'], diff: 0 } },
+        'reduction-de-fracture': { job: 'medecin', lvl: 3, care: { type: 'fracture', level: 4 }, needs: { platre: 1, morphine: 1, 'fil-de-suture': 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 259200, game: { list: ['incision', 'reduction', 'suture'], diff: 0, time: 150 } },
+        'extraction-de-balle': { job: 'medecin', lvl: 2, care: { type: 'balle-logee', level: 4 }, needs: { 'fil-de-suture': 1, 'alcool-medical': 1 }, tools: { 'trousse-de-medecine': 1 }, seconds: 86400, game: { list: ['incision', 'extraction', 'suture'], diff: 0, time: 150 } },
       };
       const F = {
         '1555026549739102368': 0.9, '1555280961833275422': 0.95,
         '1555024561777545368': 1.05, '1555279229904748706': 1.05, '1562497093434740827~2': 1.05, '1562497584973611098': 1.05,
         '1562533958195875912': 1.1, '1562497093434740827': 1.1, '1555012326321688632': 1.1, '1555011827858145360': 1.15,
       };
-      const WEAPONS = ['arc', 'revolver', 'sabre-courbe', 'katana', 'epee-longue', 'fusil', 'massue', 'tromblon-a-6-canons'];
+      const WEAPONS = ['lance-pierre', 'arc', 'revolver', 'sabre-courbe', 'katana', 'lance', 'epee-longue', 'fusil', 'massue', 'tromblon-a-6-canons', 'poudre-a-canon'];
       const nice = (n) => (n >= 10000 ? Math.round(n / 500) * 500 : n >= 1000 ? Math.round(n / 50) * 50 : Math.max(5, Math.round(n / 5) * 5));
+      // Nouveaux objets (créés s'ils n'existent pas) : [nom, catégorie, rareté, valeur, poids, description, soin]
+      const N = {
+        corde: ['Corde', 'mat', 'commun', 600, 0.6, 'Cordage tressé en fibres de chanvre. Gréement, amarrage, réparations : un navire en consomme des kilomètres.'],
+        clous: ['Clous', 'mat', 'commun', 300, 0.5, 'Petit sac de clous forgés. Indispensables à toute construction et réparation.'],
+        cuir: ['Cuir', 'mat', 'commun', 1200, 1, 'Peau tannée, souple et résistante. Pour les fourreaux, les sacs et les sangles.'],
+        fer: ['Lingot de fer', 'mat', 'commun', 3000, 2, 'Lingot de fer brut, prêt à être forgé en clous, en lames ou en pièces de navire.'],
+        'poudre-a-canon': ['Poudre à canon', 'mat', 'peu-commun', 2000, 0.5, 'Poudre noire très inflammable. À garder au sec, et loin du cuisinier qui fume.'],
+        'herbes-medicinales': ['Herbes médicinales', 'mat', 'commun', 300, 0.1, 'Bouquet de plantes séchées aux vertus apaisantes et cicatrisantes.'],
+        'alcool-medical': ['Alcool médical', 'mat', 'commun', 1000, 0.5, 'Flacon d’alcool pur pour désinfecter les plaies et les instruments. Ne se boit pas, même pour fêter une victoire.'],
+        'fil-de-suture': ['Fil de suture', 'mat', 'commun', 500, 0.05, 'Fil fin et stérilisé, pour refermer les plaies proprement.'],
+        platre: ['Plâtre', 'mat', 'commun', 2500, 1, 'Bandes plâtrées qui durcissent en séchant, pour immobiliser une fracture grave.'],
+        pommade: ['Pommade cicatrisante', 'conso', 'commun', 2000, 0.2, 'Onguent à base d’herbes qui apaise les brûlures légères.', { type: 'brulure', level: 1 }],
+        morphine: ['Morphine', 'conso', 'peu-commun', 6000, 0.1, 'Puissant antidouleur. À manier avec précaution : la dose fait le remède, ou le poison.'],
+        'baby-den-den-mushi': ['Baby Den Den Mushi', 'objet', 'peu-commun', 50000, 0.5, 'Petit escargophone de poche. Sa portée est courte, mais il tient dans la main.'],
+        'den-den-mushi': ['Den Den Mushi', 'objet', 'rare', 150000, 2, 'Escargophone capable de joindre un autre Den Den Mushi à l’autre bout de la mer.'],
+        'vivre-card': ['Vivre Card', 'objet', 'rare', 50000, 0, 'Morceau de papier qui se déplace vers son propriétaire, et brûle quand sa vie s’éteint.'],
+        lanterne: ['Lanterne', 'objet', 'commun', 3000, 1, 'Lanterne à huile, pour les grottes, les cales sombres et les fouilles de nuit.'],
+        'lance-pierre': ['Lance-pierre', 'arme', 'commun', 5000, 0.3, 'Fronde en bois et caoutchouc. Ridicule en apparence, redoutable entre de bonnes mains.'],
+        lance: ['Lance', 'arme', 'commun', 40000, 3, 'Longue hampe à pointe d’acier. Elle garde l’ennemi à distance.'],
+        cola: ['Cola', 'conso', 'commun', 300, 1, 'Boisson pétillante et sucrée. Délicieuse, et carburant du moteur au cola.'],
+        rhum: ['Rhum', 'conso', 'commun', 500, 1, 'Bouteille de rhum ambré. Indispensable à tout pirate qui se respecte.'],
+        bombe: ['Bombe', 'conso', 'peu-commun', 8000, 0.8, 'Boule de fonte bourrée de poudre, avec sa mèche. Allumer, lancer, courir.'],
+        fumigene: ['Fumigène', 'conso', 'commun', 4000, 0.3, 'Dégage un épais nuage de fumée. Parfait pour fuir, ou pour surprendre.'],
+        'pieces-oxydees': ['Pièces oxydées', 'tresor', 'commun', 600, 0.05, 'Pièces anciennes couvertes de vert-de-gris. Un archéologue saurait leur rendre leur éclat.'],
+        'piece-d-or-ancienne': ['Pièce d’or ancienne', 'tresor', 'commun', 5000, 0.05, 'Pièce frappée par un royaume disparu. Les collectionneurs se l’arrachent.'],
+        perle: ['Perle', 'tresor', 'peu-commun', 20000, 0.02, 'Perle nacrée d’un éclat parfait, pêchée dans les eaux chaudes.'],
+        'relique-abimee': ['Relique abîmée', 'tresor', 'peu-commun', 15000, 2, 'Objet ancien brisé et couvert de terre. Restauré, il vaudrait une fortune.'],
+        'relique-ancienne': ['Relique ancienne', 'tresor', 'rare', 80000, 2, 'Objet d’une civilisation oubliée, soigneusement restauré.'],
+        'lingot-d-or': ['Lingot d’or', 'tresor', 'rare', 100000, 1, 'Lingot d’or pur, frappé du sceau d’une banque de Grand Line.'],
+        'collier-de-diamants': ['Collier de diamants', 'tresor', 'epique', 1000000, 0.1, 'Rivière de diamants digne d’une reine. De quoi attirer bien des convoitises.'],
+      };
+      await Promise.all(Object.entries(N).map(async ([id, [name, kind, rarity, value, weight, desc, heal]]) => {
+        V[id] = [value, weight];
+        if (catalog.items[id]) return;
+        const item = normalizeItem({ name, kind, rarity, value, weight, desc, heal: heal || null });
+        await write('items', id, item, null);
+        catalog.items[id] = item;
+      }));
       // Objets (en parallèle, pour rester sous la limite de temps de Vercel)
       const itemsDone = await Promise.all(Object.entries(V).map(async ([id, [value, weight]]) => {
         const row = await read('items', id);
@@ -672,7 +731,10 @@ export default handler(['POST'], async (req, body) => {
         const has = (k) => items.some((x) => x[0] === k);
         const add = (k) => { if (!has(k)) items.push([k, 0, -1]); };
         if (items.some(([k]) => catalog.items[k]?.kind === 'arme')) WEAPONS.forEach(add);
-        if (has('log-pose') || has('barque')) { add('chanvre'); add('tissu'); }
+        if (has('log-pose') || has('barque')) { add('chanvre'); add('tissu'); add('corde'); }
+        if (has('log-pose')) ['cuir', 'herbes-medicinales', 'alcool-medical', 'fil-de-suture', 'lanterne', 'baby-den-den-mushi', 'den-den-mushi'].forEach(add); // marchés
+        if (has('barque')) ['clous', 'fer'].forEach(add); // ports
+        if (has('riz')) ['rhum', 'cola'].forEach(add); // nourriture
         const priced = items.filter(([k]) => catalog.items[k]).map(([k, , stock]) => [k, nice((V[k]?.[0] ?? catalog.items[k].value) * f), stock]);
         const row = await read('shops', key);
         await write('shops', key, { ...s, items: priced, buyRate: 0.4 }, row?.version ?? null);

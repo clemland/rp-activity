@@ -941,7 +941,33 @@ function toolsHTML(r, store = NAVD?.aboard) {
     return `<span class="need ${h >= q ? 'have' : 'miss'}">${itemIco(k)}${esc(itemOf(k).name)}${q > 1 ? ` × ${q}` : ''}</span>`;
   }).join('')}</div>`;
 }
+/* Recettes de base de la cuisine : retirées de l'onglet Métier, affichées dans l'onglet Cuisine */
+let kitchenRecs = {};
 function renderJob() {
+  kitchenRecs = {};
+  for (const [k, r] of Object.entries(G.RECIPES)) {
+    if (!r.kitchen) continue;
+    kitchenRecs[k] = r;
+    delete G.RECIPES[k];
+  }
+  try {
+    return renderJobInner();
+  } finally {
+    Object.assign(G.RECIPES, kitchenRecs);
+  }
+}
+function kitchenHTML() {
+  const list = Object.entries(kitchenRecs);
+  if (!list.length) return '';
+  return `<div class="sec-head"><h2 style="font-size:20px">🥘 Recettes de base</h2></div>
+    <div class="recipes">${list.map(([id, r]) => `<article class="recipe">
+      <h3 class="rc-title">${recipeIco(r)}${esc(G.recipeLabel(r))}</h3>
+      <b>Il faut</b><div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('') || '<span class="note">Rien</span>'}</div>${toolsHTML(r)}
+      <div class="recipe-foot"><span class="note">${r.seconds ? `⏳ ${G.duree(r.seconds)}` : 'immédiat'}</span>${VIEW ? '' : `<button class="btn sm" data-craft="${esc(id)}" ${S.craft || G.craftBlock(S, r, CREW) ? 'disabled' : ''}>Préparer</button>`}</div>
+    </article>`).join('')}</div>
+    ${S.craft ? `<p class="note">En cours : ${esc(S.craft.name)}. À récupérer dans l’onglet Métier une fois prêt.</p>` : ''}`;
+}
+function renderJobInner() {
   renameJobTab();
   if (nouveautes() && !VIEW && jobView === 'cuisine') {
     $('v-job').innerHTML = jobSwitchHTML() + cookHTML();
@@ -1709,6 +1735,13 @@ const SIMPLE_GAMES = {
   bandage: ['🩹 Bandage', (d, rank) => timingStep({ label: '🩹 <b>Bandage</b> : serre quand le curseur est dans la zone.', verb: '🩹 Serrer', icon: '🩹', speed: 0.6 + d * 0.2, zone: Math.max(8, 30 - d * 4 + (rank - 1) * 3), hits: 2 + Math.ceil(d / 2), misses: 1 + rank })],
   desinfecter: ['🦠 Désinfecter', (d, rank) => whackStep({ label: '🦠 <b>Désinfecter</b> : nettoie les microbes avant qu’ils ne s’incrustent.', icon: '🦠', total: 4 + d, life: Math.max(0.9, 2.4 - d * 0.25 + rank * 0.2), every: 0.8, misses: rank, cls: 'skin-wh' })],
   points: ['🔢 Points dans l’ordre', (d, rank) => orderStep({ label: '🔢 <b>Dans l’ordre</b> : clique les points dans l’ordre (1, 2, 3…).', n: 3 + d * 2, misses: rank })],
+  extraction: ['🔧 Extraction', (d, rank) => extractionStep({ label: '🔧 <b>Extraction</b> : guide la pince du point vert jusqu’à l’éclat, sans toucher les parois.', path: randomPath(Math.max(1, d - 1)), width: Math.max(16, 34 - d * 3 + rank * 2), penalty: 8 })],
+  reduction: ['🦴 Réduction', (d, rank) => rotateStep({ label: '🦴 <b>Réduction</b> : fais pivoter chaque fragment d’os (clic) jusqu’à ce que toutes les flèches pointent vers le haut.', n: 3 + Math.ceil(d / 2), icon: '🦴', dur: Math.max(10, 22 - d * 2 + rank * 2) })],
+  massage: ['❤️ Massage cardiaque', (d, rank) => rhythmStep({ label: '❤️ <b>Massage cardiaque</b> : appuie au moment où le cœur bat (clic, Espace ou le bouton).', beat: Math.max(0.5, 0.85 - d * 0.06), win: 0.1 + rank * 0.03, goal: 8 + d * 2, penalty: 4 })],
+  transfusion: ['🩸 Transfusion', (d, rank) => holdStep({ label: '🩸 <b>Transfusion</b> : maintiens le bouton (ou Espace) pour injecter, et garde le niveau de sang dans la zone verte.', lo: 45, hi: Math.min(85, 75 - d * 3 + rank * 2), need: 6 + d, dur: 20 + d * 2, penalty: 3 })],
+  fouiller: ['🖌️ Fouiller', (d, rank) => scratchStep({ label: '🖌️ <b>Fouiller</b> : dégage la relique de la terre en glissant dessus, doucement pour ne pas l’abîmer.', icon: '🏺', dur: Math.max(14, 26 - d * 2 + rank * 2), maxSpeed: 1.1 - d * 0.1 + rank * 0.1 })],
+  recoller: ['🏺 Recoller', (d, rank) => rotateStep({ label: '🏺 <b>Recoller</b> : fais pivoter chaque fragment (clic) jusqu’à ce que toutes les flèches pointent vers le haut.', n: 3 + Math.ceil(d / 2), icon: '🧩', dur: Math.max(10, 24 - d * 2 + rank * 2) })],
+  dechiffrer: ['📜 Déchiffrer', (d, rank) => pairsStep({ label: '📜 <b>Déchiffrer</b> : retrouve les paires de symboles gravés.', pairs: Math.min(8, 3 + d), misses: Math.max(2, 8 - d + rank) })],
 };
 const OP_KEYS = ['incision', 'suture', 'hemorragie'];
 const DIFF_NAMES = ['Automatique', 'Très facile', 'Facile', 'Normale', 'Difficile', 'Extrême'];
@@ -1734,7 +1767,7 @@ function gameFieldsHTML(r) {
   const g = r.game || { list: [], diff: 0 };
   const box = (k, label) => `<label><input type="checkbox" data-game="${k}" ${g.list.includes(k) ? 'checked' : ''}> ${label}</label>`;
   const isOp = r.care && r.care.level >= 2;
-  return `<div class="wide work-box"><b>🎮 Mini-jeu</b>
+  return `<div class="wide"><label><input type="checkbox" id="rc-kitchen" ${r.kitchen ? 'checked' : ''}> 🥘 Recette de base de la cuisine (dans l’onglet Cuisine, pour tout le monde)</label></div><div class="wide work-box"><b>🎮 Mini-jeu</b>
     <div class="mj-row"><label for="rc-gdiff">Difficulté</label><select id="rc-gdiff">${DIFF_NAMES.map((l, i) => `<option value="${i}" ${(g.diff || 0) === i ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     ${r.care ? `<div class="mj-row"><label for="rc-gtime">Durée de l’opération</label><input id="rc-gtime" type="number" min="0" max="600" value="${g.time || 0}" style="width:90px"><span class="note">secondes avant que les constantes tombent à zéro (0 = automatique)</span></div>` : ''}
     <div class="mj-row"><label for="rc-trank">Tester en</label><select id="rc-trank">${JOB_LEVELS.map((l, i) => `<option value="${i + 1}" ${rcTest.rank === i + 1 ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -1748,6 +1781,7 @@ function gameFieldsHTML(r) {
 }
 function readGameFields(r) {
   if (!$('rc-gdiff')) return;
+  r.kitchen = !!$('rc-kitchen')?.checked;
   if ($('rc-trank')) rcTest.rank = +$('rc-trank').value || 1;
   if ($('rc-tlvl')) rcTest.lvl = +$('rc-tlvl').value || 1;
   const list = [...document.querySelectorAll('#rc-body [data-game]')].filter((c) => c.checked).map((c) => c.dataset.game);
@@ -1971,7 +2005,7 @@ function cookHTML() {
   if (!nouveautes()) return '';
   const list = S.cook || [];
   const status = (r) => (r.ok ? '<span class="status ok">Validée</span>' : r.refused ? '<span class="status refused">Refusée</span>' : '<span class="status wait">À valider</span>');
-  return `<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🍳 Mes recettes</h2>${VIEW ? '' : '<button class="btn sm" id="ck-new">+ Nouvelle recette</button>'}</div>
+  return `${kitchenHTML()}<div class="sec-head" style="margin-top:22px"><h2 style="font-size:20px">🍳 Mes recettes</h2>${VIEW ? '' : '<button class="btn sm" id="ck-new">+ Nouvelle recette</button>'}</div>
     <p class="note">Tout le monde peut cuisiner ! Crée tes recettes : ingrédients, étapes dans l’ordre et plat final. Une fois validée par le staff, tu peux la cuisiner.</p>
     ${list.length ? `<div class="recipes">${list.map((r) => `<article class="recipe">
       ${r.photo ? `<img class="ck-thumb" src="${imgSrc(r.photo)}" alt="">` : ''}
@@ -2161,6 +2195,291 @@ $('d-trade').addEventListener('click', async (e) => {
     if (out) closeDialog($('d-trade'));
   }
 });
+
+/* ═══ Nouveaux mini-jeux : médecine et archéologie ═══════════════════════ */
+/** Extraction : guider une pince dans un couloir, sans toucher les parois. */
+const extractionStep = (o) => (api) => {
+  const W = 460, H = 260, pts = o.path, half = o.width / 2;
+  let drawing = false, prog = 0;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><canvas id="mg-cv" class="op-cv trace-cv" width="${W}" height="${H}"></canvas>`;
+  const cv = $('mg-cv'), g = cv.getContext('2d');
+  const path = (n = pts.length) => {
+    g.beginPath();
+    pts.slice(0, n).forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)));
+  };
+  const draw = () => {
+    g.clearRect(0, 0, W, H);
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.strokeStyle = '#7a2a22';
+    g.lineWidth = o.width + 6;
+    path();
+    g.stroke();
+    g.strokeStyle = '#f6e3d3';
+    g.lineWidth = o.width;
+    path();
+    g.stroke();
+    if (prog) {
+      g.strokeStyle = 'rgba(47,111,208,.6)';
+      g.lineWidth = 4;
+      path(prog + 1);
+      g.stroke();
+    }
+    const s = pts[0], f = pts[pts.length - 1];
+    g.fillStyle = '#2f9a55';
+    g.beginPath();
+    g.arc(s.x, s.y, 8, 0, 7);
+    g.fill();
+    g.font = '22px serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(o.target || '🔩', f.x, f.y);
+  };
+  const pt = (e) => {
+    const r = cv.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
+  };
+  const hit = (text) => {
+    drawing = false;
+    prog = 0;
+    replay(cv, 'shake');
+    if (o.penalty) api.hurt(o.penalty, text);
+    else api.msg(text);
+    draw();
+  };
+  cv.onpointerdown = (e) => {
+    const p = pt(e);
+    if (Math.hypot(p.x - pts[0].x, p.y - pts[0].y) > 18) return void api.msg('Commence sur le point vert.');
+    drawing = true;
+    prog = 0;
+    cv.setPointerCapture(e.pointerId);
+    api.msg('Doucement…');
+  };
+  cv.onpointermove = (e) => {
+    if (!drawing) return;
+    const p = pt(e);
+    let best = prog, bd = Infinity;
+    for (let j = Math.max(0, prog - 5); j < Math.min(pts.length, prog + 30); j++) {
+      const dd = Math.hypot(p.x - pts[j].x, p.y - pts[j].y);
+      if (dd < bd) {
+        bd = dd;
+        best = j;
+      }
+    }
+    if (bd > half) return hit(o.bad || 'Tu as touché la paroi !');
+    prog = Math.max(prog, best);
+    draw();
+    if (prog >= pts.length - 2) {
+      drawing = false;
+      api.msg(o.good || 'Extraction réussie !');
+      api.next();
+    }
+  };
+  cv.onpointerup = () => {
+    if (drawing) hit('Tu as lâché la pince : recommence.');
+  };
+  draw();
+};
+/** Réduction / Recoller : faire pivoter les fragments jusqu'à ce que toutes les flèches pointent vers le haut. */
+const rotateStep = (o) => (api) => {
+  const ang = Array.from({ length: o.n }, () => 90 * (1 + Math.floor(Math.random() * 3)));
+  let t = 0, over = false;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="rot-grid">${ang.map((a, i) => `<button type="button" class="rot-piece" data-rot="${i}" aria-label="Fragment ${i + 1}"><span style="transform:rotate(${a}deg)"><b class="rot-arrow">▲</b>${o.icon}</span></button>`).join('')}</div>${o.dur ? '<div class="gauge"><i id="rot-t" style="width:100%"></i></div>' : ''}`;
+  api.area.querySelector('.rot-grid').onclick = (e) => {
+    const b = e.target.closest('[data-rot]');
+    if (!b || over) return;
+    const i = +b.dataset.rot;
+    ang[i] = (ang[i] + 90) % 360;
+    b.firstElementChild.style.transform = `rotate(${ang[i]}deg)`;
+    b.classList.toggle('ok', ang[i] === 0);
+    if (ang.every((a) => a === 0)) {
+      over = true;
+      api.msg(o.good || 'Tout est aligné !');
+      setTimeout(() => api.next(), 500);
+    }
+  };
+  if (o.dur) {
+    api.onTick((dt) => {
+      if (over) return;
+      t += dt;
+      $('rot-t').style.width = `${Math.max(0, 100 - (t / o.dur) * 100)}%`;
+      if (t >= o.dur) {
+        over = true;
+        api.fail(o.slow || 'Trop lent.');
+      }
+    });
+  }
+};
+/** Massage cardiaque : appuyer en rythme avec les battements. */
+const rhythmStep = (o) => (api) => {
+  const beat = o.beat || 0.75, win = o.win || 0.14, goal = o.goal || 12, dur = goal * beat + 8;
+  let t = 0, good = 0, last = -1, over = false;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="beat"><span id="beat-h">${o.icon || '❤️'}</span></div>
+    <div class="form-actions" style="justify-content:center"><button type="button" class="btn" id="mg-hit">${o.verb || '👐 Appuyer'}</button></div>
+    <div class="gauge"><i id="beat-p" style="width:0%"></i></div><div class="gauge-cap"><span id="beat-n">0 / ${goal}</span><span></span></div>`;
+  $('mg-hit').onclick = () => {
+    if (over) return;
+    const k = Math.round(t / beat), d = Math.abs(t - k * beat);
+    if (d <= win && k !== last && k > 0) {
+      last = k;
+      good++;
+      $('beat-p').style.width = `${(good / goal) * 100}%`;
+      $('beat-n').textContent = `${good} / ${goal}`;
+      if (good >= goal) {
+        over = true;
+        api.msg(o.good || 'Le cœur repart !');
+        setTimeout(() => api.next(), 500);
+      }
+    } else {
+      replay($('beat-h'), 'shake');
+      if (o.penalty) api.hurt(o.penalty, o.bad || 'Pas en rythme !');
+      else api.msg(o.bad || 'Pas en rythme !');
+    }
+  };
+  api.onTick((dt) => {
+    if (over) return;
+    t += dt;
+    const ph = (t % beat) / beat;
+    $('beat-h').style.transform = `scale(${1 + 0.35 * Math.max(0, 1 - ph * 5)})`;
+    if (t >= dur) {
+      over = true;
+      api.fail(o.slow || 'Trop tard.');
+    }
+  });
+};
+/** Transfusion : maintenir un niveau dans la zone verte (le niveau baisse tout seul). */
+const holdStep = (o) => (api) => {
+  const lo = o.lo ?? 45, hi = o.hi ?? 70, need = o.need ?? 8, dur = o.dur ?? 20, ph = mgRnd(0, 6.28);
+  let lvl = 30, ok = 0, t = 0, hold = false, over = false;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="tank"><div class="tank-z" style="bottom:${lo}%;height:${hi - lo}%"></div><div class="tank-f" id="tk-f" style="height:30%"></div></div>
+    <div class="form-actions" style="justify-content:center"><button type="button" class="btn" id="mg-hold">${o.verb || '💉 Injecter (maintenir)'}</button></div>
+    <div class="gauge"><i id="tk-p" style="width:0%"></i></div><div class="gauge-cap"><span>Stabilisé</span><span id="tk-n">0 s / ${need} s</span></div>`;
+  const b = $('mg-hold');
+  b.onpointerdown = () => (hold = true);
+  b.onpointerup = b.onpointerleave = b.onpointercancel = () => (hold = false);
+  const key = (e) => {
+    if (e.code !== 'Space') return;
+    e.preventDefault();
+    hold = e.type === 'keydown';
+  };
+  document.addEventListener('keydown', key);
+  document.addEventListener('keyup', key);
+  const end = (fn) => {
+    over = true;
+    document.removeEventListener('keydown', key);
+    document.removeEventListener('keyup', key);
+    fn();
+  };
+  api.onTick((dt) => {
+    if (over) return;
+    t += dt;
+    lvl = Math.max(0, Math.min(100, lvl + ((hold ? 30 : 0) - 12 - 6 * Math.sin(t * 1.3 + ph)) * dt));
+    if (lvl >= lo && lvl <= hi) ok += dt;
+    else if (o.penalty) api.hurt(o.penalty * dt);
+    $('tk-f').style.height = `${lvl}%`;
+    $('tk-p').style.width = `${Math.min(100, (ok / need) * 100)}%`;
+    $('tk-n').textContent = `${Math.floor(ok)} s / ${need} s`;
+    if (ok >= need) return end(() => { api.msg(o.good || 'Stabilisé !'); setTimeout(() => api.next(), 500); });
+    if (t >= dur) end(() => api.fail(o.slow || 'Pas assez stable.'));
+  });
+};
+/** Fouiller : dégager une relique de la terre, doucement pour ne pas l'abîmer. */
+const scratchStep = (o) => (api) => {
+  const C = 14, R = 8, dur = o.dur ?? 20;
+  const inRelic = (c, r) => ((c - (C - 1) / 2) / (C * 0.28)) ** 2 + ((r - (R - 1) / 2) / (R * 0.36)) ** 2 <= 1;
+  const relic = new Set();
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (inRelic(c, r)) relic.add(`${c},${r}`);
+  const cleared = new Set();
+  let dmg = 0, t = 0, over = false, last = null;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="dig" id="dig" style="grid-template-columns:repeat(${C},1fr)"><span class="dig-relic" aria-hidden="true">${o.icon || '🏺'}</span>${Array.from({ length: C * R }, (_, i) => `<i data-cell="${i % C},${Math.floor(i / C)}"></i>`).join('')}</div>
+    <div class="gauge"><i id="dig-p" style="width:0%"></i></div><div class="gauge-cap"><span>Dégagé : <b id="dig-n">0 %</b></span><span>Abîmé : <b id="dig-d">0 %</b></span></div>`;
+  const box = $('dig');
+  const end = (ok, text) => {
+    over = true;
+    if (ok) {
+      api.msg(text);
+      setTimeout(() => api.next(), 500);
+    } else api.fail(text);
+  };
+  const scrape = (e) => {
+    if (over) return;
+    const now = performance.now();
+    const speed = last ? Math.hypot(e.clientX - last.x, e.clientY - last.y) / Math.max(1, now - last.t) : 0; // px par ms
+    last = { x: e.clientX, y: e.clientY, t: now };
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const key = el?.dataset?.cell;
+    if (!key || el.classList.contains('off')) return;
+    el.classList.add('off');
+    if (!relic.has(key)) return;
+    cleared.add(key);
+    if (speed > (o.maxSpeed ?? 0.9)) {
+      dmg += 7;
+      api.msg('Doucement, tu abîmes la relique !');
+    }
+    const pct = Math.round((cleared.size / relic.size) * 100);
+    $('dig-p').style.width = `${pct}%`;
+    $('dig-n').textContent = `${pct} %`;
+    $('dig-d').textContent = `${Math.min(100, dmg)} %`;
+    if (dmg >= 100) return end(false, 'La relique est abîmée.');
+    if (pct >= 90) end(true, 'Relique dégagée !');
+  };
+  box.onpointerdown = (e) => {
+    box.setPointerCapture(e.pointerId);
+    last = null;
+    scrape(e);
+  };
+  box.onpointermove = (e) => {
+    if (e.buttons || e.pointerType === 'touch') scrape(e);
+  };
+  box.onpointerup = () => (last = null);
+  api.onTick((dt) => {
+    if (over) return;
+    t += dt;
+    if (t >= dur) end(false, 'Le temps est écoulé.');
+  });
+};
+/** Déchiffrer : retrouver les paires de symboles (jeu de mémoire). */
+const pairsStep = (o) => (api) => {
+  const glyphs = ['ᚠ', 'ᚢ', 'ᚦ', 'ᚨ', 'ᚱ', 'ᚲ', 'ᚷ', 'ᚹ'].sort(() => Math.random() - 0.5).slice(0, o.pairs ?? 6);
+  const cards = [...glyphs, ...glyphs].sort(() => Math.random() - 0.5);
+  let open = [], found = 0, miss = 0, lock = false, over = false;
+  api.area.innerHTML = `<p class="op-step">${o.label}</p><div class="pairs">${cards.map((gl, i) => `<button type="button" class="pair" data-pair="${i}" aria-label="Pierre gravée"><span>${gl}</span></button>`).join('')}</div><p class="note" id="pair-n"></p>`;
+  const info = () => ($('pair-n').textContent = `${found} / ${glyphs.length} paires${o.misses != null ? ` · ${o.misses - miss} erreur${o.misses - miss > 1 ? 's' : ''} permise${o.misses - miss > 1 ? 's' : ''}` : ''}`);
+  api.area.querySelector('.pairs').onclick = (e) => {
+    const b = e.target.closest('[data-pair]');
+    if (!b || lock || over || b.classList.contains('up')) return;
+    b.classList.add('up');
+    open.push(b);
+    if (open.length < 2) return;
+    const [a, c] = open;
+    open = [];
+    if (cards[+a.dataset.pair] === cards[+c.dataset.pair]) {
+      a.classList.add('done');
+      c.classList.add('done');
+      found++;
+      info();
+      if (found >= glyphs.length) {
+        over = true;
+        api.msg(o.good || 'Inscription déchiffrée !');
+        setTimeout(() => api.next(), 500);
+      }
+      return;
+    }
+    miss++;
+    info();
+    if (o.misses != null && miss > o.misses) {
+      over = true;
+      return api.fail('Trop d’erreurs.');
+    }
+    lock = true;
+    setTimeout(() => {
+      a.classList.remove('up');
+      c.classList.remove('up');
+      lock = false;
+    }, 700);
+  };
+  info();
+};
 
 /* ═══ Inventions des scientifiques ═══════════════════════════════════════ */
 function inventionsHTML() {

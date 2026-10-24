@@ -84,6 +84,22 @@ export default handler(['POST'], async (req, body) => {
       return { name: fullName(row.data) };
     }
 
+    case 'shops.list': {
+      // /boutiques annoncer : toutes les boutiques regroupées par salon, avec leurs objets en vente
+      const GMs = await import('../shared/game.js');
+      const { loadCatalog } = await import('./_lib/context.js');
+      await loadCatalog();
+      const by = {};
+      for (const [key, s0] of Object.entries(await readAll('shops'))) {
+        const s = GMs.normalizeShop({ ...s0 });
+        (by[key.split('~')[0]] ??= []).push({
+          name: s.name, seller: s.seller, face: s.face || '', img: s.img || null,
+          items: s.items.filter(([k]) => GMs.ITEMS[k]).map(([k, price, stock]) => ({ name: GMs.ITEMS[k].name, price, stock })),
+        });
+      }
+      return { channels: Object.entries(by).map(([id, shops]) => ({ id, shops })) };
+    }
+
     case 'group': {
       // /fiche groupe : équipage ou escouade d'un joueur (logo, banque commune, bateau attribué, membres et grades)
       need(body.userId, 400, 'Joueur manquant.');

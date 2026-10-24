@@ -2176,7 +2176,7 @@ journalFab.hidden = true;
 journalFab.textContent = '📓 Carnet';
 document.body.append(journalFab);
 setInterval(() => {
-  journalFab.hidden = !S || !beta();
+  journalFab.hidden = !S;
 }, 1500);
 function jrEntryHTML(e) {
   return `<article class="jr-entry">
@@ -4204,7 +4204,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(), ajour: tools() && beta(),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(), ajour: tools() && staffCan('joueurs'),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';

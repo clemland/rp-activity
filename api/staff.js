@@ -75,11 +75,8 @@ export default handler(['POST'], async (req, body) => {
       return retry(async () => {
         const row = await read('players', body.target);
         need(row, 404, 'Ce joueur n’a pas de fiche.');
-        // Carnet : annotations signées par le membre du staff (en test, réservé aux testeurs)
-        if (String(body.action?.type || '').startsWith('journal.')) {
-          need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
-          body.action = { ...body.action, by: me.uid, byName: me.name || '' };
-        }
+        // Carnet : annotations signées par le membre du staff
+        if (String(body.action?.type || '').startsWith('journal.')) body.action = { ...body.action, by: me.uid, byName: me.name || '' };
         const out = staffAction(normalize(row.data), body.action);
         await write('players', body.target, out.player, row.version);
         return out;
@@ -858,8 +855,7 @@ export default handler(['POST'], async (req, body) => {
       return { shop: null, toast: 'Boutique fermée' };
 
     case 'journals': {
-      // Dernières entrées des carnets de tous les joueurs (en test, réservé aux testeurs)
-      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+      // Dernières entrées des carnets de tous les joueurs
       const list = [];
       for (const [uid, p] of Object.entries(await readAll('players'))) {
         for (const e of Array.isArray(p.journal) ? p.journal : []) {
@@ -873,7 +869,6 @@ export default handler(['POST'], async (req, body) => {
     case 'secret.add':
     case 'secret.delete': {
       // Notes secrètes du staff sur un joueur : rangées à part de sa fiche, jamais envoyées à son app
-      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
       need(body.target, 400, 'Joueur manquant.');
       const key = `notes:${String(body.target)}`;
       if (body.op === 'secret.get') return { notes: (await read('meta', key))?.data?.list || [] };

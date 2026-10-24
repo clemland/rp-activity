@@ -70,8 +70,7 @@ export default handler(['POST'], async (req, body) => {
     if (typeof ph === 'string') action.photo = await ingest(ph, 'photos', me.uid);
     else if (ph?.url) action.photo = { ...ph, url: await ingest(ph.url, 'photos', me.uid) };
   }
-  // Carnet de suivi : en test, réservé aux testeurs
-  need(!String(action.type).startsWith('journal.') || GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
+  // Carnet de suivi : images envoyées dans le stockage
   if (action.type === 'journal.save' && Array.isArray(action.images)) action.images = await Promise.all(action.images.slice(0, 4).map((u) => ingest(u, 'carnets', me.uid)));
   // Nouveautés en test (cuisine, commerce) : réservées aux testeurs
   need(!GM.betaAction(action.type) || GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');

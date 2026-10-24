@@ -218,7 +218,13 @@ export default handler(['POST'], async (req, body) => {
       let drop = null;
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
         const loot = normalizeLoot((await read('meta', 'loot'))?.data || {});
-        if (Object.keys(loot.places).length) {
+        // En mer : les messages RP écrits à bord d'un bateau en voyage pêchent dans la table « Pleine mer »
+        const here = [String(body.channelId), body.parentId ? String(body.parentId) : null].filter(Boolean);
+        const atSea = loot.tables.mer && Object.values(await readAll('ships')).some((s) => s.voyage?.status === 'sea' && s.channel?.id && here.includes(String(s.channel.id)));
+        if (atSea) {
+          await loadCatalog();
+          drop = rollLoot(loot.tables.mer);
+        } else if (Object.keys(loot.places).length) {
           await loadCatalog();
           const pos = { channelId: String(body.channelId), parentId: body.parentId ? String(body.parentId) : null };
           const islandId = Object.keys(loot.places).some((k) => k.startsWith('isl:')) ? islandOf((await loadMap()).map, pos) : null;

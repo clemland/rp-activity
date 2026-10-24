@@ -2332,6 +2332,17 @@ $('d-journal').addEventListener('change', async (e) => {
   renderJournal();
 });
 
+/* Liens du carnet : dans une Activity, Discord bloque les liens classiques, on passe par son SDK pour les ouvrir */
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="http"]');
+  if (!a || !a.closest('.jr-text')) return;
+  e.preventDefault();
+  const url = a.href;
+  const sdk = window.__discordSdk;
+  if (sdk?.commands?.openExternalLink) sdk.commands.openExternalLink({ url }).catch(() => window.open(url, '_blank'));
+  else window.open(url, '_blank');
+});
+
 /* ═══ Commerce entre joueurs (bouton flottant) ═══════════════════════════ */
 const tradeFab = document.createElement('button');
 tradeFab.type = 'button';

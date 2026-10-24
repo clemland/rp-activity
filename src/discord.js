@@ -35,7 +35,7 @@ if (!inDiscord()) {
 export async function connect() {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID;
   if (!clientId) throw new Error('VITE_DISCORD_CLIENT_ID manquant.');
-  const sdk = new DiscordSDK(clientId);
+  const sdk = window.__discordSdk = new DiscordSDK(clientId);
   await sdk.ready();
   const { code } = await sdk.commands.authorize({
     client_id: clientId,

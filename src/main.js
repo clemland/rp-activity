@@ -3000,15 +3000,16 @@ function renderAdminShops() {
           <span class="chev" aria-hidden="true">▾</span>
         </button>
         ${open ? `<div class="ashop-body">
-          <p class="note">ID du salon : <code>${esc(ch)}</code></p>
+          <p class="note">Salon : <b>${esc(sh.channel)}</b></p>
           ${items.length ? `<table class="ashop-items"><thead><tr><th>Objet</th><th>Prix</th><th>Stock</th></tr></thead><tbody>${items.map(([k, price, left]) => `<tr><td>${itemIco(k)} ${esc(itemOf(k).name)}</td><td>${berry(price)}</td><td>${left < 0 ? 'illimité' : left}</td></tr>`).join('')}</tbody></table>` : '<p class="note">Aucun objet en vente.</p>'}
           <div class="ashop-acts">
             <button class="btn sm" data-ashop-edit="${esc(ch)}">Modifier</button>
+            <button class="btn sm ghost" data-ashop-dup="${esc(ch)}">Dupliquer</button>
             <button class="btn sm ghost danger-txt" data-ashop-del="${esc(ch)}">Supprimer la boutique</button>
           </div>
         </div>` : ''}
       </article>`;
-    }).join('')}</div>` : '<div class="no-shop">' + ico(265) + '<h2>Aucune boutique</h2><p class="note">Crée la première avec « + Nouvelle boutique » : il suffira de coller l’ID du salon.</p></div>'}`;
+    }).join('')}</div>` : '<div class="no-shop">' + ico(265) + '<h2>Aucune boutique</h2><p class="note">Crée la première avec « + Nouvelle boutique » : il suffira de choisir son salon.</p></div>'}`;
   paintStatic(el);
 }
 $('v-ashop').addEventListener('click', async (e) => {
@@ -3020,6 +3021,9 @@ $('v-ashop').addEventListener('click', async (e) => {
   }
   const ed = e.target.closest('[data-ashop-edit]')?.dataset.ashopEdit;
   if (ed) return openShopEdit(adminShops[ed], ed);
+  // Dupliquer : mêmes objets, prix et vendeur ; il reste à choisir un autre salon
+  const dup = e.target.closest('[data-ashop-dup]')?.dataset.ashopDup;
+  if (dup) return openShopEdit({ ...structuredClone(adminShops[dup]), name: `${adminShops[dup].name} (copie)`.slice(0, 40) }, null);
   const del = e.target.closest('[data-ashop-del]')?.dataset.ashopDel;
   if (del) {
     const sh = adminShops[del];
@@ -3157,23 +3161,47 @@ $('v-shop').addEventListener('click', async (e) => {
 /* Éditeur de boutique : staff seulement (double-clic ou appui long sur le vendeur) */
 let shopDraft = null;
 let shopEditCh = null, shopDraftCh = '';
+/* Salons RP proposés pour placer une boutique (posts des forums compris) */
+let shopChans = null, seChanOther = false;
+async function loadShopChans() {
+  try {
+    shopChans = (await API.staff('shop.channels')).channels;
+  } catch {
+    shopChans = []; // sans la liste, on garde la saisie d'un ID
+  }
+  if ($('d-shopedit').open) {
+    readShopEdit();
+    renderShopEdit();
+  }
+}
 function openShopEdit(base, channelId = null) {
   if (!tools() || !base) return;
   shopDraft = structuredClone(base);
   shopEditCh = channelId; // salon d'origine (null = nouvelle boutique)
   // Nouvelle boutique : on propose le salon où le panneau est ouvert, s'il n'a pas déjà de boutique.
   shopDraftCh = channelId ?? (API.channelId && !adminShops?.[API.channelId] ? API.channelId : '');
+  seChanOther = false;
   renderShopEdit();
   $('se-err').textContent = '';
   openDialog('d-shopedit');
+  if (!shopChans) loadShopChans();
 }
 function renderShopEdit() {
   const d = shopDraft;
+  // Menu des salons RP (posts rangés sous leur forum), ou un ID collé à la main
+  const inList = (id) => (shopChans || []).some((c) => c.id === id || c.posts.some((p) => p.id === id));
+  const other = seChanOther || (shopDraftCh && shopChans && !inList(shopDraftCh)) || (shopChans && !shopChans.length);
+  const taken = (id) => adminShops?.[id] && id !== shopEditCh;
+  const opt = (id, label) => `<option value="${esc(id)}" ${id === shopDraftCh && !other ? 'selected' : ''} ${taken(id) ? 'disabled' : ''}>${esc(label)}${taken(id) ? ' (a déjà une boutique)' : ''}</option>`;
+  const idInput = `<input id="se-chan" value="${esc(shopDraftCh)}" inputmode="numeric" placeholder="ID du salon (clic droit > Copier l’identifiant)" maxlength="22" style="margin-top:6px">`;
+  const chanField = shopChans == null
+    ? `<p class="note" style="margin:0">Chargement des salons…</p><input id="se-chan" type="hidden" value="${esc(shopDraftCh)}">`
+    : `<select id="se-chan-pick"><option value="" ${!shopDraftCh && !other ? 'selected' : ''}>Choisis un salon…</option>${shopChans.map((c) => (c.kind === 'forum' ? (c.posts.length ? `<optgroup label="🗂️ ${esc(c.name)}">${c.posts.map((p) => opt(p.id, p.name)).join('')}</optgroup>` : '') : opt(c.id, `#${c.name}`))).join('')}<option value="__id" ${other ? 'selected' : ''}>Autre salon (coller son ID)…</option></select>
+      ${other ? idInput : `<input id="se-chan" type="hidden" value="${esc(shopDraftCh)}">`}`;
   const opts = (s) => Object.entries(G.ITEMS).map(([k, it]) => `<option value="${k}" ${k === s ? 'selected' : ''}>${esc(it.name)}</option>`).join('');
   $('se-body').innerHTML = `
     <div class="form">
-      <div class="wide"><label for="se-chan">ID du salon</label><input id="se-chan" value="${esc(shopDraftCh)}" inputmode="numeric" placeholder="ex. 1234567890123456789" maxlength="22">
-        <small class="note">Dans Discord : clic droit sur le salon > Copier l’identifiant (mode développeur activé). Le nom du salon est retrouvé tout seul.</small></div>
+      <div class="wide"><label for="se-chan-pick">Salon</label>${chanField}</div>
       <div><label for="se-name">Nom de la boutique</label><input id="se-name" value="${esc(d.name)}" maxlength="40"></div>
       <div><label for="se-seller">Vendeur</label><input id="se-seller" value="${esc(d.seller)}" maxlength="30"></div>
       <div><label for="se-rate">Rachat (% de la valeur)</label><input id="se-rate" type="number" min="5" max="100" value="${Math.round(d.buyRate * 100)}"></div>
@@ -3205,7 +3233,8 @@ function renderShopEdit() {
 }
 function readShopEdit() {
   const d = shopDraft;
-  const raw = $('se-chan').value.trim();
+  const pick = $('se-chan-pick')?.value;
+  const raw = !pick || pick === '__id' ? $('se-chan').value.trim() : pick;
   shopDraftCh = API.mode === 'demo' ? raw : raw.replace(/\D/g, '');
   d.name = $('se-name').value.trim() || d.name;
   d.seller = $('se-seller').value.trim() || d.seller;
@@ -3242,6 +3271,11 @@ $('d-shopedit').addEventListener('click', async (e) => {
 
 });
 $('d-shopedit').addEventListener('change', async (e) => {
+  if (e.target.id === 'se-chan-pick') {
+    readShopEdit();
+    seChanOther = e.target.value === '__id';
+    return renderShopEdit();
+  }
   if (e.target.dataset?.f === 'inf') {
     const s = e.target.closest('.se-stock').querySelector('[data-f=stock]');
     s.disabled = e.target.checked;

@@ -84,6 +84,26 @@ export default handler(['POST'], async (req, body) => {
       return { name: fullName(row.data) };
     }
 
+    case 'export.economy': {
+      // /export economie : tout ce qui touche à l'économie, sans les images
+      const GMe = await import('../shared/game.js');
+      const { loadCatalog } = await import('./_lib/context.js');
+      await loadCatalog();
+      const light = (o) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => !['img', 'icon', 'photo'].includes(k)).map(([k, v]) => [k, k === 'desc' ? String(v || '').slice(0, 120) : v]));
+      const players = Object.values(await readAll('players'));
+      const b = players.map((p) => Number(p.berry) || 0).sort((x, y) => x - y);
+      const grades = Object.entries(GMe).filter(([, v]) => Array.isArray(v) && v.length && v[0] && typeof v[0] === 'object' && 'pay' in v[0]);
+      return {
+        exportedAt: new Date().toISOString(),
+        items: Object.fromEntries(Object.entries(GMe.ITEMS).map(([k, it]) => [k, light(it)])),
+        recipes: GMe.RECIPES,
+        shops: Object.fromEntries(Object.entries(await readAll('shops')).map(([k, s]) => [k, light(s)])),
+        salaries: Object.fromEntries(grades),
+        shipCfg: GMe.SHIPCFG,
+        economy: { players: players.length, berries: { min: b[0] ?? 0, median: b[Math.floor(b.length / 2)] ?? 0, max: b[b.length - 1] ?? 0, total: b.reduce((s, x) => s + x, 0) } },
+      };
+    }
+
     case 'shops.list': {
       // /boutiques annoncer : toutes les boutiques regroupées par salon, avec leurs objets en vente
       const GMs = await import('../shared/game.js');

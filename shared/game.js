@@ -130,6 +130,8 @@ export function careBlock(doctor, patient, h, recipe) {
   if (Object.entries(recipe.needs).some(([k, q]) => count(doctor, k) < q)) return 'Matériel manquant.';
   const missT = missingTools(doctor, recipe);
   if (missT.length) return `Outil manquant : ${missT.join(', ')}.`;
+  const cdC = cooldownLeft(doctor, cdKey(recipe));
+  if (cdC) return `Repos après un échec : encore ${duree(cdC / 1000)} avant de retenter ce soin.`;
   return null;
 }
 export function normalizeHealth(h = {}) {
@@ -155,6 +157,14 @@ export const JOBS = {
 
 };
 
+/** Repos après un mini-jeu raté : rien n'est perdu, mais on ne relance pas la même recette tout de suite. */
+export const cdKey = (r) => `l:${recipeLabel(r)}`;
+export const cooldownLeft = (p, key, now = Date.now()) => Math.max(0, (p.cooldowns?.[key] || 0) - now);
+export const COOK_REST = 300; // cuisine : 5 minutes de repos (les recettes n'ont pas de durée)
+function setCooldown(p, key, seconds, now) {
+  if (!(seconds > 0)) return;
+  p.cooldowns = { ...(p.cooldowns || {}), [key]: now + Math.round(seconds * 1000) };
+}
 /** Testeurs des nouveautés pas encore ouvertes à tous (cuisine, commerce). */
 export const BETA_USERS = ['464061688069488640'];
 export const isBeta = (uid) => BETA_USERS.includes(String(uid));
@@ -267,6 +277,8 @@ export function normalize(p) {
   p.careIn = freshReq(p.careIn); // demandes de soin reçues (valables 1 h)
   p.careOut = freshReq(p.careOut); // demandes de soin envoyées
   if (p.job?.id && !JOBS[p.job.id]) p.job = { ...p.job, id: null }; // métier supprimé (ex. cuisinier)
+  // Recettes au repos après un échec : { clé: fin du repos }
+  p.cooldowns = Object.fromEntries(Object.entries(p.cooldowns || {}).filter(([, t]) => Number(t) > Date.now()).slice(0, 50).map(([k, t]) => [String(k).slice(0, 120), Number(t)]));
   // Recettes de cuisine du joueur : validées par le staff (le plat devient alors un objet du catalogue)
   p.cook = (Array.isArray(p.cook) ? p.cook : []).filter((x) => x && str(x.name, 60)).slice(0, 40).map((x) => ({
     id: Number(x.id) || Date.now(),
@@ -557,6 +569,8 @@ export function craftBlock(p, r, crew = null) {
   if (Object.entries(r.needs).some(([k, q]) => stockOf(p, crew, k) < q)) return 'Objets manquants (inventaire et cale).';
   const miss = missingTools(p, r, crew);
   if (miss.length) return `Outil manquant : ${miss.join(', ')}.`;
+  const cd = cooldownLeft(p, cdKey(r));
+  if (cd) return `Repos après un échec : encore ${duree(cd / 1000)}.`;
   return null;
 }
 
@@ -671,10 +685,14 @@ export function playerAction(player, action, ctx = {}) {
       const fromChest = takeItems(p, store, r.needs); // inventaire d'abord, puis la cale du bateau où l'on est à bord
       const used = Object.keys(fromChest).length > 0;
       if (used) out.store = store;
-      // Recette avec mini-jeu : raté, les ingrédients sont perdus
+      // Recette avec mini-jeu ratée : rien n'est perdu (on repart de la fiche d'avant), mais la recette est au repos
       if (r.game?.list?.length && a.success === false) {
+        const q = clone(player);
+        setCooldown(q, cdKey(r), (r.seconds || 0) / 2, now);
+        out.player = q;
+        delete out.store;
         out.failed = true;
-        out.toast = `Raté : ${recipeLabel(r)}. Les ingrédients sont perdus.`;
+        out.toast = `Raté : ${recipeLabel(r)}. Rien n’est perdu${r.seconds ? `, mais il faut attendre ${duree(r.seconds / 2)} avant de réessayer` : ''}.`;
         break;
       }
       p.craft = { recipe: a.id, name: recipeLabel(r), gives: r.gives, start: now, end: now + r.seconds * 1000, fromChest, fromShip: used ? ctx.storeId || null : null };
@@ -766,8 +784,14 @@ export function playerAction(player, action, ctx = {}) {
       if (used && w.type === 'construire') out.store = store;
       if (used && ship) out.ship = normalizeShip(ship); // la cale du bateau a changé
       if (!a.success) {
+        // Raté : rien n'est perdu (fiche, cale et bateau comme avant), mais ce travail est au repos
+        const q = clone(player);
+        setCooldown(q, cdKey(r), (r.seconds || 0) / 2, now);
+        out.player = q;
+        delete out.store;
+        delete out.ship;
         out.failed = true;
-        out.toast = `Travail raté : ${workLabel(w)}. Les matériaux sont perdus.`;
+        out.toast = `Travail raté : ${workLabel(w)}. Rien n’est perdu${r.seconds ? `, mais il faut attendre ${duree(r.seconds / 2)} avant de réessayer` : ''}.`;
         break;
       }
       // Mini-jeu réussi : le travail prend ensuite le temps de la recette (à récupérer dans l'onglet Métier)
@@ -830,13 +854,17 @@ export function playerAction(player, action, ctx = {}) {
       const r = p.cook.find((x) => x.id === a.id);
       if (!r) fail('Recette introuvable.');
       if (!r.ok || !r.item || !ITEMS[r.item]) fail('Cette recette n’est pas encore validée par le staff.');
+      const cdk = cooldownLeft(p, `c:${r.id}`, now);
+      if (cdk) fail(`Repos après un échec : encore ${duree(cdk / 1000)}.`);
       for (const [k, q] of Object.entries(r.needs)) if (count(p, k) < q) fail(`Il te manque : ${itemOf(k).name}.`);
-      for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
       if (!a.success) {
+        // Raté : les ingrédients sont gardés, mais la recette est au repos
+        setCooldown(p, `c:${r.id}`, COOK_REST, now);
         out.failed = true;
-        out.toast = `Raté : ${r.name}. Les ingrédients sont perdus.`;
+        out.toast = `Raté : ${r.name}. Tu gardes tes ingrédients, mais il faut attendre ${duree(COOK_REST)} avant de réessayer.`;
         break;
       }
+      for (const [k, q] of Object.entries(r.needs)) removeItem(p, k, q);
       if (!addItem(p, r.item, 1)) {
         out.toast = `${r.name} est réussi, mais tu ne peux pas le porter : ${carryBlock(p, r.item, 1)} Le plat est perdu.`;
         break;

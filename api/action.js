@@ -226,8 +226,11 @@ export default handler(['POST'], async (req, body) => {
         const h = patient.health.find((x) => x.id === req.healthId);
         const why = careBlock(player, patient, h, r);
         need(!why, 400, why);
-        for (const [k, q] of Object.entries(r.needs)) removeItem(player, k, q);
-        let toast = `Soin raté : « ${h.label} » n’est pas soigné. Le matériel est perdu.`;
+        // Raté : le matériel est gardé, mais ce soin est au repos (moitié de sa durée, 1 h au plus)
+        const rest = Math.min(3600, (r.seconds || 0) / 2);
+        if (action.success) for (const [k, q] of Object.entries(r.needs)) removeItem(player, k, q);
+        else if (rest > 0) player.cooldowns = { ...(player.cooldowns || {}), [GM.cdKey(r)]: now + Math.round(rest * 1000) };
+        let toast = `Soin raté : « ${h.label} » n’est pas soigné. Le matériel est gardé${rest > 0 ? `, mais il faut attendre ${GM.duree(rest)} avant de retenter ce soin` : ''}.`;
         // Annonce dans le salon : réussite ou échec du soin
         await announce(player.position?.channelId, `🩺 **${fullName(player)}** ${action.success ? 'réussit' : 'rate'} ${h.level >= 2 ? 'l’opération' : 'les soins'} de ${self ? 'sa propre blessure' : `**${fullName(patient)}**`} : « ${h.label} » (${GM.HEALTH_LEVELS[h.level - 1].toLowerCase()})${action.success && r.seconds ? `, guérison dans ${GM.duree(r.seconds)}` : ''}.`);
         if (action.success) {

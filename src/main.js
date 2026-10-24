@@ -1048,7 +1048,7 @@ $('v-job').addEventListener('click', async (e) => {
     const r = G.RECIPES[id];
     if (r?.game?.list?.length) {
       // Recette avec mini-jeu : les ingrédients sont perdus en cas d'échec
-      if (!(await askConfirm('Les ingrédients seront pris tout de suite. Si tu rates le mini-jeu, ils sont perdus.', { title: `${G.recipeLabel(r)} ?`, ok: 'Commencer' }))) return;
+      if (!(await askConfirm('Si tu rates le mini-jeu, rien n’est perdu, mais tu devras attendre la moitié du temps de la recette avant de réessayer.', { title: `${G.recipeLabel(r)} ?`, ok: 'Commencer' }))) return;
       const success = await customGame(r, S.job.lvl, G.recipeLabel(r));
       return void run({ type: 'craft.start', id, success });
     }
@@ -1782,7 +1782,7 @@ function gameFieldsHTML(r) {
     <b style="font-size:14px">Mini-jeux à enchaîner : tous ceux cochés, l’un après l’autre, dans cet ordre${r.care ? ' (pour une opération, l’anesthésie vient d’abord)' : ''}</b>
     <div class="perms">${Object.entries(SIMPLE_GAMES).map(([k, [l]]) => box(k, l)).join('')}</div>
     ${r.care ? `<b style="font-size:14px">Gestes médicaux</b><div class="perms">${OP_KEYS.map((k) => box(k, OP_STEPS[k])).join('')}</div>` : ''}
-    <p class="note" style="margin:0">${r.work || r.care ? 'Rien de coché : les mini-jeux habituels.' : 'Rien de coché : pas de mini-jeu (fabrication directe). Avec un mini-jeu, les ingrédients sont perdus en cas d’échec.'} Difficulté « Automatique » : selon le travail, la gravité et le rang.</p>
+    <p class="note" style="margin:0">${r.work || r.care ? 'Rien de coché : les mini-jeux habituels.' : 'Rien de coché : pas de mini-jeu (fabrication directe). Avec un mini-jeu, rien n’est perdu en cas d’échec, mais la recette se repose la moitié de sa durée.'} Difficulté « Automatique » : selon le travail, la gravité et le rang.</p>
   </div>`;
 }
 function readGameFields(r) {
@@ -2019,7 +2019,7 @@ function cookHTML() {
       ${!r.ok && r.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(r.refused.reason)}</p>` : ''}
       <b>Il faut</b><div class="needs">${Object.entries(r.needs).map((x) => needChip(x)).join('')}</div>
       <p class="note" style="margin:4px 0">${r.steps.map((k) => G.COOK_STEPS[k]).join(' → ')}</p>
-      ${VIEW ? '' : `<div class="t-actions">${r.ok ? `<button class="btn sm" data-ck-make="${r.id}" ${Object.entries(r.needs).every(([k, q]) => G.count(S, k) >= q) ? '' : 'disabled'}>🍳 Cuisiner</button>` : ''}<button class="btn sm ghost" data-ck-edit="${r.id}">${!r.ok && r.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-ck-delr="${r.id}">Supprimer</button></div>`}
+      ${VIEW ? '' : `<div class="t-actions">${r.ok ? (G.cooldownLeft(S, `c:${r.id}`) ? `<button class="btn sm" disabled>⏳ Repos : ${G.duree(G.cooldownLeft(S, `c:${r.id}`) / 1000)}</button>` : `<button class="btn sm" data-ck-make="${r.id}" ${Object.entries(r.needs).every(([k, q]) => G.count(S, k) >= q) ? '' : 'disabled'}>🍳 Cuisiner</button>`) : ''}<button class="btn sm ghost" data-ck-edit="${r.id}">${!r.ok && r.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-ck-delr="${r.id}">Supprimer</button></div>`}
     </article>`).join('')}</div>` : '<p class="note">Aucune recette pour l’instant.</p>'}`;
 }
 let cookDraft = null;
@@ -2142,7 +2142,7 @@ $('v-job').addEventListener('click', async (e) => {
   if (mk) {
     const r = S.cook.find((x) => x.id === Number(mk));
     if (!r) return;
-    if (!(await askConfirm('Les ingrédients sont pris tout de suite. Si tu rates une étape, ils sont perdus.', { title: `Cuisiner : ${r.name} ?`, ok: 'En cuisine !' }))) return;
+    if (!(await askConfirm('Si tu rates une étape, tu gardes tes ingrédients, mais tu devras attendre 5 minutes avant de réessayer.', { title: `Cuisiner : ${r.name} ?`, ok: 'En cuisine !' }))) return;
     const success = await cookGame(r);
     run({ type: 'cook.make', id: r.id, success });
   }

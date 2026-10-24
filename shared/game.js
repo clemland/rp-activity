@@ -570,7 +570,13 @@ export function normalizeShop(s) {
   s.difficulty = int(s.difficulty ?? 0, 0, 50);
   return s;
 }
-export const refPrice = (shop, k) => Math.max(1, Math.round(itemOf(k).value * shop.buyRate));
+/** Les trésors (or, perles, reliques…) sont faits pour être revendus : rachetés 80 % de leur valeur. */
+export const TREASURE_RATE = 0.8;
+export const refPrice = (shop, k) => {
+  const it = itemOf(k);
+  const rate = it.kind === 'tresor' ? Math.max(shop.buyRate, TREASURE_RATE) : shop.buyRate;
+  return Math.max(1, Math.round(it.value * rate));
+};
 /** Chance que le vendeur accepte : 100 % au prix de référence, chute vite au-delà. */
 export function sellChance(shop, pct) {
   if (pct <= 100) return 100;

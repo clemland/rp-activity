@@ -2312,8 +2312,11 @@ function renderPoll() {
   if (!POLL) return void (el.innerHTML = '<p class="note">Chargement…</p>');
   const tabs = [...Object.entries(G.POLL_CATS), ['results', '🏆 Résultats']];
   el.innerHTML = `
-    <div class="pl-head"><b id="pl-left">${pollLeft()}</b><span class="note">dimanche 20 h · ${POLL.voters} votant${POLL.voters > 1 ? 's' : ''} cette semaine</span></div>
-    <div class="job-switch" role="tablist">${tabs.map(([k, l]) => `<button type="button" role="tab" class="${pollTab === k ? 'on' : ''}" aria-selected="${pollTab === k}" data-pl-tab="${k}">${l}</button>`).join('')}</div>
+    <div class="pl-sticky"><div class="pl-head"><b id="pl-left">${pollLeft()}</b><span class="note">dimanche 20 h · ${POLL.voters} votant${POLL.voters > 1 ? 's' : ''} cette semaine</span></div>
+    <div class="job-switch pl-tabs" role="tablist">${tabs.map(([k, l]) => {
+      const [ico, ...rest] = l.split(' ');
+      return `<button type="button" role="tab" class="${pollTab === k ? 'on' : ''}" aria-selected="${pollTab === k}" data-pl-tab="${k}"><span class="pl-tab-ico" aria-hidden="true">${ico}</span><span class="pl-tab-l">${rest.join(' ')}</span></button>`;
+    }).join('')}</div></div>
     ${pollTab === 'results'
       ? `<div class="form-actions" style="justify-content:flex-start;margin-top:0">${POLL.last ? '<button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button>' : ''}${beta() ? '<button class="btn sm ghost" id="pl-preview">👁️ Aperçu du reveal (données fictives)</button>' : ''}</div>
         ${pollPreview ? '<p class="note pl-preview-note">👁️ Aperçu avec des points inventés : rien n’est enregistré.</p>' : ''}${pollResultsHTML(pollPreview || POLL.last, pollAnim)}`

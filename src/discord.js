@@ -17,7 +17,12 @@ function showFatal(msg) {
   }
   box.textContent = `⚠️ Erreur de l’app (envoie ce message) :\n${msg}`.slice(0, 2000);
 }
-window.addEventListener('error', (e) => showFatal(`${e.message}\n${e.filename?.split('/').pop() || ''}:${e.lineno || ''}\n${e.error?.stack || ''}`));
+// Avertissements sans gravité du navigateur : on ne les affiche pas
+const HARMLESS = /ResizeObserver loop|^Script error\.?$/i;
+window.addEventListener('error', (e) => {
+  if (HARMLESS.test(e.message || '')) return;
+  showFatal(`${e.message}\n${e.filename?.split('/').pop() || ''}:${e.lineno || ''}\n${e.error?.stack || ''}`);
+});
 window.addEventListener('unhandledrejection', (e) => showFatal(`${e.reason?.message || e.reason}\n${e.reason?.stack || ''}`));
 
 // Hors Discord : plus de démo, on invite simplement à ouvrir l'app depuis Discord

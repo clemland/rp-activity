@@ -642,7 +642,7 @@ function renderTech() {
         </summary>
         ${!t.ok && t.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(t.refused.reason)}</p>` : ''}
         ${t.media ? `<div class="t-media"><img src="${imgSrc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.classList.add('broken');this.remove()"></div>` : ''}
-        <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
+        <div class="jr-text tech-desc">${t.desc ? md(t.desc) : '<em>Pas de description.</em>'}</div>
         <div class="t-actions">
           <button class="btn sm ghost" data-edit-tech="${t.id}">${!t.ok && t.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-del-tech="${t.id}">Supprimer</button>
           ${tools() && VIEW && !t.ok ? `<button class="btn sm" data-ok-tech="${t.id}">Valider</button>${t.refused ? '' : `<button class="btn sm ghost" data-no-tech="${t.id}">Refuser</button>`}` : ''}
@@ -2950,7 +2950,7 @@ function inventionsHTML() {
       <summary>${x.images[0] ? `<span class="t-thumb"><img src="${imgSrc(x.images[0])}" alt="" loading="lazy"></span>` : ''}<span><span class="t-name">${esc(x.name)}</span>${status(x)}</span><span class="cost"><span class="chev" aria-hidden="true">▾</span></span></summary>
       ${!x.ok && x.refused ? `<p class="refused-why"><b>Motif du refus :</b> ${esc(x.refused.reason)}</p>` : ''}
       ${x.images.length ? `<div class="inv-gallery">${x.images.map((u) => `<img src="${imgSrc(u)}" alt="" loading="lazy">`).join('')}</div>` : ''}
-      <p class="inv-desc">${esc(x.desc)}</p>
+      <div class="inv-desc jr-text" style="padding:0 16px">${md(x.desc)}</div>
       ${VIEW ? '' : `<div class="t-actions"><button class="btn sm ghost" data-inv-edit="${x.id}">${!x.ok && x.refused ? 'Corriger et reproposer' : 'Modifier'}</button><button class="btn sm ghost" data-inv-del="${x.id}">Supprimer</button></div>`}
     </details>`).join('') : '<p class="note">Aucune invention pour l’instant.</p>'}`;
 }
@@ -4318,7 +4318,7 @@ function renderMjTab() {
         ${t.media ? `<div class="val-media"><img src="${imgSrc(t.media)}" alt="Illustration de ${esc(t.name)}" loading="lazy" onerror="this.parentElement.remove()"></div>` : ''}
         <div class="val-body">
           <h3>${esc(t.name)} <span class="tag ${SRC_CLS[t.src]}">${G.TECH_SOURCES[t.src]}</span></h3>
-          <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
+          <div class="jr-text tech-desc">${t.desc ? md(t.desc) : '<em>Pas de description.</em>'}</div>
           <div class="val-acts"><button class="btn sm" data-ok-tech="${t.id}">✓ Valider</button><button class="btn sm ghost" data-no-tech="${t.id}">✗ Refuser</button></div>
         </div>
       </article>`).join('')}</div>` : '<p class="note">Aucune technique en attente.</p>'}
@@ -5552,7 +5552,7 @@ function renderPendingTechs() {
         <div class="val-body">
           <p class="note" style="margin:0 0 4px">Proposée par <b>${esc(player)}</b></p>
           <h3>${esc(t.name)} <span class="tag ${SRC_CLS[t.src] || ''}">${G.TECH_SOURCES[t.src] || ''}</span></h3>
-          <p>${esc(t.desc) || '<em>Pas de description.</em>'}</p>
+          <div class="jr-text tech-desc">${t.desc ? md(t.desc) : '<em>Pas de description.</em>'}</div>
           <div class="val-acts">
             <button class="btn sm" data-tv-ok="${esc(uid)}" data-tid="${t.id}">✓ Valider</button>
             <button class="btn sm ghost" data-tv-no="${esc(uid)}" data-tid="${t.id}">✗ Refuser</button>
@@ -5912,7 +5912,7 @@ function renderPendingInventions() {
           <p class="note" style="margin:0 0 4px">Proposée par <b>${esc(player)}</b> · ${job ? `${esc(JOBS[job]?.name || job)} ${JOB_LEVELS[jobLvl - 1]}` : 'sans métier'}${job !== 'scientifique' ? ' <span class="req">(n’est plus scientifique)</span>' : ''}</p>
           <h3>${esc(x.name)}</h3>
           ${x.images.length ? `<div class="inv-gallery">${x.images.map((u) => `<img src="${imgSrc(u)}" alt="" loading="lazy">`).join('')}</div>` : ''}
-          <p class="inv-desc">${esc(x.desc)}</p>
+          <div class="inv-desc jr-text">${md(x.desc)}</div>
           <div class="val-acts">
             <button class="btn sm" data-iv-ok="${esc(uid)}" data-iid="${x.id}">✓ Valider</button>
             <button class="btn sm ghost" data-iv-no="${esc(uid)}" data-iid="${x.id}">✗ Refuser</button>

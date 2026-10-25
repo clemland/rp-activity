@@ -4461,7 +4461,7 @@ function updateNav() {
     admin: ADMIN && staffCan('joueurs'), atech: tools() && staffCan('techniques'), ashop: tools() && staffCan('boutiques'),
     amap: tools() && staffCan('carte'), marine: tools() && (staffCan('marine') || staffCan('joueurs')),
     fleet: tools() && staffCan('equipages'), ships: tools() && staffCan('equipages'), gest: tools() && staffCan('gestion'),
-    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(), ajour: tools() && staffCan('joueurs'),
+    aloot: tools() && staffCan('butins'), aicons: tools() && ME?.uid === G.ICONS_OWNER, aperms: tools() && staffCan('permissions'), agames: tools(), ainv: tools() && staffCan('inventions'), afeat: tools() && staffCan('permissions'), acalc: tools() && staffCan('carte'), asea: tools() && staffCan('carte'), acook: tools() && staffCan('cuisine') && nouveautes(), ajour: tools() && staffCan('joueurs'), avoy: tools() && staffCan('carte'),
   };
   scrBtns.forEach((b) => (b.hidden = !vis[b.dataset.screen]));
   document.querySelector('.scr[data-screen="fiche"] span:last-child').textContent = ADMIN ? 'Fiche ouverte' : 'Ma fiche';
@@ -5762,6 +5762,49 @@ $('v-afeat').addEventListener('change', async (e) => {
   } finally {
     setBusy(-1);
   }
+});
+
+/* ═══ Voyages en cours (panneau admin) ═══════════════════════════════════ */
+let voyList = null;
+async function loadVoyages() {
+  try {
+    const out = await API.staff('ships');
+    const all = Array.isArray(out.ships) ? out.ships : Object.entries(out.ships || {}).map(([id, s]) => ({ id, ...s }));
+    voyList = all.filter((s) => s.voyage && ['vote', 'sea'].includes(s.voyage.status));
+  } catch (err) {
+    voyList = [];
+    toast(esc(err.message));
+  }
+  renderVoyages();
+}
+function renderVoyages() {
+  const el = $('v-avoy');
+  if (!voyList) return void (el.innerHTML = '<p class="note">Chargement…</p>');
+  const st = { vote: '🗳️ Vote du départ', sea: '⛵ En mer' };
+  const list = [...voyList].sort((a, b) => (b.voyage.at || 0) - (a.voyage.at || 0));
+  el.innerHTML = `
+    <div class="sec-head">
+      <div><h2>Voyages en cours</h2><p class="lede" style="margin:0">Tous les bateaux qui votent un départ ou qui sont en pleine mer.</p></div>
+      <button class="btn ghost" id="avoy-reload">Actualiser</button>
+    </div>
+    ${list.length ? list.map((s) => {
+      const v = s.voyage, pax = (s.passengers || []).length;
+      const pct = Math.min(100, Math.round((100 * (v.done || 0)) / Math.max(1, v.needed || 1)));
+      const enc = v.encounter ? ` · 🔭 ${v.encounter.alongside ? 'bord à bord avec' : 'arrêté face à'} ${esc(v.encounter.withName || '?')}` : '';
+      const infos = [v.diff ? `Route ${G.ROUTE_DIFFS[v.diff - 1].toLowerCase()}` : '', v.event?.name ? `Événement : ${esc(v.event.name)}` : '', `${pax} passager${pax > 1 ? 's' : ''}`, v.at ? `depuis le ${jrDate(v.at)}` : ''].filter(Boolean).join(' · ');
+      return `<article class="crew-box avoy">
+        <h3>${esc(s.name || s.id)} <small class="note">${esc(s.type || '')}</small></h3>
+        <p class="note" style="margin:0 0 4px">${st[v.status]}${enc}</p>
+        <p style="margin:0 0 6px"><b>${esc(v.fromName || '?')}</b> → <b>${esc(v.toName || '?')}</b>${v.unknown ? ' <small class="note">(Log Pose : destination cachée aux joueurs)</small>' : ''}</p>
+        ${v.status === 'sea'
+          ? `<div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>${v.done || 0} / ${v.needed} actions RP</span><span>${pct} %</span></div>`
+          : `<p class="note" style="margin:0">${Object.keys(v.votes || {}).length} vote${Object.keys(v.votes || {}).length > 1 ? 's' : ''} sur ${pax} passager${pax > 1 ? 's' : ''} · ${v.needed} actions RP prévues${v.navRead ? '' : ' · mer pas encore lue par un navigateur'}</p>`}
+        <p class="note" style="margin:6px 0 0">${infos}</p>
+      </article>`;
+    }).join('') : '<p class="note">Aucun voyage en cours.</p>'}`;
+}
+$('v-avoy').addEventListener('click', (e) => {
+  if (e.target.closest('#avoy-reload')) loadVoyages();
 });
 
 /* ═══ Carnets : dernières entrées de tous les joueurs (panneau admin) ════ */
@@ -7391,6 +7434,7 @@ function showScreen(name) {
   if (name === 'asea') loadSeaEvents();
   if (name === 'acook') loadCooks();
   if (name === 'ajour') loadJournals();
+  if (name === 'avoy') loadVoyages();
   if (name === 'map') renderMap();
   if (name === 'amap') (amap ? renderAdminMap() : loadAdminMap());
   if (name === 'fleet') renderFleet();

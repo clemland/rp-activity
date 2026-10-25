@@ -1656,6 +1656,8 @@ dialog.confirm #cf-text{margin:0 0 6px;font-size:16px}
 .tech .tech-desc{padding:0 16px}
 .avoy{margin:10px 0}
 .avoy h3{margin:0 0 4px}
+.avoy-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+.avoy-pax{margin-top:8px}
 .jr-excerpt{max-height:9.5em;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,#000 75%,transparent)}
 #trade-fab{position:fixed;left:14px;bottom:14px;z-index:40;font:inherit;font-weight:800;background:var(--gold);color:var(--ink);border:3px solid var(--ink);border-radius:999px;padding:8px 14px;box-shadow:0 4px 0 rgba(0,0,0,.3);cursor:pointer}
 #trade-fab b{background:var(--red);color:#fff;border-radius:999px;padding:0 7px;margin-left:4px}

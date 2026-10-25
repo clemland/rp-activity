@@ -5768,9 +5768,7 @@ $('v-afeat').addEventListener('change', async (e) => {
 let voyList = null;
 async function loadVoyages() {
   try {
-    const out = await API.staff('ships');
-    const all = Array.isArray(out.ships) ? out.ships : Object.entries(out.ships || {}).map(([id, s]) => ({ id, ...s }));
-    voyList = all.filter((s) => s.voyage && ['vote', 'sea'].includes(s.voyage.status));
+    voyList = (await API.staff('voyages')).list;
   } catch (err) {
     voyList = [];
     toast(esc(err.message));
@@ -5788,23 +5786,37 @@ function renderVoyages() {
       <button class="btn ghost" id="avoy-reload">Actualiser</button>
     </div>
     ${list.length ? list.map((s) => {
-      const v = s.voyage, pax = (s.passengers || []).length;
+      const v = s.voyage, pax = s.passengers.length;
       const pct = Math.min(100, Math.round((100 * (v.done || 0)) / Math.max(1, v.needed || 1)));
       const enc = v.encounter ? ` · 🔭 ${v.encounter.alongside ? 'bord à bord avec' : 'arrêté face à'} ${esc(v.encounter.withName || '?')}` : '';
       const infos = [v.diff ? `Route ${G.ROUTE_DIFFS[v.diff - 1].toLowerCase()}` : '', v.event?.name ? `Événement : ${esc(v.event.name)}` : '', `${pax} passager${pax > 1 ? 's' : ''}`, v.at ? `depuis le ${jrDate(v.at)}` : ''].filter(Boolean).join(' · ');
       return `<article class="crew-box avoy">
-        <h3>${esc(s.name || s.id)} <small class="note">${esc(s.type || '')}</small></h3>
+        <div class="avoy-top"><h3>${esc(s.name || s.id)} <small class="note">${esc(s.type || '')} · ${esc(s.owner)}</small></h3><button class="btn sm ghost danger-txt" data-avoy-cancel="${esc(s.id)}" data-avoy-name="${esc(s.name || '')}">Annuler le voyage</button></div>
         <p class="note" style="margin:0 0 4px">${st[v.status]}${enc}</p>
         <p style="margin:0 0 6px"><b>${esc(v.fromName || '?')}</b> → <b>${esc(v.toName || '?')}</b>${v.unknown ? ' <small class="note">(Log Pose : destination cachée aux joueurs)</small>' : ''}</p>
         ${v.status === 'sea'
           ? `<div class="gauge"><i style="width:${pct}%"></i></div><div class="gauge-cap"><span>${v.done || 0} / ${v.needed} actions RP</span><span>${pct} %</span></div>`
           : `<p class="note" style="margin:0">${Object.keys(v.votes || {}).length} vote${Object.keys(v.votes || {}).length > 1 ? 's' : ''} sur ${pax} passager${pax > 1 ? 's' : ''} · ${v.needed} actions RP prévues${v.navRead ? '' : ' · mer pas encore lue par un navigateur'}</p>`}
         <p class="note" style="margin:6px 0 0">${infos}</p>
+        <div class="avoy-pax needs">${pax ? s.passengers.map((p) => `<span class="need ${v.status === 'vote' ? (p.voted ? 'have' : 'miss') : ''}">${esc(p.name)}${v.status === 'vote' ? (p.voted ? ' ✓' : ' …') : ''}</span>`).join('') : '<span class="note">Personne à bord</span>'}</div>
       </article>`;
     }).join('') : '<p class="note">Aucun voyage en cours.</p>'}`;
 }
-$('v-avoy').addEventListener('click', (e) => {
-  if (e.target.closest('#avoy-reload')) loadVoyages();
+$('v-avoy').addEventListener('click', async (e) => {
+  if (e.target.closest('#avoy-reload')) return void loadVoyages();
+  const b = e.target.closest('[data-avoy-cancel]');
+  if (!b) return;
+  if (!(await askConfirm(`Le voyage de ${b.dataset.avoyName || 'ce bateau'} sera annulé. En mer, le bateau revient à son port de départ.`, { title: 'Annuler ce voyage ?', ok: 'Annuler le voyage', danger: true }))) return;
+  setBusy(1);
+  try {
+    const out = await API.staff('voyage.cancel', { id: b.dataset.avoyCancel });
+    toast(esc(out.toast));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+  loadVoyages();
 });
 
 /* ═══ Carnets : dernières entrées de tous les joueurs (panneau admin) ════ */

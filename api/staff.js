@@ -52,6 +52,7 @@ export default handler(['POST'], async (req, body) => {
     : op === 'cooks' || op === 'cook.validate' ? ['cuisine']
     : op.startsWith('secret.') ? ['joueurs']
     : op === 'journals' ? ['joueurs']
+    : op === 'voyages' || op === 'voyage.cancel' ? ['carte']
     : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
     : op.startsWith('crew.') ? ['equipages', 'marine']
     : op.startsWith('ship.') ? ['equipages']
@@ -854,6 +855,40 @@ export default handler(['POST'], async (req, body) => {
       await remove('shops', body.channelId);
       return { shop: null, toast: 'Boutique fermée' };
 
+    case 'voyages': {
+      // Voyages en cours (vote du départ ou en mer), avec le propriétaire et les passagers
+      const [ships, players, crews] = await Promise.all([readAll('ships'), readAll('players'), readAll('crews')]);
+      const nm = (uid) => (players[uid] ? fullName(players[uid]) : 'Fiche supprimée');
+      const list = Object.entries(ships)
+        .filter(([, s]) => s.voyage && ['vote', 'sea'].includes(s.voyage.status))
+        .map(([id, s]) => ({
+          id,
+          name: s.name,
+          type: s.type || '',
+          voyage: s.voyage,
+          owner: s.owner?.kind === 'crew' ? `🏴‍☠️ ${crews[s.owner.id]?.name || 'Équipage'}` : s.owner?.id ? nm(s.owner.id) : '—',
+          passengers: (s.passengers || []).map((u) => ({ uid: u, name: nm(u), voted: !!s.voyage.votes?.[u] })),
+        }));
+      return { list };
+    }
+    case 'voyage.cancel': {
+      // Annuler un voyage : le bateau reste (ou revient) à son port de départ
+      need(body.id, 400, 'Bateau manquant.');
+      return retry(async () => {
+        const r = await read('ships', String(body.id));
+        need(r, 404, 'Bateau introuvable.');
+        const sh = { ...r.data };
+        need(sh.voyage, 400, 'Ce bateau n’a pas de voyage en cours.');
+        if (!sh.position && sh.voyage.port) sh.position = sh.voyage.port;
+        sh.voyage = null;
+        await write('ships', String(body.id), sh, r.version);
+        if (sh.channel?.id) {
+          const { postMessage } = await import('./_lib/discord.js');
+          await postMessage(sh.channel.id, `⚓ Le staff a annulé le voyage de **${sh.name}** : le navire retourne au port de départ.`);
+        }
+        return { toast: `Voyage de ${sh.name} annulé : retour au port de départ.` };
+      });
+    }
     case 'journals': {
       // Dernières entrées des carnets de tous les joueurs
       const list = [];

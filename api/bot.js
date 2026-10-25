@@ -250,6 +250,36 @@ export default handler(['POST'], async (req, body) => {
           });
         }
       }
+      // Écrire en RP dans le salon d'un bateau (ou un de ses posts) fait monter à bord automatiquement
+      if ((Number(body.length) || 0) >= RP_MIN_CHARS) {
+        const hereIds = [String(body.channelId), body.parentId ? String(body.parentId) : null].filter(Boolean);
+        const all = await readAll('ships');
+        const target = Object.entries(all).find(([, s]) => s.channel?.id && hereIds.includes(String(s.channel.id)));
+        const atSeaElsewhere = Object.entries(all).some(([id, s]) => id !== target?.[0] && s.voyage?.status === 'sea' && (s.passengers || []).includes(body.userId));
+        if (target && !atSeaElsewhere && !(target[1].passengers || []).includes(body.userId)) {
+          const [sid] = target;
+          // On descend d'abord des autres bateaux (à quai)
+          for (const [oid, o] of Object.entries(all)) {
+            if (oid === sid || !(o.passengers || []).includes(body.userId)) continue;
+            await retry(async () => {
+              const r = await read('ships', oid);
+              if (!r) return;
+              await write('ships', oid, { ...r.data, passengers: (r.data.passengers || []).filter((u) => u !== body.userId) }, r.version);
+            });
+          }
+          await retry(async () => {
+            const r = await read('ships', sid);
+            if (!r) return;
+            const sh = normalizeShip(r.data);
+            if (sh.passengers.includes(body.userId)) return;
+            const max = Number(sh.berths ?? r.data.berths) || 0;
+            if (max && sh.passengers.length >= max) return; // plus de place
+            sh.passengers = [...sh.passengers, body.userId];
+            await write('ships', sid, sh, r.version);
+            res.boarded = sh.name;
+          });
+        }
+      }
       // Bateau à quai nulle part (acheté ou fabriqué avant d'avoir écrit en RP, ou créé par le staff) :
       // il se met à quai là où son propriétaire écrit son prochain message RP (jamais dans le salon d'un bateau)
       if ((Number(body.length) || 0) >= RP_MIN_CHARS) {

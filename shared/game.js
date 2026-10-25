@@ -177,7 +177,8 @@ export function nextReveal(now = Date.now()) {
   const d = new Date(now + off);
   const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + ((7 - d.getUTCDay()) % 7), 20, 0, 0));
   if (target.getTime() <= d.getTime()) target.setUTCDate(target.getUTCDate() + 7);
-  return target.getTime() - off;
+  const local = target.getTime();
+  return local - parisOffset(local - off); // décalage du dimanche visé (heure d'été ou d'hiver)
 }
 /** Podium personnel : 🥇 7 points, 🥈 4, 🥉 2 ; médaille du jour : 1 point (personnages). */
 export const POLL_POINTS = [7, 4, 2];

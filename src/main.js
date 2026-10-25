@@ -2158,7 +2158,7 @@ pollFab.innerHTML = '⭐<span class="fab-t"> Popularité</span>';
 pollFab.setAttribute('aria-label', 'Sondage de popularité');
 document.body.append(pollFab);
 setInterval(() => {
-  pollFab.hidden = !S || VIEW || !beta();
+  pollFab.hidden = !S || VIEW;
   const l = $('pl-left');
   if (l && POLL) l.textContent = pollLeft();
 }, 1500);

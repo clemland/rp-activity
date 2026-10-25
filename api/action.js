@@ -65,7 +65,15 @@ async function pollState(now = Date.now()) {
   return retry(async () => {
     const row = await read('meta', 'poll:current');
     let cur = row?.data;
-    if (cur?.deadline > now) return cur;
+    if (cur?.deadline > now) {
+      // Semaine créée avant un changement d'heure : recalée sur 20 h (heure de Paris)
+      const fix = GM.nextReveal(now);
+      if (fix !== cur.deadline && Math.abs(fix - cur.deadline) <= 3_600_000) {
+        cur.deadline = fix;
+        await write('meta', 'poll:current', cur, row.version);
+      }
+      return cur;
+    }
     if (cur?.deadline) {
       const hrow = await read('meta', 'poll:history');
       const hist = hrow?.data?.list || [];
@@ -122,7 +130,6 @@ export default handler(['POST'], async (req, body) => {
   need(!GM.betaAction(action.type) || GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
   // Sondage : votes rapides (podium, médaille), sans recharger toute la galerie
   if (action.type === 'poll.vote' || action.type === 'poll.medal') {
-    need(GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
     const first = await read('meta', 'poll:current');
     if (!first?.data?.deadline || first.data.deadline <= Date.now()) await pollState(Date.now());
     const today = GM.parisDay();
@@ -182,7 +189,6 @@ export default handler(['POST'], async (req, body) => {
   }
   // Sondage de popularité (en test, réservé aux testeurs)
   if (action.type === 'poll.get' || action.type === 'poll.vote' || action.type === 'poll.medal') {
-    need(GM.isBeta(me.uid), 403, 'Cette fonctionnalité est encore en test.');
     await pollState(Date.now());
     const cands = await pollCandidates();
     const today = GM.parisDay();

@@ -104,6 +104,32 @@ export default handler(['POST'], async (req, body) => {
       };
     }
 
+    case 'poll.render.take': {
+      // Demande d'images des classements de popularité (déposée depuis l'app) : on la prend et on renvoie les données
+      const row = await read('meta', 'poll:render');
+      if (!row?.data?.by) return { none: true };
+      await remove('meta', 'poll:render');
+      const GMp = await import('../shared/game.js');
+      const [cur, hist, players, crews] = await Promise.all([read('meta', 'poll:current'), read('meta', 'poll:history'), readAll('players'), readAll('crews')]);
+      const pic = (ph) => (typeof ph === 'string' ? ph : ph?.url) || null;
+      const info = (cat, id) => (cat === 'personnage'
+        ? { name: players[id] ? fullName(players[id]) : 'Fiche supprimée', img: pic(players[id]?.photo) }
+        : { name: crews[id]?.name || 'Groupe supprimé', img: crews[id]?.flag || null });
+      const d = (t) => new Date(t).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'long', timeStyle: 'short' });
+      const sets = [];
+      const c = cur?.data;
+      if (c) {
+        const results = {};
+        for (const cat of Object.keys(GMp.POLL_CATS)) {
+          results[cat] = Object.entries(GMp.pollTally(c, cat)).map(([id, t]) => ({ ...info(cat, id), votes: t.pts, medals: t.medals })).sort((a, b) => b.votes - a.votes).slice(0, 10);
+        }
+        sets.push({ title: 'Classement provisoire', sub: `Reveal le ${d(c.deadline)} · ${Object.keys(c.votes || {}).length} votants`, results });
+      }
+      const last = hist?.data?.list?.[0];
+      if (last) sets.push({ title: 'Résultats de la semaine', sub: `Révélés le ${d(last.week)} · ${last.voters} votants`, results: last.results });
+      return { by: row.data.by, cats: GMp.POLL_CATS, sets };
+    }
+
     case 'shops.list': {
       // /boutiques annoncer : toutes les boutiques regroupées par salon, avec leurs objets en vente
       const GMs = await import('../shared/game.js');

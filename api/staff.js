@@ -53,6 +53,7 @@ export default handler(['POST'], async (req, body) => {
     : op.startsWith('secret.') ? ['joueurs']
     : op === 'journals' ? ['joueurs']
     : op === 'voyages' || op === 'voyage.cancel' ? ['carte']
+    : op === 'poll.render' ? ['joueurs']
     : op === 'crew.save' ? [body.crew?.kind === 'flotte' ? 'marine' : 'equipages']
     : op.startsWith('crew.') ? ['equipages', 'marine']
     : op.startsWith('ship.') ? ['equipages']
@@ -855,6 +856,13 @@ export default handler(['POST'], async (req, body) => {
       await remove('shops', body.channelId);
       return { shop: null, toast: 'Boutique fermée' };
 
+    case 'poll.render': {
+      // Demande d'images des classements : le bot la prend dans les 15 secondes et envoie les images en MP
+      need((await import('../shared/game.js')).isBeta(me.uid), 403, 'Réservé au propriétaire du RP.');
+      const prev = await read('meta', 'poll:render');
+      await write('meta', 'poll:render', { by: me.uid, at: Date.now() }, prev?.version ?? null);
+      return { toast: 'Demande envoyée : le bot t’envoie les images en message privé d’ici quelques secondes.' };
+    }
     case 'voyages': {
       // Voyages en cours (vote du départ ou en mer), avec le propriétaire et les passagers
       const [ships, players, crews] = await Promise.all([readAll('ships'), readAll('players'), readAll('crews')]);

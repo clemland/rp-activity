@@ -2226,6 +2226,18 @@ $('d-poll').addEventListener('click', (e) => {
   renderPoll();
   $('pl-body').scrollTo?.(0, 0);
 });
+$('d-poll').addEventListener('click', async (e) => {
+  if (!e.target.closest('#pl-images')) return;
+  setBusy(1);
+  try {
+    const out = await API.staff('poll.render');
+    toast(esc(out.toast));
+  } catch (err) {
+    toast(esc(err.message));
+  } finally {
+    setBusy(-1);
+  }
+});
 /** Vote affiché tout de suite, puis envoyé ; annulé si le serveur refuse. */
 async function pollSend(action, apply, undo) {
   apply();
@@ -2321,7 +2333,7 @@ function renderPoll() {
       return `<button type="button" role="tab" class="${pollTab === k ? 'on' : ''}" aria-selected="${pollTab === k}" data-pl-tab="${k}"><span class="pl-tab-ico" aria-hidden="true">${ico}</span><span class="pl-tab-l">${rest.join(' ')}</span></button>`;
     }).join('')}</div></div>
     ${pollTab === 'results'
-      ? `<div class="form-actions" style="justify-content:flex-start;margin-top:0">${POLL.last ? '<button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button>' : ''}${beta() ? '<button class="btn sm ghost" id="pl-preview">👁️ Aperçu du reveal (données fictives)</button>' : ''}</div>
+      ? `<div class="form-actions" style="justify-content:flex-start;margin-top:0">${POLL.last ? '<button class="btn sm ghost" id="pl-replay">▶ Revoir le reveal</button>' : ''}${beta() ? '<button class="btn sm ghost" id="pl-preview">👁️ Aperçu du reveal (données fictives)</button><button class="btn sm ghost" id="pl-images">🖼️ Images des classements (MP)</button>' : ''}</div>
         ${pollPreview ? '<p class="note pl-preview-note">👁️ Aperçu avec des points inventés : rien n’est enregistré.</p>' : ''}${pollResultsHTML(pollPreview || POLL.last, pollAnim)}`
       : pollGalleryHTML()}`;
   pollFollow.forEach(clearTimeout);
